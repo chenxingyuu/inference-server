@@ -36,20 +36,22 @@ ManagementServer       HTTP /healthz /metrics /streams (热增删流)
 
 ### 依赖
 
-| 依赖 | 版本 | 必需 |
-|------|------|------|
-| CMake | ≥ 3.20 | ✓ |
-| C++ 编译器 | C++17 | ✓ |
-| FFmpeg | 4.x / 5.x / 6.x | ✓ |
-| OpenCV | ≥ 4.0 | ✓ |
-| yaml-cpp | any | ✓ |
-| nlohmann/json | ≥ 3.9 | ✓ |
-| spdlog | any | ✓ |
-| Boost | ≥ 1.71 | ✓ |
-| librdkafka | any | ✓ |
-| TensorRT | ≥ 8.5 | TRT only |
-| CUDA Toolkit | ≥ 11.8 | TRT only |
-| Ascend CANN | 6.x | Ascend only |
+
+| 依赖            | 版本              | 必需          |
+| ------------- | --------------- | ----------- |
+| CMake         | ≥ 3.20          | ✓           |
+| C++ 编译器       | C++17           | ✓           |
+| FFmpeg        | 4.x / 5.x / 6.x | ✓           |
+| OpenCV        | ≥ 4.0           | ✓           |
+| yaml-cpp      | any             | ✓           |
+| nlohmann/json | ≥ 3.9           | ✓           |
+| spdlog        | any             | ✓           |
+| Boost         | ≥ 1.71          | ✓           |
+| librdkafka    | any             | ✓           |
+| TensorRT      | ≥ 8.5           | TRT only    |
+| CUDA Toolkit  | ≥ 11.8          | TRT only    |
+| Ascend CANN   | 6.x             | Ascend only |
+
 
 ### 编译
 
@@ -77,6 +79,7 @@ docker compose -f docker/docker-compose.nvidia.yml up -d
 ```
 
 启动后包含：
+
 - `infer-trt` — 推理服务，监听 HTTP 8080
 - `kafka` — 消息队列
 - `prometheus` — 指标采集（9090）
@@ -133,15 +136,17 @@ kill -SIGTERM $(pgrep infer_server)
 
 ## 指标列表
 
-| 指标名 | 类型 | 标签 | 说明 |
-|--------|------|------|------|
-| `infer_latency_ms` | histogram | `model_id` | 单批推理耗时 |
-| `e2e_latency_ms` | histogram | `stream_id` | 采集到发布的端到端延迟 |
-| `frames_decoded_total` | counter | `stream_id` | 已解码帧数 |
-| `frames_dropped_total` | counter | `stream_id` | 因队列满丢弃的帧数 |
-| `kafka_published_total` | counter | — | 成功发布到 Kafka 的消息数 |
-| `kafka_dropped_total` | counter | — | 因队列满丢弃的消息数 |
-| `infer_batches_total` | counter | `model_id` | 已处理批次数 |
+
+| 指标名                     | 类型        | 标签          | 说明               |
+| ----------------------- | --------- | ----------- | ---------------- |
+| `infer_latency_ms`      | histogram | `model_id`  | 单批推理耗时           |
+| `e2e_latency_ms`        | histogram | `stream_id` | 采集到发布的端到端延迟      |
+| `frames_decoded_total`  | counter   | `stream_id` | 已解码帧数            |
+| `frames_dropped_total`  | counter   | `stream_id` | 因队列满丢弃的帧数        |
+| `kafka_published_total` | counter   | —           | 成功发布到 Kafka 的消息数 |
+| `kafka_dropped_total`   | counter   | —           | 因队列满丢弃的消息数       |
+| `infer_batches_total`   | counter   | `model_id`  | 已处理批次数           |
+
 
 ## Ascend 310P 模型转换
 
