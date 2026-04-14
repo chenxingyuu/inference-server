@@ -1,0 +1,43 @@
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+# Base image: Huawei CANN toolkit (provides acl headers + libs)
+FROM ascendhub.huawei.com/public-ascendhub/ascend-toolkit:8.0.RC3-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake ninja-build pkg-config git \
+    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+    libopencv-dev \
+    libyaml-cpp-dev \
+    nlohmann-json3-dev \
+    libspdlog-dev \
+    libboost-dev \
+    librdkafka-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# CANN toolkit sets ASCEND_HOME_PATH; expose to CMake
+ENV ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
+
+WORKDIR /src
+COPY . .
+
+RUN cmake -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TRT_BACKEND=OFF \
+    -DBUILD_ASCEND_BACKEND=ON \
+    && cmake --build build --parallel $(nproc)
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM ascendhub.huawei.com/public-ascendhub/ascend-toolkit:8.0.RC3-ubuntu22.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libavcodec58 libavformat58 libavutil56 libswscale5 \
+    libopencv-core4.5d libopencv-imgproc4.5d \
+    libyaml-cpp0.7 \
+    librdkafka1 \
+    libspdlog1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server
+
+VOLUME ["/models", "/config"]
+ENTRYPOINT ["/usr/local/bin/infer_server", "/config/config.yaml"]

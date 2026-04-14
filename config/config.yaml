@@ -1,0 +1,51 @@
+server:
+  stream_pool_threads: 32
+  max_streams: 100
+
+models:
+  - id: "yolov8n_trt"
+    version: yolov8
+    backend: tensorrt
+    engine_path: "/models/yolov8n_b16.engine"
+    input_size: [640, 640]
+    batch_size: 16
+    conf_thresh: 0.4
+    nms_thresh: 0.45
+    device_id: 0
+    num_classes: 80
+
+  - id: "yolo11s_ascend"
+    version: yolo11
+    backend: ascend
+    om_paths:
+      1:  "/models/yolo11s_b1.om"
+      4:  "/models/yolo11s_b4.om"
+      8:  "/models/yolo11s_b8.om"
+      16: "/models/yolo11s_b16.om"
+    input_size: [640, 640]
+    batch_size: 16
+    conf_thresh: 0.4
+    nms_thresh: 0.45
+    device_id: 0
+    num_classes: 80
+
+streams:
+  - id: "cam_001"
+    url: "rtsp://192.168.1.100/stream1"
+    model_id: "yolov8n_trt"
+    sample_fps: 5
+    reconnect_delay_ms: 3000
+
+  - id: "cam_002"
+    url: "rtsp://192.168.1.101/stream1"
+    model_id: "yolov8n_trt"
+    sample_fps: 5
+    reconnect_delay_ms: 3000
+
+kafka:
+  brokers: "kafka:9092"
+  topic: "inference-results"
+  batch_size: 100
+  linger_ms: 5
+  compression: "lz4"
+  queue_capacity: 10000

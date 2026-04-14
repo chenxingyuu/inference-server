@@ -1,0 +1,44 @@
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake ninja-build pkg-config git \
+    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+    libopencv-dev \
+    libyaml-cpp-dev \
+    nlohmann-json3-dev \
+    libspdlog-dev \
+    libboost-dev \
+    librdkafka-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# TensorRT is expected to be mounted/installed via NVIDIA container runtime.
+# If using a fixed TRT version, install it here:
+# COPY --from=nvcr.io/nvidia/tensorrt:24.02-py3 /usr/lib/x86_64-linux-gnu/libnvinfer* /usr/lib/x86_64-linux-gnu/
+# COPY --from=nvcr.io/nvidia/tensorrt:24.02-py3 /usr/include/x86_64-linux-gnu/NvInfer.h /usr/include/
+
+WORKDIR /src
+COPY . .
+
+RUN cmake -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TRT_BACKEND=ON \
+    -DBUILD_ASCEND_BACKEND=OFF \
+    && cmake --build build --parallel $(nproc)
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libavcodec58 libavformat58 libavutil56 libswscale5 \
+    libopencv-core4.5d libopencv-imgproc4.5d \
+    libyaml-cpp0.7 \
+    librdkafka1 \
+    libspdlog1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server
+
+VOLUME ["/models", "/config"]
+ENTRYPOINT ["/usr/local/bin/infer_server", "/config/config.yaml"]
