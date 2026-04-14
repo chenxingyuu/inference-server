@@ -38,7 +38,7 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     ACL_CHECK(aclrtCreateStream(&stream_));
 
     for (auto& [bs, path] : cfg.om_paths) {
-        aclmdlID model_id = 0;
+        uint32_t model_id = 0;
         ACL_CHECK(aclmdlLoadFromFile(path.c_str(), &model_id));
         model_map_[bs] = model_id;
         LOG_INFO("AscendBackend: loaded om {} (batch={})", path, bs);
@@ -57,9 +57,9 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     loaded_ = true;
 }
 
-aclmdlID AscendBackend::selectModel(int batch_size) const {
+uint32_t AscendBackend::selectModel(int batch_size) const {
     // Round down to the largest available batch size <= requested
-    aclmdlID best_id = model_map_.begin()->second;
+    uint32_t best_id = model_map_.begin()->second;
     for (const auto& [bs, id] : model_map_) {
         if (bs <= batch_size) best_id = id;
         else break;
@@ -92,7 +92,7 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
     const int bs = input.size();
 
     preprocessCPU(input, input_staging_.data(), bs, input_h_, input_w_);
-    aclmdlID model_id = selectModel(bs);
+    uint32_t model_id = selectModel(bs);
 
     // Build input dataset
     size_t in_bytes = bs * 3 * input_h_ * input_w_ * sizeof(float);

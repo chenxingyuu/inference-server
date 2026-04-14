@@ -94,6 +94,7 @@ if(BUILD_ASCEND_BACKEND)
 endif()
 
 set(DECODER_SOURCES
+    src/decoder/IYOLODecoder.cpp
     src/decoder/YOLOv5Decoder.cpp
     src/decoder/YOLOv8Decoder.cpp
     src/decoder/YOLO11Decoder.cpp
@@ -160,6 +161,15 @@ target_compile_definitions(infer_core PUBLIC
 # ── Executable ────────────────────────────────────────────────────────────────
 add_executable(infer_server src/main.cpp)
 target_link_libraries(infer_server PRIVATE infer_core)
+
+# AscendCL pulls additional toolkit libs (e.g. libascend_hal.so) through DT_NEEDED.
+# In containerized builds, help the linker resolve those indirect deps from CANN lib64.
+if(BUILD_ASCEND_BACKEND)
+    target_link_options(infer_server PRIVATE
+        -Wl,-rpath-link,/usr/local/Ascend/ascend-toolkit/latest/lib64
+        -Wl,--allow-shlib-undefined
+    )
+endif()
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 if(BUILD_TESTS)

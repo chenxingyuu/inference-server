@@ -73,19 +73,36 @@ cmake --build build --parallel
 # Docker 构建（Ascend）
 # - DOCKER_BUILDKIT=1: 启用 BuildKit，才能使用 Dockerfile 中的 apt/ccache 缓存挂载
 # - ASCEND_BASE_IMAGE: 可替换 Ascend 基础镜像版本（无需改 Dockerfile）
+# - APT_MIRROR: 可选，替换 apt 源以加速依赖下载（Ascend arm64 建议 ubuntu-ports 镜像）
 DOCKER_BUILDKIT=1 docker build \
   -f docker/Dockerfile.ascend \
   --build-arg ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11 \
   .
 
+# Ascend 构建（可选：使用国内镜像源加速）
+DOCKER_BUILDKIT=1 docker build \
+  -f docker/Dockerfile.ascend \
+  --build-arg ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11 \
+  --build-arg APT_MIRROR=http://mirrors.ustc.edu.cn/ubuntu-ports \
+  .
+
 # Docker 构建（TensorRT）
 # - CUDA_DEVEL_IMAGE: 编译阶段镜像（含编译工具链）
 # - CUDA_RUNTIME_IMAGE: 运行阶段镜像（尽量精简）
+# - APT_MIRROR: 可选，替换 apt 源以加速依赖下载（x86 常用 ubuntu 镜像）
 # - 首次构建会下载依赖；后续改代码重建会复用缓存，明显更快
 DOCKER_BUILDKIT=1 docker build \
   -f docker/Dockerfile.tensorrt \
   --build-arg CUDA_DEVEL_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04 \
   --build-arg CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
+  .
+
+# TensorRT 构建（可选：使用国内镜像源加速）
+DOCKER_BUILDKIT=1 docker build \
+  -f docker/Dockerfile.tensorrt \
+  --build-arg CUDA_DEVEL_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04 \
+  --build-arg CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
+  --build-arg APT_MIRROR=http://mirrors.ustc.edu.cn/ubuntu \
   .
 
 ```

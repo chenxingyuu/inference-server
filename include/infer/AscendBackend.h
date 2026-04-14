@@ -3,16 +3,11 @@
 #ifdef BUILD_ASCEND_BACKEND
 
 #include "infer/IInferBackend.h"
+#include <acl/acl.h>
+#include <cstdint>
 #include <map>
 #include <vector>
 #include <array>
-
-// Forward-declare ACL types
-typedef void* aclrtStream;
-typedef unsigned int aclmdlID;
-typedef void  aclmdlDesc;
-typedef void  aclDataBuffer;
-typedef void  aclmdlDataset;
 
 namespace infer {
 
@@ -34,7 +29,7 @@ public:
 
 private:
     // Select the closest .om for the requested batch size (rounds down)
-    aclmdlID selectModel(int batch_size) const;
+    uint32_t selectModel(int batch_size) const;
 
     void preprocessCPU(const Batch& input, float* dst, int batch_size,
                        int h, int w);
@@ -47,7 +42,7 @@ private:
     int  device_id_{0};
 
     // batch_size → model_id
-    std::map<int, aclmdlID> model_map_;
+    std::map<int, uint32_t> model_map_;
 
     aclrtStream   stream_{nullptr};
     std::vector<float> input_staging_;

@@ -1,17 +1,20 @@
-# syntax=docker/dockerfile:1.7
-
 # ── Stage 1: build ────────────────────────────────────────────────────────────
 # Base image can be overridden at build time:
 #   docker build --build-arg ASCEND_BASE_IMAGE=... -f docker/Dockerfile.ascend .
 ARG ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11
 FROM ${ASCEND_BASE_IMAGE} AS builder
+ARG APT_MIRROR=
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    if [ -n "${APT_MIRROR}" ]; then \
+    sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
+    fi && \
     apt-get update && apt-get install -y --no-install-recommends \
     cmake ninja-build pkg-config git \
     ccache \
+    libssl-dev \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
     libopencv-dev \
     libyaml-cpp-dev \
@@ -38,10 +41,15 @@ RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 ARG ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11
 FROM ${ASCEND_BASE_IMAGE}
+ARG APT_MIRROR=
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    if [ -n "${APT_MIRROR}" ]; then \
+    sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
+    fi && \
     apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
     libavcodec58 libavformat58 libavutil56 libswscale5 \
     libopencv-core4.5d libopencv-imgproc4.5d \
     libyaml-cpp0.7 \
