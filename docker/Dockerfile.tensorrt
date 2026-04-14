@@ -5,6 +5,7 @@
 #     --build-arg CUDA_RUNTIME_IMAGE=... \
 #     -f docker/Dockerfile.tensorrt .
 ARG CUDA_DEVEL_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04
+ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04
 FROM ${CUDA_DEVEL_IMAGE} AS builder
 ARG APT_MIRROR=
 
@@ -44,7 +45,6 @@ RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
     && cmake --build build --parallel $(nproc)
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04
 FROM ${CUDA_RUNTIME_IMAGE}
 ARG APT_MIRROR=
 

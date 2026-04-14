@@ -1,20 +1,19 @@
-version: "3.9"
-
 services:
   # ── Inference service (Ascend 310P) ────────────────────────────────────────
   infer-ascend:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.ascend
+    image: registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend
     devices:
       - /dev/davinci0:/dev/davinci0
       - /dev/davinci_manager:/dev/davinci_manager
       - /dev/hisi_hdc:/dev/hisi_hdc
     volumes:
-      - ../models:/models:ro
-      - ../config:/config:ro
+      - ./models:/models:ro
+      - ./config:/config:ro
+      - /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro
     environment:
       - ASCEND_DEVICE_ID=0
+      - ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
+      - LD_LIBRARY_PATH=/usr/local/Ascend/ascend-toolkit/latest/lib64:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:/usr/local/lib:/usr/lib
     depends_on:
       kafka:
         condition: service_healthy
@@ -43,10 +42,12 @@ services:
       - zookeeper
     ports:
       - "9092:9092"
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
