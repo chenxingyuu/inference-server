@@ -1,6 +1,6 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
 # Base image: Huawei CANN toolkit (provides acl headers + libs)
-FROM ascendhub.huawei.com/public-ascendhub/ascend-toolkit:8.0.RC3-ubuntu22.04 AS builder
+FROM ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -27,7 +27,7 @@ RUN cmake -B build -G Ninja \
     && cmake --build build --parallel $(nproc)
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM ascendhub.huawei.com/public-ascendhub/ascend-toolkit:8.0.RC3-ubuntu22.04
+FROM ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libavcodec58 libavformat58 libavutil56 libswscale5 \

@@ -11,7 +11,6 @@ services:
       - /dev/davinci_manager:/dev/davinci_manager
       - /dev/hisi_hdc:/dev/hisi_hdc
     volumes:
-      - /usr/local/Ascend:/usr/local/Ascend:ro
       - ../models:/models:ro
       - ../config:/config:ro
     environment:
