@@ -1,0 +1,121 @@
+# 迭代记录
+
+## Phase 1 — MVP
+
+**目标**：单路 RTSP 软解 → TensorRT 推理 → Kafka 发布，跑通全链路。
+
+**核心组件**：
+- `FFmpegDecoder`：libavcodec 软解，`sws_scale` 转 BGR cv::Mat
+- `FrameBuffer`：`boost::lockfree::spsc_queue<32>` 无锁单生产者单消费者队列
+- `TRTBackend`：读取 `.engine`，CPU 预处理（resize + normalize），cudaMemcpy H2D，`executeV2`
+- `KafkaPublisher`：librdkafka 异步生产，JSON 序列化，独立 publish 线程
+
+**关键决策**：
+- 推理输入走 CPU 预处理再 H2D，简单但存在两次内存拷贝
+- FrameBuffer 容量 32 帧，超出则丢弃并计数
+
+---
+
+## Phase 2 — StreamPool + BatchScheduler
+
+**目标**：多路并发，引入批处理调度。
+
+**新增**：
+- `StreamPool`：管理 N 路 `FFmpegDecoder` 实例，支持运行时增删流（`addStream` / `removeStream`）
+- `BatchScheduler`：轮询所有 FrameBuffer，按 `max_batch=16` 或 `max_wait=10ms` 触发下发
+- `InferWorker`：接收 Batch，串行调用 `IInferBackend::infer()` + `IYOLODecoder::decode()`
+
+**关键决策**：
+- BatchScheduler 以 500µs 轮询间隔忙等，避免条件变量延迟
+- 每个 ModelConfig 对应独立的 InferWorker + BatchScheduler，多模型可并行
+
+---
+
+## Phase 3 — 多模型 YOLO 版本支持
+
+**目标**：同时支持 YOLOv5 / v8 / v11 / v26，统一后处理接口。
+
+**新增**：
+- `IYOLODecoder` 抽象接口 + `DecoderFactory`
+- `YOLOv5Decoder`：anchor-based，解析 `[bs, anchors, 5+nc]` 输出
+- `YOLOv8Decoder`：anchor-free，解析 `[bs, 4+nc, 8400]` 输出（transpose + NMS）
+- `YOLO11Decoder`：格式与 v8 相同，继承 `YOLOv8Decoder`
+- `YOLO26Decoder`：格式待定，暂返回空结果并打印 WARN
+
+**关键决策**：
+- 后处理与推理后端解耦，Backend 只负责填充 `float[]`，Decoder 负责语义解析
+- NMS 实现在 `IYOLODecoder` 基类，子类复用
+
+---
+
+## Phase 4 — NVDEC 硬件解码 + CUDA 预处理
+
+**目标**：消除两次大 H2D memcpy，降低 CPU 占用，目标减少 ~8ms 延迟。
+
+**改造路径**：
+```
+之前: FFmpeg 软解 → cv::Mat(CPU) → CPU resize+normalize → cudaMemcpy H2D → TRT
+之后: FFmpeg NVDEC → NV12 GPU buf → fused CUDA kernel(resize+YUV→RGB+normalize) → TRT
+```
+
+**关键实现**：
+- `GpuBuffer`：持有 `void* y_data / uv_data`（设备指针）+ `shared_ptr<void> frame_ref` 保持 AVFrame 引用计数
+- `FFmpegDecoder`：检测 `h264_cuvid` / `hevc_cuvid` decoder；`av_frame_ref` 延长 NV12 surface 生命周期，`shared_ptr` 析构时释放
+- `CudaPreprocess.cu`：16×16 线程块，每线程处理一个输出像素，双线性插值 + BT.601 YCbCr→RGB + normalize
+- `TRTBackend`：新增 `infer_stream_`（cudaStream），`inferGPU()` 调用 kernel 后 `cudaStreamSynchronize` 再 `executeV2`
+- `BatchScheduler`：按 `model_id` 过滤流（`StreamPool::getStreamModelId()`），同一批次强制同质（全 GPU 或全 CPU）
+
+**踩坑**：
+- NVDEC 帧指针是 FFmpeg buffer pool 管理的，`av_frame_unref` 后立即失效。必须 `av_frame_ref` 持引用，在 Batch 消费完毕后才能释放
+- `executeV2` 走默认流，与 `infer_stream_` 异步，必须先 `cudaStreamSynchronize` 确保 kernel 写完再让 TRT 读输入 buffer
+
+**配置**：`streams[].use_hwdec: true` 启用 NVDEC，`false` 退回软解（Ascend 机器默认 false）
+
+---
+
+## Phase 5 — Ascend 310P 后端
+
+**目标**：适配华为 Ascend 310P NPU。
+
+**核心约束**：310P 不支持动态 shape，需预编译多档 `.om`。
+
+**实现**：
+- `AscendBackend`：`loadModel()` 读取 `om_paths` map，按 batch=1/4/8/16 加载
+- `selectModel(bs)`：选最接近且 ≥ bs 的档位，不足时 pad 输入
+- `convert_ascend.sh`：调用 `atc` 工具批量生成 4 个档位的 `.om`
+- `docker-compose.ascend.yml`：挂载 `/dev/davinci*` 设备
+
+**状态**：框架完成，待真机联调。
+
+---
+
+## Phase 6 — 生产化（Prometheus + HTTP 管理）
+
+**目标**：可观测性 + 热更新 + 优雅关闭。
+
+**新增**：
+- `Metrics`：自研轻量 Prometheus 文本格式导出器（无外部依赖）
+  - `LabeledHistogram`（延迟）/ `LabeledCounter`（帧数、Kafka 消息数）
+  - 直方图桶上界：1/2/5/10/20/50/100/200/500/1000 ms
+- `ManagementServer`：cpp-httplib（header-only，FetchContent 引入）
+  - `GET /healthz` — liveness probe
+  - `GET /metrics` — Prometheus 格式
+  - `GET/POST/DELETE /streams` — 运行时增删摄像头流
+- Grafana 自动 provisioning：挂载 `config/grafana/provisioning/` 目录
+
+**埋点位置**：
+- `InferWorker`：`infer_latency_ms`（单批推理）、`e2e_latency_ms`（端到端）、`infer_batches_total`
+- `FFmpegDecoder`：`frames_decoded_total`、`frames_dropped_total`
+- `KafkaPublisher`：`kafka_published_total`、`kafka_dropped_total`
+
+**优雅关闭顺序**：`ManagementServer::stop()` → Scheduler/Worker stop → `StreamPool::stopAll()` → `KafkaPublisher::flush()`
+
+---
+
+## 待办
+
+- [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
+- [ ] Phase 5 Ascend 310P 真机联调
+- [ ] NVDEC → `enqueueV3(stream)` 替换 `executeV2`（TRT 8.5+ 全异步路径）
+- [ ] Grafana 预置 Dashboard JSON（延迟热力图 + 丢帧率）
+- [ ] 单元测试（Decoder NMS 逻辑、Metrics 序列化格式验证）
