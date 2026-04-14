@@ -45,6 +45,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
     if (auto sn = root["server"]) {
         cfg.server.stream_pool_threads = sn["stream_pool_threads"].as<int>(32);
         cfg.server.max_streams         = sn["max_streams"].as<int>(100);
+        cfg.server.management_port     = sn["management_port"].as<int>(8080);
     }
 
     // ── models ────────────────────────────────────────────────────────────────
@@ -89,6 +90,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
         s.model_id          = sn["model_id"].as<std::string>();
         s.sample_fps        = sn["sample_fps"].as<int>(5);
         s.reconnect_delay_ms = sn["reconnect_delay_ms"].as<int>(3000);
+        s.use_hwdec         = sn["use_hwdec"].as<bool>(false);
         cfg.streams.push_back(std::move(s));
     }
 

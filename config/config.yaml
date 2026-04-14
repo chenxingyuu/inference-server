@@ -1,6 +1,7 @@
 server:
   stream_pool_threads: 32
   max_streams: 100
+  management_port: 8080
 
 models:
   - id: "yolov8n_trt"
@@ -35,12 +36,14 @@ streams:
     model_id: "yolov8n_trt"
     sample_fps: 5
     reconnect_delay_ms: 3000
+    use_hwdec: true
 
   - id: "cam_002"
     url: "rtsp://192.168.1.101/stream1"
     model_id: "yolov8n_trt"
     sample_fps: 5
     reconnect_delay_ms: 3000
+    use_hwdec: true
 
 kafka:
   brokers: "kafka:9092"

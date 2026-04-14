@@ -27,8 +27,9 @@ void StreamPool::addStream(const StreamConfig& cfg) {
     }
 
     auto& entry = streams_[cfg.id];
-    entry.buffer  = std::make_unique<FrameBuffer>(cfg.id);
-    entry.decoder = std::make_unique<FFmpegDecoder>();
+    entry.buffer   = std::make_unique<FrameBuffer>(cfg.id);
+    entry.decoder  = std::make_unique<FFmpegDecoder>();
+    entry.model_id = cfg.model_id;
 
     // Capture raw pointer before the lock is released
     FrameBuffer* buf = entry.buffer.get();
@@ -72,6 +73,13 @@ std::vector<std::string> StreamPool::activeStreams() const {
         ids.push_back(id);
     }
     return ids;
+}
+
+std::string StreamPool::getStreamModelId(const std::string& stream_id) const {
+    std::shared_lock lock(mutex_);
+    auto it = streams_.find(stream_id);
+    if (it == streams_.end()) return "";
+    return it->second.model_id;
 }
 
 } // namespace infer

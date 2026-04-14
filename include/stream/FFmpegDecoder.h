@@ -11,12 +11,13 @@ struct AVCodecContext;
 struct AVFrame;
 struct AVPacket;
 struct SwsContext;
+struct AVBufferRef;
 
 namespace infer {
 
 // RTSP decoder backed by FFmpeg.
-// Phase 1: software decode (libavcodec).
-// Phase 4: switch to NVDEC via hwaccel=cuda.
+// Software path: libavcodec → cv::Mat BGR
+// Hardware path (use_hwdec=true): NVDEC → NV12 GPU buffer (GpuBuffer)
 class FFmpegDecoder : public IStreamDecoder {
 public:
     FFmpegDecoder();
@@ -29,9 +30,12 @@ public:
 
 private:
     void decodeLoop(StreamConfig cfg, FrameCallback cb);
-    bool openStream(const std::string& url);
+    bool openStream(const StreamConfig& cfg);
     void closeStream();
     bool readAndDecode(FrameCallback& cb, int sample_interval);
+
+    // Called by FFmpeg to select the hw pixel format
+    static int getHWFormat(AVCodecContext* ctx, const int* pix_fmts);
 
     std::string          stream_id_;
     std::thread          thread_;
@@ -42,8 +46,10 @@ private:
     AVFormatContext* fmt_ctx_{nullptr};
     AVCodecContext*  codec_ctx_{nullptr};
     SwsContext*      sws_ctx_{nullptr};
+    AVBufferRef*     hw_device_ctx_{nullptr};
     int              video_stream_idx_{-1};
     uint64_t         frame_seq_{0};
+    bool             use_hwdec_{false};
 };
 
 } // namespace infer

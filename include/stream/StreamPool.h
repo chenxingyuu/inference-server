@@ -35,12 +35,16 @@ public:
     // Snapshot of all active stream IDs
     std::vector<std::string> activeStreams() const;
 
+    // Returns the model_id assigned to the given stream, or "" if not found.
+    std::string getStreamModelId(const std::string& stream_id) const;
+
     int maxStreams() const noexcept { return max_streams_; }
 
 private:
     struct Entry {
         std::unique_ptr<FFmpegDecoder> decoder;
         std::unique_ptr<FrameBuffer>   buffer;
+        std::string                    model_id;
     };
 
     int max_streams_;

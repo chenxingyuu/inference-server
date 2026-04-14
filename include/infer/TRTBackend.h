@@ -3,6 +3,7 @@
 #ifdef BUILD_TRT_BACKEND
 
 #include "infer/IInferBackend.h"
+#include <cuda_runtime_api.h>
 #include <memory>
 #include <vector>
 #include <string>
@@ -33,6 +34,8 @@ private:
     void allocateBuffers(int batch_size);
     void preprocessCPU(const Batch& input, float* dst, int batch_size,
                        int h, int w);
+    void preprocessGPU(const Batch& input, int batch_size);
+    void inferGPU(const Batch& input, std::vector<float>& output);
 
     int  max_batch_size_{1};
     int  input_h_{640};
@@ -52,6 +55,8 @@ private:
 
     size_t input_size_{0};
     size_t output_size_{0};
+
+    cudaStream_t infer_stream_{nullptr};
 };
 
 } // namespace infer

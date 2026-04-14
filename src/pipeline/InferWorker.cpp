@@ -1,5 +1,6 @@
 #include "pipeline/InferWorker.h"
 #include "common/Logger.h"
+#include "metrics/Metrics.h"
 #include <chrono>
 
 namespace infer {
@@ -71,8 +72,16 @@ void InferWorker::workerLoop() {
         if (batch.empty()) continue;
 
         try {
+            auto infer_start = std::chrono::steady_clock::now();
+
             std::vector<float> output;
             backend_->infer(batch, output);
+
+            auto infer_end = std::chrono::steady_clock::now();
+            double infer_ms = std::chrono::duration<double, std::milli>(
+                infer_end - infer_start).count();
+            Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
+            Metrics::get().incInferBatches(model_cfg_.id);
 
             auto per_image = decoder_->decode(
                 output.data(), batch.size(), shape,
@@ -87,6 +96,8 @@ void InferWorker::workerLoop() {
                 r.latency_ms = (infer_ts - r.frame_ts) * 1000.0;
                 r.model_id   = model_cfg_.id;
                 r.detections = std::move(per_image[i]);
+
+                Metrics::get().recordE2eLatency(r.stream_id, r.latency_ms);
 
                 // Resolve class names if configured
                 for (auto& d : r.detections) {

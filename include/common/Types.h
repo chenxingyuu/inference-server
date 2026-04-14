@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 #include <cstdint>
 #include <chrono>
 #include <opencv2/core/mat.hpp>
@@ -38,19 +39,40 @@ struct StreamMeta {
     int         orig_height{0};
 };
 
+// ── GPU buffer descriptor (NVDEC output, NV12 format) ─────────────────────────
+// All pointers are device pointers. void* avoids pulling cuda_runtime.h into
+// every translation unit; callers in CUDA TUs cast to the appropriate types.
+//
+// `frame_ref` holds a reference-counted opaque handle (AVFrame*) that keeps the
+// NVDEC buffer alive until this GpuBuffer is destroyed. When the last copy of
+// `frame_ref` goes out of scope it calls av_frame_unref, returning the NV12
+// surface to FFmpeg's hardware frame pool.
+struct GpuBuffer {
+    void*   y_data{nullptr};    // Y plane  (device ptr, NV12)
+    void*   uv_data{nullptr};   // UV interleaved plane (device ptr, NV12)
+    int     width{0};
+    int     height{0};
+    void*   cuda_stream{nullptr};            // cudaStream_t cast to void*
+    std::shared_ptr<void> frame_ref;         // keeps AVFrame alive
+};
+
 // ── A decoded frame ready for preprocessing ──────────────────────────────────
 struct Frame {
-    cv::Mat    image;        // BGR, uint8, original resolution
+    cv::Mat    image;           // CPU path: BGR uint8, original resolution
+    GpuBuffer  gpu_buf;         // GPU path: NVDEC NV12 output
+    bool       is_gpu{false};
     StreamMeta meta;
 };
 
 // ── A batch of preprocessed frames ready for inference ───────────────────────
 struct Batch {
-    std::vector<cv::Mat>    frames;   // preprocessed (resized, normalized float)
+    std::vector<cv::Mat>    frames;     // CPU path: preprocessed float CHW
+    std::vector<GpuBuffer>  gpu_frames; // GPU path: NVDEC NV12 buffers
     std::vector<StreamMeta> metas;
+    bool                    is_gpu{false};
 
-    int size() const noexcept { return static_cast<int>(frames.size()); }
-    bool empty() const noexcept { return frames.empty(); }
+    int  size()  const noexcept { return static_cast<int>(metas.size()); }
+    bool empty() const noexcept { return metas.empty(); }
 };
 
 // ── Shape descriptor for model input/output ───────────────────────────────────

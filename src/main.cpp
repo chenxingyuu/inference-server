@@ -6,6 +6,7 @@
 #include "pipeline/BatchScheduler.h"
 #include "pipeline/InferWorker.h"
 #include "publisher/KafkaPublisher.h"
+#include "server/ManagementServer.h"
 
 #include <csignal>
 #include <atomic>
@@ -99,8 +100,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    LOG_INFO("All pipelines running. Streams: {}  Models: {}",
-             cfg.streams.size(), pipelines.size());
+    // ── Start management HTTP server ──────────────────────────────────────────
+    infer::ManagementServer mgmt_server(cfg.server.management_port, pool);
+    mgmt_server.start();
+
+    LOG_INFO("All pipelines running. Streams: {}  Models: {}  ManagementPort: {}",
+             cfg.streams.size(), pipelines.size(), cfg.server.management_port);
 
     // ── Main wait loop ────────────────────────────────────────────────────────
     while (!g_shutdown.load()) {
@@ -110,6 +115,7 @@ int main(int argc, char* argv[]) {
     // ── Graceful shutdown ─────────────────────────────────────────────────────
     LOG_INFO("Shutting down…");
 
+    mgmt_server.stop();
     for (auto& p : pipelines) {
         p.scheduler->stop();
         p.worker->stop();

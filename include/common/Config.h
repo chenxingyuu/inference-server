@@ -11,6 +11,7 @@ namespace infer {
 struct ServerConfig {
     int stream_pool_threads{32};
     int max_streams{100};
+    int management_port{8080};  // HTTP management server port
 };
 
 struct ModelConfig {
@@ -39,6 +40,7 @@ struct StreamConfig {
     std::string model_id;
     int         sample_fps{5};
     int         reconnect_delay_ms{3000};
+    bool        use_hwdec{false};  // true → NVDEC hardware decode
 };
 
 struct KafkaConfig {

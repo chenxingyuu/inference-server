@@ -1,6 +1,7 @@
 #ifdef BUILD_TRT_BACKEND
 
 #include "infer/TRTBackend.h"
+#include "cuda/CudaPreprocess.h"
 #include "common/Logger.h"
 
 #include <NvInfer.h>
@@ -13,7 +14,6 @@ namespace infer {
 
 namespace {
 
-// TensorRT logger
 class TRTLogger : public nvinfer1::ILogger {
     void log(Severity severity, const char* msg) noexcept override {
         if (severity <= Severity::kWARNING)
@@ -22,9 +22,9 @@ class TRTLogger : public nvinfer1::ILogger {
 } g_trt_logger;
 
 #define CUDA_CHECK(call) do { \
-    cudaError_t err = (call); \
-    if (err != cudaSuccess) { \
-        throw std::runtime_error(std::string("[CUDA] ") + cudaGetErrorString(err)); \
+    cudaError_t _err = (call); \
+    if (_err != cudaSuccess) { \
+        throw std::runtime_error(std::string("[CUDA] ") + cudaGetErrorString(_err)); \
     } \
 } while(0)
 
@@ -45,7 +45,6 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
 
     CUDA_CHECK(cudaSetDevice(device_id_));
 
-    // Read engine file
     std::ifstream file(cfg.engine_path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         throw std::runtime_error("TRTBackend: cannot open engine: " + cfg.engine_path);
@@ -63,15 +62,16 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
     context_.reset(engine_->createExecutionContext());
 
     allocateBuffers(max_batch_size_);
+
+    // Create a CUDA stream for async preprocessing + inference
+    CUDA_CHECK(cudaStreamCreate(&infer_stream_));
+
     loaded_ = true;
     LOG_INFO("TRTBackend: loaded engine {} (batch={})", cfg.engine_path, max_batch_size_);
 }
 
 void TRTBackend::allocateBuffers(int batch_size) {
-    // input: [batch, 3, H, W]  float32
     input_size_  = batch_size * 3 * input_h_ * input_w_ * sizeof(float);
-    // output size depends on model; allocate generously
-    // YOLOv8 output: [batch, 4+num_classes, num_anchors] ≈ [batch, 84, 8400]
     output_size_ = batch_size * (4 + num_classes_) * 8400 * sizeof(float);
 
     CUDA_CHECK(cudaMalloc(&device_buffers_[0], input_size_));
@@ -87,7 +87,6 @@ void TRTBackend::preprocessCPU(const Batch& input, float* dst,
     for (int b = 0; b < batch_size; ++b) {
         cv::Mat resized;
         cv::resize(input.frames[b], resized, {w, h});
-        // Convert BGR uint8 → CHW float [0,1]
         float* ch_r = dst + b * 3 * h * w;
         float* ch_g = ch_r + h * w;
         float* ch_b = ch_g + h * w;
@@ -102,6 +101,54 @@ void TRTBackend::preprocessCPU(const Batch& input, float* dst,
     }
 }
 
+void TRTBackend::preprocessGPU(const Batch& input, int batch_size) {
+    // Each frame's NV12 buffer is processed by the fused CUDA kernel.
+    // The kernel writes directly into the TRT input device buffer (CHW float).
+    const float mean  = 0.0f;
+    const float scale = 1.0f / 255.0f;
+    const int   plane = input_h_ * input_w_;
+
+    for (int b = 0; b < batch_size; ++b) {
+        const GpuBuffer& gb = input.gpu_frames[b];
+        float* dst_offset   = static_cast<float*>(device_buffers_[0]) + b * 3 * plane;
+
+        cuda::preprocessNV12ToCHW(
+            static_cast<const uint8_t*>(gb.y_data),
+            static_cast<const uint8_t*>(gb.uv_data),
+            gb.height, gb.width,
+            dst_offset, input_h_, input_w_,
+            mean, scale,
+            infer_stream_);
+    }
+}
+
+void TRTBackend::inferGPU(const Batch& input, std::vector<float>& output) {
+    const int bs = input.size();
+
+    if (static_cast<int>(input.gpu_frames.size()) != bs) {
+        throw std::runtime_error(
+            "TRTBackend: gpu_frames.size() != metas.size() — heterogeneous batch");
+    }
+
+    preprocessGPU(input, bs);
+
+    // Ensure the async preprocessing kernel has written all input data before
+    // TensorRT starts reading device_buffers_[0].
+    CUDA_CHECK(cudaStreamSynchronize(infer_stream_));
+
+    context_->setInputShape("images",
+        nvinfer1::Dims4{bs, 3, input_h_, input_w_});
+
+    bool ok = context_->executeV2(device_buffers_);
+    if (!ok) throw std::runtime_error("TRTBackend: executeV2 failed (GPU path)");
+
+    size_t out_bytes = bs * (4 + num_classes_) * 8400 * sizeof(float);
+    output.resize(out_bytes / sizeof(float));
+    CUDA_CHECK(cudaMemcpyAsync(output.data(), device_buffers_[1],
+                               out_bytes, cudaMemcpyDeviceToHost, infer_stream_));
+    CUDA_CHECK(cudaStreamSynchronize(infer_stream_));
+}
+
 void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
     if (!loaded_) throw std::runtime_error("TRTBackend: model not loaded");
     const int bs = input.size();
@@ -111,13 +158,18 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
 
     CUDA_CHECK(cudaSetDevice(device_id_));
 
+    if (input.is_gpu) {
+        inferGPU(input, output);
+        return;
+    }
+
+    // CPU path
     preprocessCPU(input, input_staging_.data(), bs, input_h_, input_w_);
 
     size_t in_bytes = bs * 3 * input_h_ * input_w_ * sizeof(float);
     CUDA_CHECK(cudaMemcpy(device_buffers_[0], input_staging_.data(),
                           in_bytes, cudaMemcpyHostToDevice));
 
-    // Set dynamic batch size if supported
     context_->setInputShape("images",
         nvinfer1::Dims4{bs, 3, input_h_, input_w_});
 
@@ -131,6 +183,10 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
 }
 
 void TRTBackend::unloadModel() {
+    if (!loaded_) return;
+    // Must free on the device that owns the allocations.
+    cudaSetDevice(device_id_);
+    if (infer_stream_) { cudaStreamDestroy(infer_stream_); infer_stream_ = nullptr; }
     if (device_buffers_[0]) { cudaFree(device_buffers_[0]); device_buffers_[0] = nullptr; }
     if (device_buffers_[1]) { cudaFree(device_buffers_[1]); device_buffers_[1] = nullptr; }
     context_.reset();

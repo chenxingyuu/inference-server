@@ -1,5 +1,6 @@
 #include "publisher/KafkaPublisher.h"
 #include "common/Logger.h"
+#include "metrics/Metrics.h"
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
@@ -46,6 +47,7 @@ void KafkaPublisher::publish(InferResult result) {
     std::unique_lock lock(mutex_);
     if (static_cast<int>(queue_.size()) >= cfg_.queue_capacity) {
         dropped_.fetch_add(1, std::memory_order_relaxed);
+        Metrics::get().incKafkaDropped();
         LOG_WARN("KafkaPublisher: queue full, dropping result for stream {}",
                  result.stream_id);
         return;
@@ -89,6 +91,7 @@ void KafkaPublisher::publishLoop() {
                       rd_kafka_err2str(rd_kafka_last_error()));
         } else {
             published_.fetch_add(1, std::memory_order_relaxed);
+            Metrics::get().incKafkaPublished();
         }
         rd_kafka_poll(producer_, 0);
     }

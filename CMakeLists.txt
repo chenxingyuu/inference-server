@@ -4,6 +4,8 @@ project(InferenceServer VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ── Build options ──────────────────────────────────────────────────────────────
@@ -47,12 +49,26 @@ pkg_check_modules(RDKAFKA REQUIRED rdkafka)
 if(BUILD_TRT_BACKEND)
     find_package(TensorRT REQUIRED)
     find_package(CUDAToolkit REQUIRED)
+    # Enable CUDA language BEFORE any targets reference .cu files.
+    # CMAKE_CUDA_STANDARD must be set before enable_language(CUDA).
+    set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     enable_language(CUDA)
 endif()
 
 if(BUILD_ASCEND_BACKEND)
     find_package(AscendCL REQUIRED)
 endif()
+
+# ── cpp-httplib (header-only HTTP server) ──────────────────────────────────────
+include(FetchContent)
+FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        v0.14.3
+    GIT_SHALLOW    TRUE
+)
+set(HTTPLIB_COMPILE OFF CACHE BOOL "Use header-only mode")
+FetchContent_MakeAvailable(httplib)
 
 # ── Source files ──────────────────────────────────────────────────────────────
 set(COMMON_SOURCES
@@ -71,6 +87,7 @@ set(INFER_SOURCES
 )
 if(BUILD_TRT_BACKEND)
     list(APPEND INFER_SOURCES src/infer/TRTBackend.cpp)
+    list(APPEND INFER_SOURCES src/cuda/CudaPreprocess.cu)
 endif()
 if(BUILD_ASCEND_BACKEND)
     list(APPEND INFER_SOURCES src/infer/AscendBackend.cpp)
@@ -93,6 +110,14 @@ set(PUBLISHER_SOURCES
     src/publisher/KafkaPublisher.cpp
 )
 
+set(METRICS_SOURCES
+    src/metrics/Metrics.cpp
+)
+
+set(SERVER_SOURCES
+    src/server/ManagementServer.cpp
+)
+
 # ── Library ───────────────────────────────────────────────────────────────────
 add_library(infer_core STATIC
     ${COMMON_SOURCES}
@@ -101,10 +126,13 @@ add_library(infer_core STATIC
     ${DECODER_SOURCES}
     ${PIPELINE_SOURCES}
     ${PUBLISHER_SOURCES}
+    ${METRICS_SOURCES}
+    ${SERVER_SOURCES}
 )
 
 target_include_directories(infer_core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/include/cuda
     ${FFMPEG_INCLUDE_DIRS}
     ${RDKAFKA_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
@@ -118,6 +146,7 @@ target_link_libraries(infer_core PUBLIC
     spdlog::spdlog
     ${OpenCV_LIBS}
     ${RDKAFKA_LIBRARIES}
+    httplib::httplib
     $<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer CUDA::cudart>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:AscendCL::ascendcl>
 )

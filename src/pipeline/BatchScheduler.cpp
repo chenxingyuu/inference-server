@@ -35,36 +35,54 @@ void BatchScheduler::scheduleLoop() {
     const int max_bs   = model_cfg_.batch_size;
     Batch     batch;
     batch.frames.reserve(max_bs);
+    batch.gpu_frames.reserve(max_bs);
     batch.metas.reserve(max_bs);
 
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(kMaxWaitMs);
 
     while (!stop_flag_.load()) {
-        // Collect frames from all streams assigned to this model
+        // Collect frames from streams assigned to this model
         auto streams = pool_.activeStreams();
         for (const auto& sid : streams) {
-            // Only pick from streams using this model
+            if (pool_.getStreamModelId(sid) != model_cfg_.id) continue;
+
             FrameBuffer* buf = pool_.getBuffer(sid);
             if (!buf) continue;
 
             Frame f;
             if (buf->pop(f)) {
                 if (f.meta.model_id.empty()) f.meta.model_id = model_cfg_.id;
-                batch.frames.push_back(std::move(f.image));
+
+                // Enforce a homogeneous batch: once the type is set, reject
+                // frames of the opposite type to prevent OOB in the backend.
+                if (!batch.empty() && f.is_gpu != batch.is_gpu) {
+                    LOG_WARN("BatchScheduler[{}]: mixed GPU/CPU frames in one batch, "
+                             "dropping frame from stream {}", model_cfg_.id, sid);
+                    continue;
+                }
+
+                if (f.is_gpu) {
+                    batch.gpu_frames.push_back(std::move(f.gpu_buf));
+                    batch.is_gpu = true;
+                } else {
+                    batch.frames.push_back(std::move(f.image));
+                }
                 batch.metas.push_back(std::move(f.meta));
             }
 
-            if (static_cast<int>(batch.frames.size()) >= max_bs) break;
+            if (batch.size() >= max_bs) break;
         }
 
         auto now = std::chrono::steady_clock::now();
         bool timeout = (now >= deadline);
 
-        if (!batch.empty() && (static_cast<int>(batch.frames.size()) >= max_bs || timeout)) {
+        if (!batch.empty() && (batch.size() >= max_bs || timeout)) {
             callback_(std::move(batch));
             batch.frames.clear();
+            batch.gpu_frames.clear();
             batch.metas.clear();
+            batch.is_gpu = false;
             deadline = std::chrono::steady_clock::now() +
                        std::chrono::milliseconds(kMaxWaitMs);
         } else if (batch.empty()) {
