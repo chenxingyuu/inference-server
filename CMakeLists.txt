@@ -147,7 +147,8 @@ target_link_libraries(infer_core PUBLIC
     ${OpenCV_LIBS}
     ${RDKAFKA_LIBRARIES}
     httplib::httplib
-    $<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer CUDA::cudart>
+    $<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer>
+    $<$<BOOL:${BUILD_TRT_BACKEND}>:CUDA::cudart>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:AscendCL::ascendcl>
 )
 
