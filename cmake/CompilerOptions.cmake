@@ -2,9 +2,12 @@ add_compile_options(
     -Wall -Wextra -Wpedantic
     -Wno-unused-parameter
     -march=native
-    $<$<CONFIG:Release>:-O3 -DNDEBUG>
-    $<$<CONFIG:Debug>:-O0 -g3>
-    $<$<CONFIG:RelWithDebInfo>:-O2 -g>
+    $<$<CONFIG:Release>:-O3>
+    $<$<CONFIG:Release>:-DNDEBUG>
+    $<$<CONFIG:Debug>:-O0>
+    $<$<CONFIG:Debug>:-g3>
+    $<$<CONFIG:RelWithDebInfo>:-O2>
+    $<$<CONFIG:RelWithDebInfo>:-g>
 )
 
 if(ENABLE_ASAN)

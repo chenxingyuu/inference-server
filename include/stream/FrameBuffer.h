@@ -26,7 +26,8 @@ public:
     // Returns false if the buffer was empty
     bool pop(Frame& out);
 
-    bool empty() const noexcept { return queue_.empty(); }
+    // NOTE: boost::lockfree::spsc_queue::empty() is non-const in Boost < 1.76
+    bool empty() noexcept { return queue_.empty(); }
     const std::string& streamId() const noexcept { return stream_id_; }
 
     uint64_t droppedFrames() const noexcept { return dropped_.load(std::memory_order_relaxed); }

@@ -12,6 +12,10 @@ struct AVFrame;
 struct AVPacket;
 struct SwsContext;
 struct AVBufferRef;
+// AVPixelFormat is an enum; forward-declare via the C header enum trick
+extern "C" {
+#include <libavutil/pixfmt.h>
+}
 
 namespace infer {
 
@@ -35,7 +39,7 @@ private:
     bool readAndDecode(FrameCallback& cb, int sample_interval);
 
     // Called by FFmpeg to select the hw pixel format
-    static int getHWFormat(AVCodecContext* ctx, const int* pix_fmts);
+    static AVPixelFormat getHWFormat(AVCodecContext* ctx, const AVPixelFormat* pix_fmts);
 
     std::string          stream_id_;
     std::thread          thread_;
