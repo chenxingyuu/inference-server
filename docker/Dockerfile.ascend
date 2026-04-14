@@ -1,10 +1,17 @@
+# syntax=docker/dockerfile:1.7
+
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-# Base image: Huawei CANN toolkit (provides acl headers + libs)
-FROM ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11 AS builder
+# Base image can be overridden at build time:
+#   docker build --build-arg ASCEND_BASE_IMAGE=... -f docker/Dockerfile.ascend .
+ARG ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11
+FROM ${ASCEND_BASE_IMAGE} AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     cmake ninja-build pkg-config git \
+    ccache \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
     libopencv-dev \
     libyaml-cpp-dev \
@@ -20,16 +27,21 @@ ENV ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
 WORKDIR /src
 COPY . .
 
-RUN cmake -B build -G Ninja \
+RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
+    cmake -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
     -DBUILD_TRT_BACKEND=OFF \
     -DBUILD_ASCEND_BACKEND=ON \
     && cmake --build build --parallel $(nproc)
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11
+ARG ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11
+FROM ${ASCEND_BASE_IMAGE}
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     libavcodec58 libavformat58 libavutil56 libswscale5 \
     libopencv-core4.5d libopencv-imgproc4.5d \
     libyaml-cpp0.7 \
