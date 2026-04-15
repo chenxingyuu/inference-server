@@ -80,6 +80,7 @@ streams:
     sample_fps: 5
     reconnect_delay_ms: 3000
     use_hwdec: true
+    tracker: "bytetrack"
 
   - id: "cam_002"
     url: "rtsp://192.168.1.101/stream1"
@@ -87,6 +88,7 @@ streams:
     sample_fps: 5
     reconnect_delay_ms: 3000
     use_hwdec: true
+    tracker: "none"
 
 kafka:
   brokers: "kafka:9092"

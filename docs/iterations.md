@@ -154,3 +154,20 @@
 - [ ] CascadeRouter GPU 路径：从 secondary ModelConfig 读取实际 input_size（当前硬编码 112×112）
 - [ ] Grafana 预置 Dashboard JSON（延迟热力图 + 丢帧率）
 - [ ] 单元测试（Decoder NMS 逻辑、ClassifierDecoder argmax、ResultMerger 超时逻辑）
+
+---
+
+## Phase 8 — 可选目标追踪（ByteTrack + DeepSORT 占位）
+
+**目标**：在不破坏现有 Kafka 消费的前提下，为每路流提供可选目标追踪能力。
+
+**新增**：
+- `streams[].tracker` 配置项：`none` / `bytetrack` / `deepsort`
+- `TrackerManager`：按 `stream_id` 维护追踪器状态，避免多 worker 并发下轨迹串线
+- `ByteTrackTracker`：基于 IoU 的两阶段匹配（高分框 + 低分框）输出 `track_id`
+- `InferWorker`：在发布前接入可选追踪逻辑，cascade 路径共享同一结果
+- `KafkaPublisher`：按需输出 `detections[].track_id`（可选字段）
+
+**状态**：
+- `bytetrack`：可用
+- `deepsort`：配置可识别，运行时提示未实现并跳过追踪（需后续接 ReID）

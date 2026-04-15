@@ -39,6 +39,7 @@ streams:
     sample_fps: 10
     reconnect_delay_ms: 1000
     use_hwdec: false
+    tracker: bytetrack
 
   - id: cam_02
     url: rtsp://localhost/cam2
@@ -46,6 +47,7 @@ streams:
     sample_fps: 5
     reconnect_delay_ms: 2000
     use_hwdec: true
+    tracker: none
 
 kafka:
   brokers: localhost:9092

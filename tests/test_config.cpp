@@ -2,6 +2,7 @@
 #include "common/Config.h"
 #include <stdexcept>
 #include <fstream>
+#include <cstdio>
 
 using namespace infer;
 
@@ -39,6 +40,19 @@ TEST(ParseDeviceType, UnknownStringThrows) {
     EXPECT_THROW(parseDeviceType("gpu"),   std::runtime_error);
     EXPECT_THROW(parseDeviceType(""),      std::runtime_error);
     EXPECT_THROW(parseDeviceType("CUDA"),  std::runtime_error);
+}
+
+// ── parseTrackerType ──────────────────────────────────────────────────────
+
+TEST(ParseTrackerType, KnownStrings) {
+    EXPECT_EQ(parseTrackerType("none"), TrackerType::None);
+    EXPECT_EQ(parseTrackerType("bytetrack"), TrackerType::ByteTrack);
+    EXPECT_EQ(parseTrackerType("deepsort"), TrackerType::DeepSort);
+}
+
+TEST(ParseTrackerType, UnknownStringThrows) {
+    EXPECT_THROW(parseTrackerType("byte_track"), std::runtime_error);
+    EXPECT_THROW(parseTrackerType(""), std::runtime_error);
 }
 
 // ── AppConfig::findModel / findStream ─────────────────────────────────────
@@ -125,6 +139,8 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cfg.streams[0].sample_fps, 10);
     EXPECT_FALSE(cfg.streams[0].use_hwdec);
     EXPECT_TRUE(cfg.streams[1].use_hwdec);
+    EXPECT_EQ(cfg.streams[0].tracker, TrackerType::ByteTrack);
+    EXPECT_EQ(cfg.streams[1].tracker, TrackerType::None);
 
     // kafka
     EXPECT_EQ(cfg.kafka.brokers, "localhost:9092");
@@ -134,4 +150,23 @@ TEST(LoadConfig, ParsesFullYaml) {
 
 TEST(LoadConfig, MissingFileThrows) {
     EXPECT_THROW(loadConfig("nonexistent.yaml"), std::runtime_error);
+}
+
+TEST(LoadConfig, InvalidTrackerThrows) {
+    const std::string path = "data/test_invalid_tracker.yaml";
+    {
+        std::ofstream out(path);
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "streams:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "    model_id: m1\n";
+        out << "    tracker: bad_tracker\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
 }

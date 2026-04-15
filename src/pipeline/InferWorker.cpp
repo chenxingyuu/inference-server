@@ -17,11 +17,15 @@ double nowEpoch() {
 InferWorker::InferWorker(const ModelConfig&            model_cfg,
                           std::unique_ptr<IInferBackend> backend,
                           std::unique_ptr<IYOLODecoder>  decoder,
-                          IPublisher&                    publisher)
+                          IPublisher&                    publisher,
+                          std::shared_ptr<TrackerManager> tracker_manager,
+                          std::function<TrackerType(const std::string&)> tracker_type_resolver)
     : model_cfg_(model_cfg)
     , backend_(std::move(backend))
     , decoder_(std::move(decoder))
     , publisher_(publisher)
+    , tracker_manager_(std::move(tracker_manager))
+    , tracker_type_resolver_(std::move(tracker_type_resolver))
 {}
 
 InferWorker::~InferWorker() {
@@ -107,6 +111,11 @@ void InferWorker::workerLoop() {
                     if (d.class_id < static_cast<int>(model_cfg_.class_names.size())) {
                         d.class_name = model_cfg_.class_names[d.class_id];
                     }
+                }
+
+                if (tracker_manager_ && tracker_type_resolver_) {
+                    const TrackerType tracker_type = tracker_type_resolver_(r.stream_id);
+                    tracker_manager_->apply(r.stream_id, tracker_type, r.frame_seq, r.detections);
                 }
 
                 if (cascade_router_) {

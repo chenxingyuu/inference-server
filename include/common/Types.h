@@ -6,6 +6,7 @@
 #include <memory>
 #include <cstdint>
 #include <chrono>
+#include <optional>
 #include <opencv2/core/mat.hpp>
 
 namespace infer {
@@ -32,6 +33,9 @@ struct Detection {
     // Phase 7b: secondary classifier attributes injected by cascade pipeline.
     // Key: attribute name (e.g. "vehicle_type"), Value: label (e.g. "sedan").
     std::map<std::string, std::string> attributes;
+
+    // Optional tracking id. Populated when stream tracker is enabled.
+    std::optional<int64_t> track_id;
 };
 
 // ── Cascade configuration: secondary model triggered by primary detections ────

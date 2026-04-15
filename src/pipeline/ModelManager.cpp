@@ -129,9 +129,18 @@ const ModelManager::ModelEntry* ModelManager::find(const std::string& model_id) 
 }
 
 void ModelManager::startPipeline(ModelEntry& entry) {
+    if (entry.cfg.model_type == ModelType::Detector) {
+        entry.tracker_manager = std::make_shared<TrackerManager>();
+    }
+
     // Create primary InferWorkerGroup (uses Kafka publisher by default)
     entry.group = std::make_unique<InferWorkerGroup>(
-        entry.cfg, publisher_, backend_factory_, decoder_factory_);
+        entry.cfg,
+        publisher_,
+        backend_factory_,
+        decoder_factory_,
+        entry.tracker_manager,
+        [this](const std::string& stream_id) { return pool_.getStreamTrackerType(stream_id); });
 
     // Wire cascade if this is a primary model with secondary classifiers
     if (!entry.cfg.cascade.empty()) {
@@ -156,7 +165,12 @@ void ModelManager::startPipeline(ModelEntry& entry) {
 
             // Create secondary InferWorkerGroup with AttributePublisher
             auto sec_group = std::make_unique<InferWorkerGroup>(
-                cfg_it->second, attr_pub_ref, backend_factory_, decoder_factory_);
+                cfg_it->second,
+                attr_pub_ref,
+                backend_factory_,
+                decoder_factory_,
+                nullptr,
+                [](const std::string&) { return TrackerType::None; });
             sec_map[cas.model_id] = sec_group.get();
             entry.secondary_groups.push_back(std::move(sec_group));
         }

@@ -16,6 +16,7 @@ struct ServerConfig {
 
 // Model type: detector outputs bounding boxes; classifier outputs class probabilities.
 enum class ModelType { Detector, Classifier };
+enum class TrackerType { None, ByteTrack, DeepSort };
 
 struct ModelConfig {
     std::string id;
@@ -59,6 +60,7 @@ struct StreamConfig {
     int         sample_fps{5};
     int         reconnect_delay_ms{3000};
     bool        use_hwdec{false};  // true → NVDEC hardware decode
+    TrackerType tracker{TrackerType::None};
 };
 
 struct KafkaConfig {
@@ -89,5 +91,8 @@ YOLOVersion parseYOLOVersion(const std::string& s);
 
 // Convert string → DeviceType
 DeviceType parseDeviceType(const std::string& s);
+
+// Convert string → TrackerType
+TrackerType parseTrackerType(const std::string& s);
 
 } // namespace infer

@@ -23,6 +23,8 @@ add_library(infer_testable STATIC
     ${CMAKE_SOURCE_DIR}/src/decoder/YOLO26Decoder.cpp
     ${CMAKE_SOURCE_DIR}/src/decoder/ClassifierDecoder.cpp
     ${CMAKE_SOURCE_DIR}/src/decoder/DecoderFactory.cpp
+    ${CMAKE_SOURCE_DIR}/src/tracker/ByteTrackTracker.cpp
+    ${CMAKE_SOURCE_DIR}/src/tracker/TrackerManager.cpp
     ${CMAKE_SOURCE_DIR}/src/pipeline/ResultMerger.cpp
 )
 
@@ -57,3 +59,4 @@ add_infer_test(test_config)
 add_infer_test(test_iou_nms)
 add_infer_test(test_yolov5_decoder)
 add_infer_test(test_result_merger)
+add_infer_test(test_tracker)

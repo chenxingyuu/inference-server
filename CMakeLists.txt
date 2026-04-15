@@ -113,6 +113,11 @@ set(PIPELINE_SOURCES
     src/pipeline/ModelManager.cpp
 )
 
+set(TRACKER_SOURCES
+    src/tracker/ByteTrackTracker.cpp
+    src/tracker/TrackerManager.cpp
+)
+
 set(PUBLISHER_SOURCES
     src/publisher/KafkaPublisher.cpp
     src/publisher/AttributePublisher.cpp
@@ -133,6 +138,7 @@ add_library(infer_core STATIC
     ${INFER_SOURCES}
     ${DECODER_SOURCES}
     ${PIPELINE_SOURCES}
+    ${TRACKER_SOURCES}
     ${PUBLISHER_SOURCES}
     ${METRICS_SOURCES}
     ${SERVER_SOURCES}

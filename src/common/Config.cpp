@@ -19,6 +19,13 @@ DeviceType parseDeviceType(const std::string& s) {
     throw std::runtime_error("Unknown device type: " + s);
 }
 
+TrackerType parseTrackerType(const std::string& s) {
+    if (s == "none") return TrackerType::None;
+    if (s == "bytetrack") return TrackerType::ByteTrack;
+    if (s == "deepsort") return TrackerType::DeepSort;
+    throw std::runtime_error("Unknown tracker type: " + s);
+}
+
 const ModelConfig* AppConfig::findModel(const std::string& id) const {
     for (const auto& m : models)
         if (m.id == id) return &m;
@@ -123,6 +130,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
         s.sample_fps        = sn["sample_fps"].as<int>(5);
         s.reconnect_delay_ms = sn["reconnect_delay_ms"].as<int>(3000);
         s.use_hwdec         = sn["use_hwdec"].as<bool>(false);
+        s.tracker           = parseTrackerType(sn["tracker"].as<std::string>("none"));
         cfg.streams.push_back(std::move(s));
     }
 

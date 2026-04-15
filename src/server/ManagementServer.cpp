@@ -113,6 +113,7 @@ void ManagementServer::registerHandlers() {
             sc.sample_fps        = body.value("sample_fps", 5);
             sc.reconnect_delay_ms = body.value("reconnect_delay_ms", 3000);
             sc.use_hwdec         = body.value("use_hwdec", false);
+            sc.tracker           = parseTrackerType(body.value("tracker", std::string("none")));
 
             pool_.addStream(sc);
             LOG_INFO("ManagementServer: added stream {}", sc.id);

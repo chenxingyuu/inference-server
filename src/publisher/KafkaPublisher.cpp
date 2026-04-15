@@ -100,7 +100,7 @@ void KafkaPublisher::publishLoop() {
 std::string KafkaPublisher::serialize(const InferResult& r) const {
     json dets = json::array();
     for (const auto& d : r.detections) {
-        dets.push_back({
+        json det = {
             {"class_id",   d.class_id},
             {"class_name", d.class_name},
             {"confidence", d.confidence},
@@ -108,7 +108,11 @@ std::string KafkaPublisher::serialize(const InferResult& r) const {
                 {"x1", d.bbox.x1}, {"y1", d.bbox.y1},
                 {"x2", d.bbox.x2}, {"y2", d.bbox.y2}
             }}
-        });
+        };
+        if (d.track_id.has_value()) {
+            det["track_id"] = d.track_id.value();
+        }
+        dets.push_back(std::move(det));
     }
     json msg = {
         {"stream_id",  r.stream_id},

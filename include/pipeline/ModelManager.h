@@ -47,6 +47,7 @@ public:
         std::unique_ptr<CascadeRouter>                   router;
         std::vector<std::unique_ptr<InferWorkerGroup>>   secondary_groups;
         std::vector<std::unique_ptr<AttributePublisher>> attr_publishers;
+        std::shared_ptr<TrackerManager>                  tracker_manager;
     };
 
     using BackendFactory = std::function<std::unique_ptr<IInferBackend>(const ModelConfig&)>;

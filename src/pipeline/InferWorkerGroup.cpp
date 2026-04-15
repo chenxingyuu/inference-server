@@ -6,7 +6,9 @@ namespace infer {
 InferWorkerGroup::InferWorkerGroup(const ModelConfig&  model_cfg,
                                    IPublisher&         publisher,
                                    BackendFactory      backend_factory,
-                                   DecoderFactory      decoder_factory) {
+                                   DecoderFactory      decoder_factory,
+                                   std::shared_ptr<TrackerManager> tracker_manager,
+                                   std::function<TrackerType(const std::string&)> tracker_type_resolver) {
     const int count = std::max(1, model_cfg.instance_count);
 
     workers_.reserve(count);
@@ -25,7 +27,9 @@ InferWorkerGroup::InferWorkerGroup(const ModelConfig&  model_cfg,
             instance_cfg,
             std::move(backend),
             std::move(decoder),
-            publisher));
+            publisher,
+            tracker_manager,
+            tracker_type_resolver));
 
         LOG_INFO("InferWorkerGroup [{}]: instance {} → device {}",
                  model_cfg.id, i, instance_cfg.device_id);

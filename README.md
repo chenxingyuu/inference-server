@@ -1,135 +1,131 @@
 # inference-server
 
-C++ 实时视频推理服务，支持 100 路 RTSP 摄像头并发接入，目标端到端延迟 < 100ms。
+`inference-server` 是一个 C++ 实时视频推理服务，面向多路 RTSP 输入，支持 TensorRT 和 Ascend 双后端、模型热管理（load/unload/swap）、级联分类和 Prometheus 指标暴露。
+
+## 文档导航
+
+- 总入口：[`docs/INDEX.md`](docs/INDEX.md)
+- 架构边界：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- 产品约束：[`docs/PRODUCT_RULES.md`](docs/PRODUCT_RULES.md)
+- 质量门禁：[`docs/QUALITY-GATES.md`](docs/QUALITY-GATES.md)
+- 迭代记录：[`docs/iterations.md`](docs/iterations.md)
 
 ## 架构概览
 
-```
-RTSP 摄像头
-    │
-    ▼
-FFmpegDecoder          软解: CPU → cv::Mat → H2D memcpy
-(NVDEC 可选)           硬解: NVDEC → NV12 GPU buffer → 零拷贝
-    │
-    ▼
-FrameBuffer            boost::lockfree::spsc_queue<32>，无锁
-    │
-    ▼
-BatchScheduler         按 model_id 筛流，max_batch=16，max_wait=10ms
-    │
-    ▼
-InferWorker
-    ├─ TRTBackend      TensorRT：软解走 CPU 预处理；硬解走 fused CUDA kernel
-    └─ AscendBackend   Ascend 310P：预编译 batch=1/4/8/16 的 .om，运行时选最近档
-    │
-    ▼
-IYOLODecoder           YOLOv5 / v8 / v11 / v26 后处理 + NMS
-    │
-    ▼
-KafkaPublisher         librdkafka 异步生产，JSON 格式
-    │
-    ▼
-ManagementServer       HTTP /healthz /metrics /streams (热增删流)
+```text
+RTSP -> FFmpegDecoder(可选HW解码) -> FrameBuffer
+     -> BatchScheduler(按 model_id 聚合)
+     -> InferWorkerGroup
+        -> TRTBackend / AscendBackend
+     -> YOLO/Classifier Decoder
+     -> (可选) CascadeRouter + ResultMerger
+     -> KafkaPublisher / AttributePublisher
+     -> ManagementServer (/healthz /metrics /streams /models)
 ```
 
-## 快速开始
+运行时关键点：
 
-### 依赖
+- 流管理与模型管理解耦：流可热增删，模型可热加载/热替换。
+- `ModelManager` 统一维护模型状态（`unloaded/loading/ready/draining/unloading`）。
+- 支持 detector -> classifier 级联，二级模型由主模型内部托管，不挂到 `streams.model_id`。
 
+## 依赖
 
-| 依赖            | 版本              | 必需          |
-| ------------- | --------------- | ----------- |
-| CMake         | ≥ 3.20          | ✓           |
-| C++ 编译器       | C++17           | ✓           |
-| FFmpeg        | 4.x / 5.x / 6.x | ✓           |
-| OpenCV        | ≥ 4.0           | ✓           |
-| yaml-cpp      | any             | ✓           |
-| nlohmann/json | ≥ 3.9           | ✓           |
-| spdlog        | any             | ✓           |
-| Boost         | ≥ 1.71          | ✓           |
-| librdkafka    | any             | ✓           |
-| TensorRT      | ≥ 8.5           | TRT only    |
-| CUDA Toolkit  | ≥ 11.8          | TRT only    |
-| Ascend CANN   | 6.x             | Ascend only |
+| 依赖 | 版本要求 | 说明 |
+| --- | --- | --- |
+| CMake | >= 3.20 | 必需 |
+| C++ 编译器 | C++17 | 必需 |
+| FFmpeg | 4.x / 5.x / 6.x | 必需 |
+| OpenCV | >= 4.0（core,imgproc） | 必需 |
+| yaml-cpp | 任意 | 必需 |
+| nlohmann/json | >= 3.9 | 必需 |
+| spdlog | 任意 | 必需 |
+| Boost | >= 1.71 | 必需 |
+| librdkafka | 任意 | 必需 |
+| TensorRT | >= 8.5 | TensorRT 后端必需 |
+| CUDA Toolkit | >= 11.8 | TensorRT 后端必需 |
+| Ascend CANN | 6.x/8.x（按镜像） | Ascend 后端必需 |
 
+## 本地编译
 
-### 编译
+### TensorRT 构建
 
 ```bash
-# TensorRT 机器（NVIDIA GPU）
 cmake -B build \
   -DBUILD_TRT_BACKEND=ON \
   -DBUILD_ASCEND_BACKEND=OFF \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
+```
 
-# Ascend 310P 机器
+### Ascend 构建
+
+```bash
 cmake -B build \
   -DBUILD_TRT_BACKEND=OFF \
   -DBUILD_ASCEND_BACKEND=ON \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-
-# Docker 构建（Ascend）
-# - DOCKER_BUILDKIT=1: 启用 BuildKit，才能使用 Dockerfile 中的 apt/ccache 缓存挂载
-# - ASCEND_BASE_IMAGE: 可替换 Ascend 基础镜像版本（无需改 Dockerfile）
-# - APT_MIRROR: 可选，替换 apt 源以加速依赖下载（Ascend arm64 建议 ubuntu-ports 镜像）
-DOCKER_BUILDKIT=1 docker build \
-  -t registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend \
-  -f docker/Dockerfile.ascend \
-  --build-arg ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11 \
-  .
-
-# Ascend 构建（可选：使用国内镜像源加速）
-DOCKER_BUILDKIT=1 docker build \
-  -t registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend \
-  -f docker/Dockerfile.ascend \
-  --build-arg ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11 \
-  --build-arg APT_MIRROR=http://mirrors.ustc.edu.cn/ubuntu-ports \
-  .
-
-# Docker 构建（TensorRT）
-# - CUDA_DEVEL_IMAGE: 编译阶段镜像（含编译工具链）
-# - CUDA_RUNTIME_IMAGE: 运行阶段镜像（尽量精简）
-# - APT_MIRROR: 可选，替换 apt 源以加速依赖下载（x86 常用 ubuntu 镜像）
-# - 首次构建会下载依赖；后续改代码重建会复用缓存，明显更快
-DOCKER_BUILDKIT=1 docker build \
-  -t registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:tensorrt \
-  -f docker/Dockerfile.tensorrt \
-  --build-arg CUDA_DEVEL_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04 \
-  --build-arg CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
-  .
-
-# TensorRT 构建（可选：使用国内镜像源加速）
-DOCKER_BUILDKIT=1 docker build \
-  -t registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:tensorrt \
-  -f docker/Dockerfile.tensorrt \
-  --build-arg CUDA_DEVEL_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04 \
-  --build-arg CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
-  --build-arg APT_MIRROR=http://mirrors.ustc.edu.cn/ubuntu \
-  .
-
 ```
 
-### Docker 启动（TensorRT）
+### 可选：构建测试
 
 ```bash
-# 将 .engine 文件放到 models/，修改 config/config.yaml
-docker compose -f docker/docker-compose.nvidia.yml up -d
+cmake -B build \
+  -DBUILD_TESTS=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
-启动后包含：
+## Docker 使用
 
-- `infer-trt` — 推理服务，监听 HTTP 8080
-- `kafka` — 消息队列
-- `prometheus` — 指标采集（9090）
-- `grafana` — 可视化（3000，默认密码 `admin`）
+### TensorRT 镜像构建
 
-### 配置文件
+```bash
+DOCKER_BUILDKIT=1 docker build \
+  -t inference-server:tensorrt \
+  -f docker/Dockerfile.tensorrt \
+  --build-arg CUDA_DEVEL_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04 \
+  --build-arg CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
+  .
+```
+
+### Ascend 镜像构建
+
+```bash
+DOCKER_BUILDKIT=1 docker build \
+  -t inference-server:ascend \
+  -f docker/Dockerfile.ascend \
+  --build-arg ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11 \
+  .
+```
+
+### Compose 启动
+
+```bash
+# TensorRT 方案（含 Kafka + Prometheus + Grafana）
+docker compose -f docker/docker-compose.nvidia.yml up -d
+
+# Ascend 方案（含 Kafka）
+docker compose -f docker/docker-compose.ascend.yml up -d
+```
+
+## 启动与配置
+
+默认启动命令：
+
+```bash
+./build/infer_server /config/config.yaml
+```
+
+配置文件路径：`config/config.yaml`。
+
+关键配置片段（已包含 detector + cascade classifier 示例）：
 
 ```yaml
-# config/config.yaml（关键字段）
 server:
+  stream_pool_threads: 32
   max_streams: 100
   management_port: 8080
 
@@ -139,86 +135,140 @@ models:
     backend: tensorrt
     engine_path: "/models/yolov8n_b16.engine"
     batch_size: 16
+    instance_count: 1
+    preferred_batch_sizes: [4, 8, 16]
+    max_queue_delay_us: 10000
+    cascade:
+      - model_id: "cls_vehicle"
+        trigger_classes: [2, 5, 7]
+        crop_expand: 0.05
+        attribute_key: "vehicle_type"
+
+  - id: "cls_vehicle"
+    model_type: classifier
+    backend: tensorrt
+    engine_path: "/models/cls_vehicle.engine"
+    batch_size: 32
+    class_names: ["sedan", "suv", "bus", "truck", "other"]
 
 streams:
   - id: "cam_001"
     url: "rtsp://192.168.1.100/stream1"
     model_id: "yolov8n_trt"
     sample_fps: 5
-    use_hwdec: true    # NVDEC 硬解（需 NVIDIA GPU）
+    reconnect_delay_ms: 3000
+    use_hwdec: true
+    tracker: "bytetrack"
+
+kafka:
+  brokers: "kafka:9092"
+  topic: "inference-results"
 ```
 
 ## HTTP 管理接口
 
-服务启动后在 `management_port`（默认 8080）暴露以下端点：
+默认端口来自 `server.management_port`（默认 `8080`）。
+
+### 健康和可观测
 
 ```bash
-# 健康检查
 curl http://localhost:8080/healthz
-
-# Prometheus 指标
 curl http://localhost:8080/metrics
-
-# 查看当前所有流
-curl http://localhost:8080/streams
-
-# 热添加流（无需重启）
-curl -X POST http://localhost:8080/streams \
-  -H 'Content-Type: application/json' \
-  -d '{"id":"cam_003","url":"rtsp://...","model_id":"yolov8n_trt"}'
-
-# 热删除流
-curl -X DELETE http://localhost:8080/streams/cam_003
-
-# 优雅关闭
-kill -SIGTERM $(pgrep infer_server)
 ```
 
-## 指标列表
-
-
-| 指标名                     | 类型        | 标签          | 说明               |
-| ----------------------- | --------- | ----------- | ---------------- |
-| `infer_latency_ms`      | histogram | `model_id`  | 单批推理耗时           |
-| `e2e_latency_ms`        | histogram | `stream_id` | 采集到发布的端到端延迟      |
-| `frames_decoded_total`  | counter   | `stream_id` | 已解码帧数            |
-| `frames_dropped_total`  | counter   | `stream_id` | 因队列满丢弃的帧数        |
-| `kafka_published_total` | counter   | —           | 成功发布到 Kafka 的消息数 |
-| `kafka_dropped_total`   | counter   | —           | 因队列满丢弃的消息数       |
-| `infer_batches_total`   | counter   | `model_id`  | 已处理批次数           |
-
-
-## Ascend 310P 模型转换
+### 流管理
 
 ```bash
-# ONNX → .om（batch=1/4/8/16）
+# 列出流
+curl http://localhost:8080/streams
+
+# 添加流
+curl -X POST http://localhost:8080/streams \
+  -H "Content-Type: application/json" \
+  -d '{"id":"cam_003","url":"rtsp://...","model_id":"yolov8n_trt","tracker":"bytetrack"}'
+
+# 删除流
+curl -X DELETE http://localhost:8080/streams/cam_003
+```
+
+### 模型管理
+
+```bash
+# 列出模型与状态
+curl http://localhost:8080/models
+
+# 加载模型
+curl -X POST http://localhost:8080/models \
+  -H "Content-Type: application/json" \
+  -d '{"id":"yolov8n_trt","backend":"tensorrt","version":"yolov8","engine_path":"/models/yolov8n_b16.engine","batch_size":16}'
+
+# 热替换模型
+curl -X PUT http://localhost:8080/models/yolov8n_trt \
+  -H "Content-Type: application/json" \
+  -d '{"backend":"tensorrt","version":"yolov8","engine_path":"/models/yolov8n_b16_v2.engine","batch_size":16}'
+
+# 卸载模型
+curl -X DELETE http://localhost:8080/models/yolov8n_trt
+
+# 查询模型统计
+curl http://localhost:8080/models/yolov8n_trt/stats
+```
+
+## 核心指标
+
+| 指标名 | 类型 | 标签 | 说明 |
+| --- | --- | --- | --- |
+| `infer_latency_ms` | histogram | `model_id` | 单批推理耗时 |
+| `e2e_latency_ms` | histogram | `stream_id` | 端到端延迟 |
+| `frames_decoded_total` | counter | `stream_id` | 解码帧数 |
+| `frames_dropped_total` | counter | `stream_id` | 解码丢帧数 |
+| `kafka_published_total` | counter | 无 | Kafka 成功发布数 |
+| `kafka_dropped_total` | counter | 无 | Kafka 丢弃消息数 |
+| `infer_batches_total` | counter | `model_id` | 已处理批次数 |
+
+## 目标追踪（可选）
+
+- 在 `streams[].tracker` 配置追踪方式：`none`（默认）/ `bytetrack` / `deepsort`。
+- `bytetrack` 已实现，会在 Kafka 输出 `detections[].track_id` 可选字段。
+- `deepsort` 当前为占位配置，运行时会输出未实现提示并跳过追踪。
+
+## Ascend 模型转换
+
+```bash
+# ONNX -> Ascend .om（自动导出 batch=1/4/8/16）
 bash scripts/convert_ascend.sh yolo11s.onnx yolo11s
 ```
 
-生成 `yolo11s_b1.om` / `_b4.om` / `_b8.om` / `_b16.om`，在 `config.yaml` 的 `om_paths` 中引用。
+转换后可在 `models/` 得到 `*_b1.om / *_b4.om / *_b8.om / *_b16.om`，并在 `config/config.yaml` 的 `om_paths` 中配置。
 
 ## 项目结构
 
-```
+```text
 inference-server/
 ├── include/
-│   ├── common/        Types.h / Config.h / Logger.h
-│   ├── cuda/          CudaPreprocess.h
-│   ├── stream/        IStreamDecoder / FFmpegDecoder / FrameBuffer / StreamPool
-│   ├── infer/         IInferBackend / TRTBackend / AscendBackend / BackendFactory
-│   ├── decoder/       IYOLODecoder / YOLOv5..v26 / DecoderFactory
-│   ├── pipeline/      BatchScheduler / InferWorker
-│   ├── publisher/     IPublisher / KafkaPublisher
-│   ├── metrics/       Metrics.h
-│   └── server/        ManagementServer.h
-├── src/               对应实现 + src/cuda/CudaPreprocess.cu
-├── config/            config.yaml / prometheus.yml / grafana provisioning
-├── docker/            Dockerfile.tensorrt / Dockerfile.ascend / docker-compose.*
-├── cmake/             FindTensorRT / FindAscendCL / CompilerOptions
-├── scripts/           convert_ascend.sh
-└── docs/              迭代记录
+│   ├── common/       配置/日志/类型
+│   ├── stream/       解码与流池
+│   ├── infer/        后端与缓冲池
+│   ├── decoder/      YOLO 与分类器后处理
+│   ├── pipeline/     调度、worker、级联、模型管理
+│   ├── tracker/      可选目标追踪（ByteTrack/DeepSORT 占位）
+│   ├── publisher/    Kafka 与属性发布
+│   ├── metrics/      指标导出
+│   ├── server/       HTTP 管理接口
+│   └── cuda/         CUDA 预处理头文件
+├── src/              对应实现（含 src/cuda/CudaPreprocess.cu）
+├── config/           服务、Prometheus、Grafana 配置
+├── docker/           Dockerfile 与 docker-compose
+├── cmake/            CMake 模块
+├── scripts/          脚本（convert_ascend.sh / validate-repo.sh）
+└── docs/             架构、规则、质量门禁、迭代记录
 ```
 
-## 开发迭代
+## 开发与提交流程
 
-详见 [docs/iterations.md](docs/iterations.md)。
+- 修改代码后同步更新相关文档（`README.md` 或 `docs/**`）。
+- 提交前建议运行：
+
+```bash
+scripts/validate-repo.sh
+```

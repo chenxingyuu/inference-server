@@ -8,7 +8,8 @@
 2. Buffer and schedule by model (`FrameBuffer`, `BatchScheduler`).
 3. Backend inference (`TRTBackend` or `AscendBackend`).
 4. YOLO decode and postprocess.
-5. Async publish to Kafka and expose management endpoints.
+5. Optional per-stream tracking (`none` / `bytetrack`, `deepsort` placeholder).
+6. Async publish to Kafka and expose management endpoints.
 
 ## Architecture Boundaries
 

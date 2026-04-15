@@ -38,6 +38,9 @@ public:
     // Returns the model_id assigned to the given stream, or "" if not found.
     std::string getStreamModelId(const std::string& stream_id) const;
 
+    // Returns tracker type assigned to the given stream, or TrackerType::None if not found.
+    TrackerType getStreamTrackerType(const std::string& stream_id) const;
+
     int maxStreams() const noexcept { return max_streams_; }
 
 private:
@@ -45,6 +48,7 @@ private:
         std::unique_ptr<FFmpegDecoder> decoder;
         std::unique_ptr<FrameBuffer>   buffer;
         std::string                    model_id;
+        TrackerType                    tracker{TrackerType::None};
     };
 
     int max_streams_;

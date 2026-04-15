@@ -4,11 +4,13 @@
 #include "decoder/IYOLODecoder.h"
 #include "publisher/IPublisher.h"
 #include "common/Config.h"
+#include "tracker/TrackerManager.h"
 #include <queue>
 #include <mutex>
 #include <condition_variable>
 #include <thread>
 #include <atomic>
+#include <functional>
 
 namespace infer { class CascadeRouter; class ResultMerger; }
 
@@ -22,7 +24,9 @@ public:
     InferWorker(const ModelConfig&           model_cfg,
                 std::unique_ptr<IInferBackend> backend,
                 std::unique_ptr<IYOLODecoder>  decoder,
-                IPublisher&                    publisher);
+                IPublisher&                    publisher,
+                std::shared_ptr<TrackerManager> tracker_manager,
+                std::function<TrackerType(const std::string&)> tracker_type_resolver);
     ~InferWorker();
 
     void start();
@@ -50,6 +54,8 @@ private:
     std::unique_ptr<IInferBackend> backend_;
     std::unique_ptr<IYOLODecoder>  decoder_;
     IPublisher&                    publisher_;
+    std::shared_ptr<TrackerManager> tracker_manager_;
+    std::function<TrackerType(const std::string&)> tracker_type_resolver_;
 
     std::queue<Batch>       queue_;
     std::mutex              mutex_;

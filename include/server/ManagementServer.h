@@ -17,7 +17,7 @@ namespace infer {
 //   GET  /healthz              → 200 OK  (liveness probe)
 //   GET  /metrics              → Prometheus text format
 //   GET  /streams              → JSON list of active stream IDs
-//   POST /streams              → Add stream  body: {"id","url","model_id"[,"sample_fps","use_hwdec"]}
+//   POST /streams              → Add stream  body: {"id","url","model_id"[,"sample_fps","use_hwdec","tracker"]}
 //   DELETE /streams/{id}       → Remove stream
 //
 //   GET  /models               → JSON list of loaded models + state
