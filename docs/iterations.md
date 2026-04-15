@@ -112,10 +112,45 @@
 
 ---
 
+---
+
+## Phase 7a — 性能优化（借鉴 Triton）
+
+**目标**：消除推理热路径上的内存分配开销，支持多实例并行，预处理与推理流水线重叠。
+
+**新增**：
+- `GpuBufferPool`：预分配 `buffer_pool_size` 个 GPU buffer slot，`acquire()` / `release()` 无锁 CAS，替代每次推理的 `cudaMalloc` / `cudaFree`
+- `InferWorkerGroup`：同一模型启动 N 个 InferWorker 实例（类 Triton `instance_group`），`enqueue()` 原子 round-robin 分发，配置项 `instance_count` / `device_ids`
+- 异步双缓冲：`TRTBackend` 拆分为 `preprocess_stream_` + `infer_stream_`，用 `cudaEvent` 同步，预处理与上一批推理重叠；TRT 8.5+ 走 `enqueueV3`，旧版退回 `executeV2`
+
+**配置项**：`buffer_pool_size`（默认 4）、`instance_count`（默认 1）、`preferred_batch_sizes`（Triton 风格凑批）、`max_queue_delay_us`（替代硬编码 10ms）
+
+---
+
+## Phase 7b — 功能扩展（借鉴 Triton + DeepStream）
+
+**目标**：运行时热管理模型；主检测模型触发二级分类，属性注入原始检测结果后统一发 Kafka。
+
+**新增**：
+- `ModelManager`：模型生命周期状态机（`UNLOADED → LOADING → READY → DRAINING`），支持 `load` / `unload` / `swap`（先起新再停旧，重叠 < 30ms）
+- `ManagementServer` 新增 `/models` REST 端点（GET / POST / DELETE / PUT / stats）
+- 级联管道（DeepStream Primary/Secondary GIE 风格）：
+  - `CascadeRouter`：按 `trigger_classes` 过滤检测框，GPU/CPU 裁剪 ROI → 二级 mini-batch
+  - `ClassifierDecoder`：实现 `IYOLODecoder`，argmax 输出 top-1 Detection
+  - `AttributePublisher`：二级模型专用 `IPublisher`，结果写入 `ResultMerger`
+  - `ResultMerger`：等待当帧所有二级结果到齐（或超时），合并 `Detection.attributes` 后发布 Kafka
+
+**关键决策**：
+- `registerPrimary()` 在所有 `enqueue()` 之前调用，避免二级结果先到时找不到 pending entry
+- 先统计全部 cascade 配置的 total_crops 再注册，防止多 cascade 时 key 碰撞
+- `stopPipeline_unlocked` 持有 `CascadeOwnership`，确保 `ResultMerger` 在二级 worker 停止后再析构
+
+---
+
 ## 待办
 
 - [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
 - [ ] Phase 5 Ascend 310P 真机联调
-- [ ] NVDEC → `enqueueV3(stream)` 替换 `executeV2`（TRT 8.5+ 全异步路径）
+- [ ] CascadeRouter GPU 路径：从 secondary ModelConfig 读取实际 input_size（当前硬编码 112×112）
 - [ ] Grafana 预置 Dashboard JSON（延迟热力图 + 丢帧率）
-- [ ] 单元测试（Decoder NMS 逻辑、Metrics 序列化格式验证）
+- [ ] 单元测试（Decoder NMS 逻辑、ClassifierDecoder argmax、ResultMerger 超时逻辑）
