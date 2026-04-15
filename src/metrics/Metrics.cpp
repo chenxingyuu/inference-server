@@ -115,6 +115,26 @@ void Metrics::incInferBatches(const std::string& model_id) {
     infer_batches_.inc(model_id);
 }
 
+void Metrics::incFramesArchived() {
+    frames_archived_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::incFramesArchiveDropped() {
+    frames_archive_dropped_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::incFramesUploaded() {
+    frames_uploaded_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::incFramesUploadFailed() {
+    frames_upload_failed_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Metrics::setFrameArchiveQueueDepth(uint64_t depth) {
+    frame_archive_queue_depth_.store(depth, std::memory_order_relaxed);
+}
+
 // ── Serialization ─────────────────────────────────────────────────────────────
 
 std::string Metrics::serializeCounter(
@@ -203,6 +223,21 @@ std::string Metrics::serialize() const {
     out << serializeSimpleCounter("kafka_dropped_total",
         "Total messages dropped due to full publish queue",
         kafka_dropped_.load(std::memory_order_relaxed));
+    out << serializeSimpleCounter("frames_archived_total",
+        "Total frames archived to local storage",
+        frames_archived_.load(std::memory_order_relaxed));
+    out << serializeSimpleCounter("frames_archive_dropped_total",
+        "Total frames dropped by archive queue or write failures",
+        frames_archive_dropped_.load(std::memory_order_relaxed));
+    out << serializeSimpleCounter("frames_uploaded_total",
+        "Total frames uploaded to MinIO",
+        frames_uploaded_.load(std::memory_order_relaxed));
+    out << serializeSimpleCounter("frames_upload_failed_total",
+        "Total frame upload failures",
+        frames_upload_failed_.load(std::memory_order_relaxed));
+    out << serializeSimpleCounter("frame_archive_queue_depth",
+        "Current pending frame archive queue depth",
+        frame_archive_queue_depth_.load(std::memory_order_relaxed));
     {
         std::unordered_map<std::string, uint64_t> snap;
         infer_batches_.snapshot(snap);

@@ -6,6 +6,7 @@
 #include "publisher/IPublisher.h"
 #include "common/Config.h"
 #include "tracker/TrackerManager.h"
+#include "archive/FrameArchiver.h"
 #include <vector>
 #include <memory>
 #include <atomic>
@@ -32,6 +33,7 @@ public:
                      IPublisher&         publisher,
                      BackendFactory      backend_factory,
                      DecoderFactory      decoder_factory,
+                     std::shared_ptr<FrameArchiver> frame_archiver,
                      std::shared_ptr<TrackerManager> tracker_manager,
                      std::function<TrackerType(const std::string&)> tracker_type_resolver);
     ~InferWorkerGroup() = default;

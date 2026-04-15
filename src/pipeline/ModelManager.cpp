@@ -8,11 +8,13 @@ namespace infer {
 
 ModelManager::ModelManager(StreamPool&                     pool,
                            IPublisher&                     publisher,
+                           std::shared_ptr<FrameArchiver>  frame_archiver,
                            BackendFactory                  backend_factory,
                            DecoderFactory                  decoder_factory,
                            const std::vector<ModelConfig>& all_model_configs)
     : pool_(pool)
     , publisher_(publisher)
+    , frame_archiver_(std::move(frame_archiver))
     , backend_factory_(std::move(backend_factory))
     , decoder_factory_(std::move(decoder_factory))
 {
@@ -139,6 +141,7 @@ void ModelManager::startPipeline(ModelEntry& entry) {
         publisher_,
         backend_factory_,
         decoder_factory_,
+        frame_archiver_,
         entry.tracker_manager,
         [this](const std::string& stream_id) { return pool_.getStreamTrackerType(stream_id); });
 
@@ -169,6 +172,7 @@ void ModelManager::startPipeline(ModelEntry& entry) {
                 attr_pub_ref,
                 backend_factory_,
                 decoder_factory_,
+                frame_archiver_,
                 nullptr,
                 [](const std::string&) { return TrackerType::None; });
             sec_map[cas.model_id] = sec_group.get();

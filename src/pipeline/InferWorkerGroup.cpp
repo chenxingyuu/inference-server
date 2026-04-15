@@ -7,6 +7,7 @@ InferWorkerGroup::InferWorkerGroup(const ModelConfig&  model_cfg,
                                    IPublisher&         publisher,
                                    BackendFactory      backend_factory,
                                    DecoderFactory      decoder_factory,
+                                   std::shared_ptr<FrameArchiver> frame_archiver,
                                    std::shared_ptr<TrackerManager> tracker_manager,
                                    std::function<TrackerType(const std::string&)> tracker_type_resolver) {
     const int count = std::max(1, model_cfg.instance_count);
@@ -28,6 +29,7 @@ InferWorkerGroup::InferWorkerGroup(const ModelConfig&  model_cfg,
             std::move(backend),
             std::move(decoder),
             publisher,
+            frame_archiver,
             tracker_manager,
             tracker_type_resolver));
 

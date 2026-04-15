@@ -72,11 +72,34 @@ struct KafkaConfig {
     int         queue_capacity{10000};
 };
 
+struct MinioConfig {
+    bool        enabled{false};
+    std::string endpoint;
+    std::string bucket;
+    std::string access_key;
+    std::string secret_key;
+    std::string region{"us-east-1"};
+    bool        use_ssl{false};
+    int         connect_timeout_ms{1500};
+    int         request_timeout_ms{3000};
+    int         max_retries{2};
+};
+
+struct FrameArchiveConfig {
+    bool        enabled{false};
+    std::string local_dir{"./data/frames"};
+    int         save_interval{1};      // save every N frames
+    int         jpeg_quality{90};      // [1,100]
+    int         queue_capacity{4096};  // async archive queue
+    MinioConfig minio;
+};
+
 struct AppConfig {
     ServerConfig            server;
     std::vector<ModelConfig> models;
     std::vector<StreamConfig> streams;
     KafkaConfig             kafka;
+    FrameArchiveConfig      frame_archive;
 
     // Find by id helpers
     const ModelConfig* findModel(const std::string& id) const;

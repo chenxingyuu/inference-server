@@ -6,6 +6,7 @@
 #include "pipeline/ModelManager.h"
 #include "publisher/KafkaPublisher.h"
 #include "server/ManagementServer.h"
+#include "archive/FrameArchiver.h"
 
 #include <csignal>
 #include <atomic>
@@ -57,11 +58,13 @@ int main(int argc, char* argv[]) {
     }
 
     // ── Create ModelManager (Phase 7b-2) ─────────────────────────────────────
+    auto frame_archiver = std::make_shared<infer::FrameArchiver>(cfg.frame_archive);
+
     // ModelManager owns all model pipelines and supports runtime load/unload/swap.
     // Pass all model configs so ModelManager can locate secondary model configs
     // for cascade wiring without requiring them to be loaded independently.
     infer::ModelManager model_manager(
-        pool, *publisher,
+        pool, *publisher, frame_archiver,
         [](const infer::ModelConfig& mc) { return infer::createBackend(mc); },
         [](const infer::ModelConfig& mc) { return infer::createDecoder(mc); },
         cfg.models);

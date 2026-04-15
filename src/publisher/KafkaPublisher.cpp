@@ -120,7 +120,10 @@ std::string KafkaPublisher::serialize(const InferResult& r) const {
         {"infer_ts",   r.infer_ts},
         {"latency_ms", r.latency_ms},
         {"model_id",   r.model_id},
-        {"detections", dets}
+        {"detections", dets},
+        {"frame_local_path", r.frame_local_path},
+        {"frame_url", r.frame_url},
+        {"frame_upload_state", r.frame_upload_state}
     };
     return msg.dump();
 }

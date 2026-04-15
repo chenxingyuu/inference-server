@@ -97,3 +97,21 @@ kafka:
   linger_ms: 5
   compression: "lz4"
   queue_capacity: 10000
+
+frame_archive:
+  enabled: true
+  local_dir: "/data/frames"
+  save_interval: 1
+  jpeg_quality: 90
+  queue_capacity: 4096
+  minio:
+    enabled: false
+    endpoint: "minio:9000"
+    bucket: "inference-frames"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    region: "us-east-1"
+    use_ssl: false
+    connect_timeout_ms: 1500
+    request_timeout_ms: 3000
+    max_retries: 2

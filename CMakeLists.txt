@@ -44,6 +44,7 @@ find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc)
 
 # librdkafka
 pkg_check_modules(RDKAFKA REQUIRED rdkafka)
+find_package(CURL REQUIRED)
 
 # ── Optional backends ─────────────────────────────────────────────────────────
 if(BUILD_TRT_BACKEND)
@@ -123,6 +124,10 @@ set(PUBLISHER_SOURCES
     src/publisher/AttributePublisher.cpp
 )
 
+set(ARCHIVE_SOURCES
+    src/archive/FrameArchiver.cpp
+)
+
 set(METRICS_SOURCES
     src/metrics/Metrics.cpp
 )
@@ -140,6 +145,7 @@ add_library(infer_core STATIC
     ${PIPELINE_SOURCES}
     ${TRACKER_SOURCES}
     ${PUBLISHER_SOURCES}
+    ${ARCHIVE_SOURCES}
     ${METRICS_SOURCES}
     ${SERVER_SOURCES}
 )
@@ -160,6 +166,7 @@ target_link_libraries(infer_core PUBLIC
     spdlog::spdlog
     ${OpenCV_LIBS}
     ${RDKAFKA_LIBRARIES}
+    CURL::libcurl
     httplib::httplib
     $<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer>
     $<$<BOOL:${BUILD_TRT_BACKEND}>:CUDA::cudart>

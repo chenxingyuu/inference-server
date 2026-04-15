@@ -109,6 +109,9 @@ struct InferResult {
     std::string              model_id;
     std::vector<Detection>   detections;
     uint64_t                 frame_seq{0};  // detection index for cascade secondary routing
+    std::string              frame_local_path;   // local archived frame path
+    std::string              frame_url;          // optional MinIO URL
+    std::string              frame_upload_state; // pending/uploaded/failed/disabled
 };
 
 // ── Device type ───────────────────────────────────────────────────────────────

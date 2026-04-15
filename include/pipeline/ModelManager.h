@@ -8,6 +8,7 @@
 #include "publisher/IPublisher.h"
 #include "publisher/AttributePublisher.h"
 #include "common/Config.h"
+#include "archive/FrameArchiver.h"
 
 #include <string>
 #include <memory>
@@ -56,6 +57,7 @@ public:
     // all_model_configs: used to look up secondary model configs for cascade wiring.
     ModelManager(StreamPool&                      pool,
                  IPublisher&                      publisher,
+                 std::shared_ptr<FrameArchiver>   frame_archiver,
                  BackendFactory                   backend_factory,
                  DecoderFactory                   decoder_factory,
                  const std::vector<ModelConfig>&  all_model_configs = {});
@@ -98,6 +100,7 @@ private:
 
     StreamPool&    pool_;
     IPublisher&    publisher_;
+    std::shared_ptr<FrameArchiver> frame_archiver_;
     BackendFactory backend_factory_;
     DecoderFactory decoder_factory_;
 

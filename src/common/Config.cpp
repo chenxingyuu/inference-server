@@ -144,6 +144,47 @@ AppConfig loadConfig(const std::string& yaml_path) {
         cfg.kafka.queue_capacity = kn["queue_capacity"].as<int>(10000);
     }
 
+    // ── frame_archive ──────────────────────────────────────────────────────────
+    if (auto an = root["frame_archive"]) {
+        cfg.frame_archive.enabled        = an["enabled"].as<bool>(false);
+        cfg.frame_archive.local_dir      = an["local_dir"].as<std::string>("./data/frames");
+        cfg.frame_archive.save_interval  = an["save_interval"].as<int>(1);
+        cfg.frame_archive.jpeg_quality   = an["jpeg_quality"].as<int>(90);
+        cfg.frame_archive.queue_capacity = an["queue_capacity"].as<int>(4096);
+
+        if (cfg.frame_archive.save_interval <= 0) {
+            throw std::runtime_error("frame_archive.save_interval must be >= 1");
+        }
+        if (cfg.frame_archive.jpeg_quality < 1 || cfg.frame_archive.jpeg_quality > 100) {
+            throw std::runtime_error("frame_archive.jpeg_quality must be in [1, 100]");
+        }
+        if (cfg.frame_archive.queue_capacity <= 0) {
+            throw std::runtime_error("frame_archive.queue_capacity must be >= 1");
+        }
+
+        if (auto mn = an["minio"]) {
+            cfg.frame_archive.minio.enabled            = mn["enabled"].as<bool>(false);
+            cfg.frame_archive.minio.endpoint           = mn["endpoint"].as<std::string>("");
+            cfg.frame_archive.minio.bucket             = mn["bucket"].as<std::string>("");
+            cfg.frame_archive.minio.access_key         = mn["access_key"].as<std::string>("");
+            cfg.frame_archive.minio.secret_key         = mn["secret_key"].as<std::string>("");
+            cfg.frame_archive.minio.region             = mn["region"].as<std::string>("us-east-1");
+            cfg.frame_archive.minio.use_ssl            = mn["use_ssl"].as<bool>(false);
+            cfg.frame_archive.minio.connect_timeout_ms = mn["connect_timeout_ms"].as<int>(1500);
+            cfg.frame_archive.minio.request_timeout_ms = mn["request_timeout_ms"].as<int>(3000);
+            cfg.frame_archive.minio.max_retries        = mn["max_retries"].as<int>(2);
+
+            if (cfg.frame_archive.minio.enabled) {
+                if (cfg.frame_archive.minio.endpoint.empty() || cfg.frame_archive.minio.bucket.empty()) {
+                    throw std::runtime_error("frame_archive.minio endpoint/bucket required when enabled");
+                }
+                if (cfg.frame_archive.minio.access_key.empty() || cfg.frame_archive.minio.secret_key.empty()) {
+                    throw std::runtime_error("frame_archive.minio access_key/secret_key required when enabled");
+                }
+            }
+        }
+    }
+
     return cfg;
 }
 

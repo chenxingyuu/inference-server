@@ -28,6 +28,11 @@ public:
     void incKafkaPublished();
     void incKafkaDropped();
     void incInferBatches(const std::string& model_id);
+    void incFramesArchived();
+    void incFramesArchiveDropped();
+    void incFramesUploaded();
+    void incFramesUploadFailed();
+    void setFrameArchiveQueueDepth(uint64_t depth);
 
     // ── Exposition ────────────────────────────────────────────────────────────
     // Returns the full Prometheus text format (OpenMetrics compatible).
@@ -85,6 +90,11 @@ private:
     std::atomic<uint64_t> kafka_published_{0};
     std::atomic<uint64_t> kafka_dropped_{0};
     LabeledCounter        infer_batches_;
+    std::atomic<uint64_t> frames_archived_{0};
+    std::atomic<uint64_t> frames_archive_dropped_{0};
+    std::atomic<uint64_t> frames_uploaded_{0};
+    std::atomic<uint64_t> frames_upload_failed_{0};
+    std::atomic<uint64_t> frame_archive_queue_depth_{0};
 
     // Serialization helpers
     static std::string serializeCounter(

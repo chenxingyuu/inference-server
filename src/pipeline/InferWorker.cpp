@@ -18,12 +18,14 @@ InferWorker::InferWorker(const ModelConfig&            model_cfg,
                           std::unique_ptr<IInferBackend> backend,
                           std::unique_ptr<IYOLODecoder>  decoder,
                           IPublisher&                    publisher,
+                          std::shared_ptr<FrameArchiver> frame_archiver,
                           std::shared_ptr<TrackerManager> tracker_manager,
                           std::function<TrackerType(const std::string&)> tracker_type_resolver)
     : model_cfg_(model_cfg)
     , backend_(std::move(backend))
     , decoder_(std::move(decoder))
     , publisher_(publisher)
+    , frame_archiver_(std::move(frame_archiver))
     , tracker_manager_(std::move(tracker_manager))
     , tracker_type_resolver_(std::move(tracker_type_resolver))
 {}
@@ -103,6 +105,14 @@ void InferWorker::workerLoop() {
                 r.latency_ms = (infer_ts - r.frame_ts) * 1000.0;
                 r.model_id   = model_cfg_.id;
                 r.detections = std::move(per_image[i]);
+                if (frame_archiver_ && !batch.is_gpu && i < static_cast<int>(batch.frames.size())) {
+                    const auto ar = frame_archiver_->submit(batch.metas[i], &batch.frames[i]);
+                    r.frame_local_path  = ar.local_path;
+                    r.frame_url         = ar.frame_url;
+                    r.frame_upload_state = ar.upload_state;
+                } else {
+                    r.frame_upload_state = "disabled";
+                }
 
                 Metrics::get().recordE2eLatency(r.stream_id, r.latency_ms);
 

@@ -5,6 +5,7 @@
 #include "publisher/IPublisher.h"
 #include "common/Config.h"
 #include "tracker/TrackerManager.h"
+#include "archive/FrameArchiver.h"
 #include <queue>
 #include <mutex>
 #include <condition_variable>
@@ -25,6 +26,7 @@ public:
                 std::unique_ptr<IInferBackend> backend,
                 std::unique_ptr<IYOLODecoder>  decoder,
                 IPublisher&                    publisher,
+                std::shared_ptr<FrameArchiver> frame_archiver,
                 std::shared_ptr<TrackerManager> tracker_manager,
                 std::function<TrackerType(const std::string&)> tracker_type_resolver);
     ~InferWorker();
@@ -54,6 +56,7 @@ private:
     std::unique_ptr<IInferBackend> backend_;
     std::unique_ptr<IYOLODecoder>  decoder_;
     IPublisher&                    publisher_;
+    std::shared_ptr<FrameArchiver> frame_archiver_;
     std::shared_ptr<TrackerManager> tracker_manager_;
     std::function<TrackerType(const std::string&)> tracker_type_resolver_;
 

@@ -163,7 +163,27 @@ streams:
 kafka:
   brokers: "kafka:9092"
   topic: "inference-results"
+
+frame_archive:
+  enabled: true
+  local_dir: "/data/frames"
+  save_interval: 1
+  jpeg_quality: 90
+  queue_capacity: 4096
+  minio:
+    enabled: true
+    endpoint: "minio:9000"
+    bucket: "inference-frames"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    region: "us-east-1"
+    use_ssl: false
 ```
+
+Kafka 单事件会新增可选字段：
+- `frame_local_path`：本地归档路径（检测发布不等待上传）
+- `frame_url`：MinIO 目标 URL（上传成功与否不阻塞发布）
+- `frame_upload_state`：`pending` / `failed` / `disabled`
 
 ## HTTP 管理接口
 
@@ -225,6 +245,11 @@ curl http://localhost:8080/models/yolov8n_trt/stats
 | `kafka_published_total` | counter | 无 | Kafka 成功发布数 |
 | `kafka_dropped_total` | counter | 无 | Kafka 丢弃消息数 |
 | `infer_batches_total` | counter | `model_id` | 已处理批次数 |
+| `frames_archived_total` | counter | 无 | 本地归档成功帧数 |
+| `frames_archive_dropped_total` | counter | 无 | 归档队列溢出或写盘失败 |
+| `frames_uploaded_total` | counter | 无 | MinIO 上传成功数 |
+| `frames_upload_failed_total` | counter | 无 | MinIO 上传失败数 |
+| `frame_archive_queue_depth` | gauge-like counter | 无 | 当前归档队列深度 |
 
 ## 目标追踪（可选）
 
