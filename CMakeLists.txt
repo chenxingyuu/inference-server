@@ -87,6 +87,7 @@ set(INFER_SOURCES
 )
 if(BUILD_TRT_BACKEND)
     list(APPEND INFER_SOURCES src/infer/TRTBackend.cpp)
+    list(APPEND INFER_SOURCES src/infer/GpuBufferPool.cpp)
     list(APPEND INFER_SOURCES src/cuda/CudaPreprocess.cu)
 endif()
 if(BUILD_ASCEND_BACKEND)
@@ -99,16 +100,22 @@ set(DECODER_SOURCES
     src/decoder/YOLOv8Decoder.cpp
     src/decoder/YOLO11Decoder.cpp
     src/decoder/YOLO26Decoder.cpp
+    src/decoder/ClassifierDecoder.cpp
     src/decoder/DecoderFactory.cpp
 )
 
 set(PIPELINE_SOURCES
     src/pipeline/BatchScheduler.cpp
     src/pipeline/InferWorker.cpp
+    src/pipeline/InferWorkerGroup.cpp
+    src/pipeline/CascadeRouter.cpp
+    src/pipeline/ResultMerger.cpp
+    src/pipeline/ModelManager.cpp
 )
 
 set(PUBLISHER_SOURCES
     src/publisher/KafkaPublisher.cpp
+    src/publisher/AttributePublisher.cpp
 )
 
 set(METRICS_SOURCES

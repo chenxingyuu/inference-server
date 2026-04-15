@@ -4,6 +4,7 @@ server:
   management_port: 8080
 
 models:
+  # ── Primary detector with cascade to secondary classifiers ─────────────────
   - id: "yolov8n_trt"
     version: yolov8
     backend: tensorrt
@@ -14,6 +15,48 @@ models:
     nms_thresh: 0.45
     device_id: 0
     num_classes: 80
+    instance_count: 1
+    preferred_batch_sizes: [4, 8, 16]
+    max_queue_delay_us: 10000
+    # Cascade: trigger secondary classifiers for specific detection classes.
+    # Secondary model configs must also be listed below but will be created
+    # internally by the primary — do NOT add them to streams.model_id.
+    cascade:
+      - model_id: "cls_vehicle"
+        trigger_classes: [2, 5, 7]   # car=2, bus=5, truck=7 (COCO ids)
+        crop_expand: 0.05
+        attribute_key: "vehicle_type"
+      - model_id: "cls_person"
+        trigger_classes: [0]          # person=0
+        crop_expand: 0.10
+        attribute_key: "person_attr"
+
+  # ── Secondary classifier: vehicle type ────────────────────────────────────
+  # Loaded internally by yolov8n_trt cascade; not assigned to any stream.
+  - id: "cls_vehicle"
+    version: yolov8          # version field is ignored for classifiers
+    model_type: classifier
+    backend: tensorrt
+    engine_path: "/models/cls_vehicle.engine"
+    input_size: [112, 112]
+    batch_size: 32
+    conf_thresh: 0.3
+    device_id: 0
+    num_classes: 5
+    class_names: ["sedan", "suv", "bus", "truck", "other"]
+
+  # ── Secondary classifier: person attributes ───────────────────────────────
+  - id: "cls_person"
+    version: yolov8
+    model_type: classifier
+    backend: tensorrt
+    engine_path: "/models/cls_person.engine"
+    input_size: [112, 112]
+    batch_size: 32
+    conf_thresh: 0.3
+    device_id: 0
+    num_classes: 4
+    class_names: ["adult_male", "adult_female", "child", "unknown"]
 
   - id: "yolo11s_ascend"
     version: yolo11

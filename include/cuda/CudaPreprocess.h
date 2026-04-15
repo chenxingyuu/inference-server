@@ -25,6 +25,19 @@ void preprocessNV12ToCHW(
     float scale,               // multiplier after mean subtraction (typically 1/255)
     cudaStream_t stream);
 
+// Crop a bounding-box region from an NV12 frame and resize to dst_h×dst_w.
+// Used by the cascade pipeline to prepare secondary classifier inputs.
+// Coordinates are in absolute pixel space (not normalised).
+void cropAndResizeNV12ToCHW(
+    const uint8_t* gpu_y,
+    const uint8_t* gpu_uv,
+    int src_h, int src_w,
+    int crop_x0, int crop_y0, int crop_x1, int crop_y1,
+    float*         dst_chw,    // output: [3, dst_h, dst_w]
+    int dst_h, int dst_w,
+    float mean, float scale,
+    cudaStream_t stream);
+
 } // namespace infer::cuda
 
 #endif // BUILD_TRT_BACKEND

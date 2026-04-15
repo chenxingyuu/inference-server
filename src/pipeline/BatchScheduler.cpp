@@ -1,6 +1,7 @@
 #include "pipeline/BatchScheduler.h"
 #include "common/Logger.h"
 #include <chrono>
+#include <algorithm>
 
 namespace infer {
 
@@ -32,14 +33,25 @@ void BatchScheduler::scheduleLoop() {
     running_.store(true);
     LOG_INFO("BatchScheduler[{}]: started", model_cfg_.id);
 
-    const int max_bs   = model_cfg_.batch_size;
-    Batch     batch;
+    // Build preferred batch sizes list (Triton-style, Phase 7b).
+    // Sort descending so we flush at the largest achievable preferred size.
+    // If no preferred sizes are configured, use batch_size as the single target.
+    std::vector<int> preferred = model_cfg_.preferred_batch_sizes;
+    if (preferred.empty()) {
+        preferred.push_back(model_cfg_.batch_size);
+    } else {
+        std::sort(preferred.begin(), preferred.end(), std::greater<int>());
+    }
+    const int max_bs = preferred.front();   // hard upper bound
+    const int delay_us = model_cfg_.max_queue_delay_us;
+
+    Batch batch;
     batch.frames.reserve(max_bs);
     batch.gpu_frames.reserve(max_bs);
     batch.metas.reserve(max_bs);
 
     auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::milliseconds(kMaxWaitMs);
+                    std::chrono::microseconds(delay_us);
 
     while (!stop_flag_.load()) {
         // Collect frames from streams assigned to this model
@@ -71,26 +83,41 @@ void BatchScheduler::scheduleLoop() {
                 batch.metas.push_back(std::move(f.meta));
             }
 
-            if (batch.size() >= max_bs) break;
+            if (static_cast<int>(batch.size()) >= max_bs) break;
         }
 
-        auto now = std::chrono::steady_clock::now();
+        auto now     = std::chrono::steady_clock::now();
         bool timeout = (now >= deadline);
 
-        if (!batch.empty() && (batch.size() >= max_bs || timeout)) {
+        // Flush decision: prefer largest target size to improve GPU utilisation.
+        // A partial batch is sent if the deadline has passed.
+        bool should_flush = false;
+        if (!batch.empty()) {
+            int bs = static_cast<int>(batch.size());
+            // Check if we hit any preferred batch size (largest first)
+            for (int target : preferred) {
+                if (bs >= target) {
+                    should_flush = true;
+                    break;
+                }
+            }
+            if (!should_flush && timeout) should_flush = true;
+        }
+
+        if (should_flush) {
             callback_(std::move(batch));
             batch.frames.clear();
             batch.gpu_frames.clear();
             batch.metas.clear();
             batch.is_gpu = false;
             deadline = std::chrono::steady_clock::now() +
-                       std::chrono::milliseconds(kMaxWaitMs);
+                       std::chrono::microseconds(delay_us);
         } else if (batch.empty()) {
             // Nothing to do; yield briefly
             std::this_thread::sleep_for(std::chrono::microseconds(500));
             if (timeout) {
                 deadline = std::chrono::steady_clock::now() +
-                           std::chrono::milliseconds(kMaxWaitMs);
+                           std::chrono::microseconds(delay_us);
             }
         }
     }

@@ -79,6 +79,38 @@ AppConfig loadConfig(const std::string& yaml_path) {
                 m.class_names.push_back(n.as<std::string>());
         }
 
+        // Phase 7b: cascade pipeline (primary → secondary)
+        if (auto cas = mn["cascade"]) {
+            for (const auto& cn : cas) {
+                CascadeConfig cc;
+                cc.model_id     = cn["model_id"].as<std::string>();
+                cc.crop_expand  = cn["crop_expand"].as<float>(0.0f);
+                cc.attribute_key = cn["attribute_key"].as<std::string>("");
+                if (auto tc = cn["trigger_classes"]) {
+                    for (const auto& c : tc)
+                        cc.trigger_classes.push_back(c.as<int>());
+                }
+                m.cascade.push_back(std::move(cc));
+            }
+        }
+        if (mn["model_type"].as<std::string>("detector") == "classifier")
+            m.model_type = ModelType::Classifier;
+
+        // Phase 7a: performance options
+        m.buffer_pool_size = mn["buffer_pool_size"].as<int>(4);
+        m.instance_count   = mn["instance_count"].as<int>(1);
+        if (auto ids = mn["device_ids"]) {
+            for (const auto& id : ids)
+                m.device_ids.push_back(id.as<int>());
+        }
+
+        // Phase 7b: Triton-style batching
+        m.max_queue_delay_us = mn["max_queue_delay_us"].as<int>(10000);
+        if (auto pbs = mn["preferred_batch_sizes"]) {
+            for (const auto& s : pbs)
+                m.preferred_batch_sizes.push_back(s.as<int>());
+        }
+
         cfg.models.push_back(std::move(m));
     }
 

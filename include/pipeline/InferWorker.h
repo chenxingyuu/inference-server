@@ -10,6 +10,8 @@
 #include <thread>
 #include <atomic>
 
+namespace infer { class CascadeRouter; class ResultMerger; }
+
 namespace infer {
 
 // Single-device inference worker.
@@ -29,6 +31,14 @@ public:
 
     // Thread-safe enqueue — called by BatchScheduler
     void enqueue(Batch batch);
+
+    // Optional: set a cascade router for primary→secondary routing (Phase 7b-1).
+    // When set, results are routed through the router instead of published directly.
+    // Must be called before start(). Not thread-safe.
+    void setCascadeRouter(CascadeRouter* router, ResultMerger* merger) {
+        cascade_router_ = router;
+        result_merger_  = merger;
+    }
 
     uint64_t processedBatches()  const { return processed_batches_.load(); }
     uint64_t droppedBatches()    const { return dropped_batches_.load(); }
@@ -50,6 +60,10 @@ private:
 
     std::atomic<uint64_t>   processed_batches_{0};
     std::atomic<uint64_t>   dropped_batches_{0};
+
+    // Phase 7b-1: optional cascade routing
+    CascadeRouter* cascade_router_{nullptr};
+    ResultMerger*  result_merger_{nullptr};
 
     static constexpr std::size_t kMaxQueueSize = 32;
 };

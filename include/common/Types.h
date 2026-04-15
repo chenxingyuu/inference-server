@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include <memory>
 #include <cstdint>
 #include <chrono>
@@ -27,6 +28,18 @@ struct Detection {
     std::string class_name;
     float       confidence{0.f};
     BBox        bbox{};
+
+    // Phase 7b: secondary classifier attributes injected by cascade pipeline.
+    // Key: attribute name (e.g. "vehicle_type"), Value: label (e.g. "sedan").
+    std::map<std::string, std::string> attributes;
+};
+
+// ── Cascade configuration: secondary model triggered by primary detections ────
+struct CascadeConfig {
+    std::string      model_id;         // secondary model to trigger
+    std::vector<int> trigger_classes;  // primary class ids that trigger secondary
+    float            crop_expand{0.0f}; // bbox expansion ratio (e.g. 0.1 = +10%)
+    std::string      attribute_key;    // key injected into Detection.attributes
 };
 
 // ── Per-stream metadata attached to each frame ────────────────────────────────
@@ -91,6 +104,7 @@ struct InferResult {
     double                   latency_ms{0.0};
     std::string              model_id;
     std::vector<Detection>   detections;
+    uint64_t                 frame_seq{0};  // detection index for cascade secondary routing
 };
 
 // ── Device type ───────────────────────────────────────────────────────────────

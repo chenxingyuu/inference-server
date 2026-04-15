@@ -119,6 +119,100 @@ void preprocessNV12ToCHW(
     CUDA_CHECK(cudaGetLastError());
 }
 
+// ── ROI crop + resize for cascade secondary models ────────────────────────────
+// Crops a bounding-box region from an NV12 frame and resizes it to the target
+// classifier input size, writing CHW float output.
+// bbox coordinates are in pixel space (absolute, not normalized).
+__global__ void cropResizeNv12RgbKernel(
+    const uint8_t* __restrict__ y_plane,
+    const uint8_t* __restrict__ uv_plane,
+    int src_h, int src_w,
+    int crop_x0, int crop_y0, int crop_x1, int crop_y1,
+    float*  __restrict__ dst_chw,
+    int dst_h, int dst_w,
+    float mean, float scale)
+{
+    const int dst_col = blockIdx.x * blockDim.x + threadIdx.x;
+    const int dst_row = blockIdx.y * blockDim.y + threadIdx.y;
+    if (dst_col >= dst_w || dst_row >= dst_h) return;
+
+    const int crop_w = crop_x1 - crop_x0;
+    const int crop_h = crop_y1 - crop_y0;
+
+    // Map destination pixel to source pixel within the crop region
+    const float fx = crop_x0 + (dst_col + 0.5f) * (static_cast<float>(crop_w) / dst_w) - 0.5f;
+    const float fy = crop_y0 + (dst_row + 0.5f) * (static_cast<float>(crop_h) / dst_h) - 0.5f;
+
+    const int x0 = max(0, static_cast<int>(fx));
+    const int y0 = max(0, static_cast<int>(fy));
+    const int x1 = min(src_w - 1, x0 + 1);
+    const int y1 = min(src_h - 1, y0 + 1);
+
+    const float wx1 = fx - x0;
+    const float wy1 = fy - y0;
+    const float wx0 = 1.0f - wx1;
+    const float wy0 = 1.0f - wy1;
+
+    const float Y = wx0 * wy0 * y_plane[y0 * src_w + x0]
+                  + wx1 * wy0 * y_plane[y0 * src_w + x1]
+                  + wx0 * wy1 * y_plane[y1 * src_w + x0]
+                  + wx1 * wy1 * y_plane[y1 * src_w + x1];
+
+    const int uv_row0 = (y0 / 2);
+    const int uv_row1 = min(src_h / 2 - 1, uv_row0 + 1);
+    const float uv_wy1 = fy / 2.0f - uv_row0;
+    const float uv_wy0 = 1.0f - uv_wy1;
+    const int uv_col0 = (x0 / 2) * 2;
+    const int uv_col1 = min(src_w - 2, uv_col0 + 2);
+
+    const float U = wx0 * uv_wy0 * uv_plane[uv_row0 * src_w + uv_col0]
+                  + wx1 * uv_wy0 * uv_plane[uv_row0 * src_w + uv_col1]
+                  + wx0 * uv_wy1 * uv_plane[uv_row1 * src_w + uv_col0]
+                  + wx1 * uv_wy1 * uv_plane[uv_row1 * src_w + uv_col1];
+    const float V = wx0 * uv_wy0 * uv_plane[uv_row0 * src_w + uv_col0 + 1]
+                  + wx1 * uv_wy0 * uv_plane[uv_row0 * src_w + uv_col1 + 1]
+                  + wx0 * uv_wy1 * uv_plane[uv_row1 * src_w + uv_col0 + 1]
+                  + wx1 * uv_wy1 * uv_plane[uv_row1 * src_w + uv_col1 + 1];
+
+    const float Yc = Y  - 16.0f;
+    const float Cb = U  - 128.0f;
+    const float Cr = V  - 128.0f;
+
+    float R = fminf(fmaxf(1.164f * Yc + 1.596f * Cr, 0.f), 255.f);
+    float G = fminf(fmaxf(1.164f * Yc - 0.392f * Cb - 0.813f * Cr, 0.f), 255.f);
+    float B = fminf(fmaxf(1.164f * Yc + 2.017f * Cb, 0.f), 255.f);
+
+    const int pixel_idx = dst_row * dst_w + dst_col;
+    const int plane     = dst_h * dst_w;
+    dst_chw[0 * plane + pixel_idx] = (R - mean) * scale;
+    dst_chw[1 * plane + pixel_idx] = (G - mean) * scale;
+    dst_chw[2 * plane + pixel_idx] = (B - mean) * scale;
+}
+
+void cropAndResizeNV12ToCHW(
+    const uint8_t* gpu_y,
+    const uint8_t* gpu_uv,
+    int src_h, int src_w,
+    int crop_x0, int crop_y0, int crop_x1, int crop_y1,
+    float*         dst_chw,
+    int dst_h, int dst_w,
+    float mean, float scale,
+    cudaStream_t stream)
+{
+    const dim3 block(16, 16);
+    const dim3 grid(
+        (dst_w + block.x - 1) / block.x,
+        (dst_h + block.y - 1) / block.y);
+
+    cropResizeNv12RgbKernel<<<grid, block, 0, stream>>>(
+        gpu_y, gpu_uv, src_h, src_w,
+        crop_x0, crop_y0, crop_x1, crop_y1,
+        dst_chw, dst_h, dst_w,
+        mean, scale);
+
+    CUDA_CHECK(cudaGetLastError());
+}
+
 } // namespace infer::cuda
 
 #endif // BUILD_TRT_BACKEND

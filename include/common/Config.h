@@ -14,10 +14,14 @@ struct ServerConfig {
     int management_port{8080};  // HTTP management server port
 };
 
+// Model type: detector outputs bounding boxes; classifier outputs class probabilities.
+enum class ModelType { Detector, Classifier };
+
 struct ModelConfig {
     std::string id;
     YOLOVersion version{YOLOVersion::v8};
     DeviceType  backend{DeviceType::CUDA};
+    ModelType   model_type{ModelType::Detector};
 
     // TensorRT
     std::string engine_path;
@@ -32,6 +36,20 @@ struct ModelConfig {
     int         device_id{0};
     int         num_classes{80};
     std::vector<std::string> class_names;
+
+    // Phase 7a: performance
+    int buffer_pool_size{4};               // pre-allocated GPU buffer slots
+    int instance_count{1};                 // parallel InferWorker instances
+    std::vector<int> device_ids;           // per-instance device binding (falls back to device_id)
+
+    // Phase 7b: cascade pipeline (DeepStream primary/secondary GIE style)
+    std::vector<CascadeConfig> cascade;   // secondary models triggered by this model
+
+    // Phase 7b: dynamic management (Triton-style)
+    // preferred_batch_sizes: scheduler tries to fill batches to these sizes in order.
+    // If empty, falls back to batch_size (legacy behaviour).
+    std::vector<int> preferred_batch_sizes;
+    int max_queue_delay_us{10000};         // max wait before flushing partial batch (µs)
 };
 
 struct StreamConfig {

@@ -3,15 +3,14 @@
 #include "stream/StreamPool.h"
 #include "infer/BackendFactory.h"
 #include "decoder/DecoderFactory.h"
-#include "pipeline/BatchScheduler.h"
-#include "pipeline/InferWorker.h"
+#include "pipeline/ModelManager.h"
 #include "publisher/KafkaPublisher.h"
 #include "server/ManagementServer.h"
 
 #include <csignal>
 #include <atomic>
 #include <memory>
-#include <vector>
+#include <set>
 #include <stdexcept>
 
 namespace {
@@ -57,55 +56,55 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // ── Create one InferWorker + BatchScheduler per model ─────────────────────
-    struct ModelPipeline {
-        std::unique_ptr<infer::InferWorker>    worker;
-        std::unique_ptr<infer::BatchScheduler> scheduler;
-    };
+    // ── Create ModelManager (Phase 7b-2) ─────────────────────────────────────
+    // ModelManager owns all model pipelines and supports runtime load/unload/swap.
+    // Pass all model configs so ModelManager can locate secondary model configs
+    // for cascade wiring without requiring them to be loaded independently.
+    infer::ModelManager model_manager(
+        pool, *publisher,
+        [](const infer::ModelConfig& mc) { return infer::createBackend(mc); },
+        [](const infer::ModelConfig& mc) { return infer::createDecoder(mc); },
+        cfg.models);
 
-    std::vector<ModelPipeline> pipelines;
-    pipelines.reserve(cfg.models.size());
+    // Collect cascade secondary model IDs — these are created internally by
+    // their primary's startPipeline() and must not be loaded as standalone models.
+    std::set<std::string> cascade_secondary_ids;
+    for (const auto& m : cfg.models) {
+        for (const auto& cas : m.cascade) {
+            cascade_secondary_ids.insert(cas.model_id);
+        }
+    }
 
+    // Load all non-secondary models defined in config at startup
+    bool any_loaded = false;
     for (const auto& model_cfg : cfg.models) {
+        if (cascade_secondary_ids.count(model_cfg.id)) {
+            LOG_INFO("Model {} is a cascade secondary — loaded by its primary", model_cfg.id);
+            continue;
+        }
         try {
-            auto backend = infer::createBackend(model_cfg);
-            auto decoder = infer::createDecoder(model_cfg);
-
-            auto worker = std::make_unique<infer::InferWorker>(
-                model_cfg,
-                std::move(backend),
-                std::move(decoder),
-                *publisher);
-
-            infer::InferWorker* worker_ptr = worker.get();
-            auto scheduler = std::make_unique<infer::BatchScheduler>(
-                model_cfg, pool,
-                [worker_ptr](infer::Batch b) {
-                    worker_ptr->enqueue(std::move(b));
-                });
-
-            worker->start();
-            scheduler->start();
-
-            pipelines.push_back({std::move(worker), std::move(scheduler)});
-            LOG_INFO("Pipeline started for model {}", model_cfg.id);
+            model_manager.load(model_cfg);
+            any_loaded = true;
+            LOG_INFO("Pipeline started for model {} ({} instance(s))",
+                     model_cfg.id, model_cfg.instance_count);
         } catch (const std::exception& e) {
             LOG_ERROR("Failed to start pipeline for model {}: {}",
                       model_cfg.id, e.what());
         }
     }
 
-    if (pipelines.empty()) {
+    if (!any_loaded) {
         LOG_CRITICAL("No pipelines started — exiting");
         return 1;
     }
 
     // ── Start management HTTP server ──────────────────────────────────────────
-    infer::ManagementServer mgmt_server(cfg.server.management_port, pool);
+    infer::ManagementServer mgmt_server(
+        cfg.server.management_port, pool, model_manager);
     mgmt_server.start();
 
     LOG_INFO("All pipelines running. Streams: {}  Models: {}  ManagementPort: {}",
-             cfg.streams.size(), pipelines.size(), cfg.server.management_port);
+             cfg.streams.size(), cfg.models.size(), cfg.server.management_port);
 
     // ── Main wait loop ────────────────────────────────────────────────────────
     while (!g_shutdown.load()) {
@@ -116,10 +115,12 @@ int main(int argc, char* argv[]) {
     LOG_INFO("Shutting down…");
 
     mgmt_server.stop();
-    for (auto& p : pipelines) {
-        p.scheduler->stop();
-        p.worker->stop();
+
+    // Unload all models (drains queues before destroying workers)
+    for (const auto& [id, _] : model_manager.listModels()) {
+        model_manager.unload(id);
     }
+
     pool.stopAll();
     publisher->flush();
 

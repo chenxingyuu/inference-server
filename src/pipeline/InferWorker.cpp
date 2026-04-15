@@ -1,4 +1,6 @@
 #include "pipeline/InferWorker.h"
+#include "pipeline/CascadeRouter.h"
+#include "pipeline/ResultMerger.h"
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
 #include <chrono>
@@ -92,6 +94,7 @@ void InferWorker::workerLoop() {
                 InferResult r;
                 r.stream_id  = batch.metas[i].stream_id;
                 r.frame_ts   = batch.metas[i].capture_ts;
+                r.frame_seq  = batch.metas[i].frame_seq;
                 r.infer_ts   = infer_ts;
                 r.latency_ms = (infer_ts - r.frame_ts) * 1000.0;
                 r.model_id   = model_cfg_.id;
@@ -105,7 +108,20 @@ void InferWorker::workerLoop() {
                         d.class_name = model_cfg_.class_names[d.class_id];
                     }
                 }
-                publisher_.publish(std::move(r));
+
+                if (cascade_router_) {
+                    // Primary model with cascade: route to secondary and let
+                    // ResultMerger publish after secondary attributes arrive.
+                    const GpuBuffer*  gpu_frame = batch.is_gpu && i < static_cast<int>(batch.gpu_frames.size())
+                                                  ? &batch.gpu_frames[i] : nullptr;
+                    const cv::Mat*    cpu_frame = !batch.is_gpu && i < static_cast<int>(batch.frames.size())
+                                                  ? &batch.frames[i] : nullptr;
+                    cascade_router_->route(r, i, gpu_frame, cpu_frame);
+                    // Flush expired entries after each frame
+                    if (result_merger_) result_merger_->flushExpired();
+                } else {
+                    publisher_.publish(std::move(r));
+                }
             }
             processed_batches_.fetch_add(1, std::memory_order_relaxed);
         } catch (const std::exception& e) {

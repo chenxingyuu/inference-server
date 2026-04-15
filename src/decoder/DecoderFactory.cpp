@@ -3,11 +3,16 @@
 #include "decoder/YOLOv8Decoder.h"
 #include "decoder/YOLO11Decoder.h"
 #include "decoder/YOLO26Decoder.h"
+#include "decoder/ClassifierDecoder.h"
 #include <stdexcept>
 
 namespace infer {
 
 std::unique_ptr<IYOLODecoder> createDecoder(const ModelConfig& cfg) {
+    if (cfg.model_type == ModelType::Classifier) {
+        return std::make_unique<ClassifierDecoder>(cfg);
+    }
+
     switch (cfg.version) {
     case YOLOVersion::v5:
         return std::make_unique<YOLOv5Decoder>(cfg.num_classes);
