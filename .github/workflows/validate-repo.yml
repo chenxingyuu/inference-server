@@ -1,0 +1,25 @@
+name: validate-repo
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate harness gates
+        env:
+          DOCS_GATE_MODE: enforce
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
+        run: |
+          chmod +x scripts/validate-repo.sh
+          scripts/validate-repo.sh
