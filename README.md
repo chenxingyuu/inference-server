@@ -174,8 +174,8 @@ frame_archive:
     enabled: true
     endpoint: "minio:9000"
     bucket: "inference-frames"
-    access_key: "minioadmin"
-    secret_key: "minioadmin"
+    access_key: "<CHANGE_ME_ACCESS_KEY>"
+    secret_key: "<CHANGE_ME_SECRET_KEY>"
     region: "us-east-1"
     use_ssl: false
 ```
@@ -249,7 +249,7 @@ curl http://localhost:8080/models/yolov8n_trt/stats
 | `frames_archive_dropped_total` | counter | 无 | 归档队列溢出或写盘失败 |
 | `frames_uploaded_total` | counter | 无 | MinIO 上传成功数 |
 | `frames_upload_failed_total` | counter | 无 | MinIO 上传失败数 |
-| `frame_archive_queue_depth` | gauge-like counter | 无 | 当前归档队列深度 |
+| `frame_archive_queue_depth` | gauge | 无 | 当前归档队列深度 |
 
 ## 目标追踪（可选）
 

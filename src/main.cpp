@@ -7,6 +7,7 @@
 #include "publisher/KafkaPublisher.h"
 #include "server/ManagementServer.h"
 #include "archive/FrameArchiver.h"
+#include <curl/curl.h>
 
 #include <csignal>
 #include <atomic>
@@ -17,9 +18,18 @@
 namespace {
 std::atomic<bool> g_shutdown{false};
 void signalHandler(int) { g_shutdown.store(true); }
+struct CurlGlobalGuard {
+    CurlGlobalGuard() = default;
+    ~CurlGlobalGuard() { curl_global_cleanup(); }
+};
 } // namespace
 
 int main(int argc, char* argv[]) {
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
+        LOG_CRITICAL("Failed to initialize libcurl globals");
+        return 1;
+    }
+    CurlGlobalGuard curl_guard;
     const std::string config_path = (argc > 1) ? argv[1] : "/config/config.yaml";
 
     // ── Init logging ──────────────────────────────────────────────────────────
@@ -126,7 +136,6 @@ int main(int argc, char* argv[]) {
 
     pool.stopAll();
     publisher->flush();
-
     LOG_INFO("inference-server stopped");
     return 0;
 }

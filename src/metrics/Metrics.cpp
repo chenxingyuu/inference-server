@@ -164,6 +164,18 @@ std::string Metrics::serializeSimpleCounter(
     return oss.str();
 }
 
+std::string Metrics::serializeSimpleGauge(
+    const std::string& name,
+    const std::string& help,
+    uint64_t value)
+{
+    std::ostringstream oss;
+    oss << "# HELP " << name << " " << help << "\n";
+    oss << "# TYPE " << name << " gauge\n";
+    oss << name << " " << value << "\n";
+    return oss.str();
+}
+
 std::string Metrics::serializeHistogram(
     const std::string& name,
     const std::string& help,
@@ -235,7 +247,7 @@ std::string Metrics::serialize() const {
     out << serializeSimpleCounter("frames_upload_failed_total",
         "Total frame upload failures",
         frames_upload_failed_.load(std::memory_order_relaxed));
-    out << serializeSimpleCounter("frame_archive_queue_depth",
+    out << serializeSimpleGauge("frame_archive_queue_depth",
         "Current pending frame archive queue depth",
         frame_archive_queue_depth_.load(std::memory_order_relaxed));
     {

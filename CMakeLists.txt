@@ -40,7 +40,7 @@ find_package(spdlog REQUIRED)
 find_package(Boost 1.71 REQUIRED)
 
 # OpenCV
-find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc)
+find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc imgcodecs)
 
 # librdkafka
 pkg_check_modules(RDKAFKA REQUIRED rdkafka)

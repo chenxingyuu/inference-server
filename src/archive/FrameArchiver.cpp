@@ -39,14 +39,15 @@ std::string FrameArchiver::buildLocalPath(const StreamMeta& meta) const {
 
 bool FrameArchiver::enqueue(ArchiveTask task) {
     std::unique_lock<std::mutex> lock(mu_);
-    if (static_cast<int>(queue_.size()) >= cfg_.queue_capacity) {
+    if (queue_.size() >= static_cast<std::size_t>(cfg_.queue_capacity)) {
         Metrics::get().incFramesArchiveDropped();
         return false;
     }
     queue_.push(std::move(task));
+    const uint64_t depth = static_cast<uint64_t>(queue_.size());
     lock.unlock();
     cv_.notify_one();
-    Metrics::get().setFrameArchiveQueueDepth(static_cast<uint64_t>(queue_.size()));
+    Metrics::get().setFrameArchiveQueueDepth(depth);
     return true;
 }
 
@@ -61,16 +62,17 @@ FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* 
         return out;
     }
 
-    out.local_path = buildLocalPath(meta);
+    const std::string object_key = buildObjectKey(meta);
+    out.local_path = fs::path(cfg_.local_dir).append(object_key).string();
     out.upload_state = cfg_.minio.enabled ? "pending" : "disabled";
     if (cfg_.minio.enabled) {
         const std::string scheme = cfg_.minio.use_ssl ? "https://" : "http://";
-        out.frame_url = scheme + cfg_.minio.endpoint + "/" + cfg_.minio.bucket + "/" + buildObjectKey(meta);
+        out.frame_url = scheme + cfg_.minio.endpoint + "/" + cfg_.minio.bucket + "/" + object_key;
     }
 
     ArchiveTask task;
     task.local_path = out.local_path;
-    task.object_key = buildObjectKey(meta);
+    task.object_key = object_key;
     task.frame = frame->clone();
     if (!enqueue(std::move(task))) {
         out.upload_state = "failed";
@@ -79,7 +81,7 @@ FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* 
 }
 
 void FrameArchiver::workerLoop() {
-    while (!stop_.load()) {
+    while (!stop_.load() || !queue_.empty()) {
         ArchiveTask task;
         {
             std::unique_lock<std::mutex> lock(mu_);
@@ -131,8 +133,8 @@ bool FrameArchiver::uploadToMinio(const std::string& local_path, const std::stri
         curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
         curl_easy_setopt(curl, CURLOPT_AWS_SIGV4, ("aws:amz:" + cfg_.minio.region + ":s3").c_str());
         curl_easy_setopt(curl, CURLOPT_USERPWD, auth.c_str());
-        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, cfg_.minio.connect_timeout_ms);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, cfg_.minio.request_timeout_ms);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(cfg_.minio.connect_timeout_ms));
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(cfg_.minio.request_timeout_ms));
         curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(file_size));
         curl_easy_setopt(curl, CURLOPT_READFUNCTION, +[](char* buffer, size_t size, size_t nitems, void* userdata) -> size_t {
             auto* in = static_cast<std::ifstream*>(userdata);

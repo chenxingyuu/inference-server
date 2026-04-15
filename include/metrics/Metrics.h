@@ -107,6 +107,10 @@ private:
         const std::string& name,
         const std::string& help,
         uint64_t value);
+    static std::string serializeSimpleGauge(
+        const std::string& name,
+        const std::string& help,
+        uint64_t value);
 
     static std::string serializeHistogram(
         const std::string& name,
