@@ -12,6 +12,11 @@
 .env.local
 .env.development.local
 .env.test.local
+.cache
+
+*.log
+
+models
 
 build
 cmake-build-debug
