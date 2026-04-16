@@ -306,8 +306,9 @@ inference-server/
 │   ├── publisher/    Kafka 与属性发布
 │   ├── metrics/      指标导出
 │   ├── server/       HTTP 管理接口
+│   ├── archive/      帧归档与 MinIO 上传
 │   └── cuda/         CUDA 预处理头文件
-├── src/              对应实现（含 src/cuda/CudaPreprocess.cu）
+├── src/              对应实现
 ├── config/           服务、Prometheus、Grafana 配置
 ├── docker/           Dockerfile 与 docker-compose
 ├── cmake/            CMake 模块
