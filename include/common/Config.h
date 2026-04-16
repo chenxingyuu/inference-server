@@ -18,6 +18,14 @@ struct ServerConfig {
 enum class ModelType { Detector, Classifier };
 enum class TrackerType { None, ByteTrack, DeepSort };
 
+struct ByteTrackConfig {
+    float high_det_thresh{0.5f};
+    float low_det_thresh{0.1f};
+    float match_iou_thresh{0.3f};
+    int   min_hits_to_confirm{2};
+    int   max_lost_frames{30};
+};
+
 struct ModelConfig {
     std::string id;
     YOLOVersion version{YOLOVersion::v8};
@@ -66,6 +74,7 @@ struct StreamConfig {
     int         max_reconnect_attempts{5};       // Phase 10: consecutive failures before DEGRADED
     bool        use_hwdec{false};  // true → NVDEC hardware decode
     TrackerType tracker{TrackerType::None};
+    ByteTrackConfig byte_track{};
 };
 
 struct KafkaConfig {
@@ -125,5 +134,7 @@ DeviceType parseDeviceType(const std::string& s);
 
 // Convert string → TrackerType
 TrackerType parseTrackerType(const std::string& s);
+// Validate stream-scoped ByteTrack config. Throws std::runtime_error on invalid values.
+void validateByteTrackConfig(const ByteTrackConfig& cfg);
 
 } // namespace infer

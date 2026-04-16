@@ -141,6 +141,17 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_TRUE(cfg.streams[1].use_hwdec);
     EXPECT_EQ(cfg.streams[0].tracker, TrackerType::ByteTrack);
     EXPECT_EQ(cfg.streams[1].tracker, TrackerType::None);
+    EXPECT_FLOAT_EQ(cfg.streams[0].byte_track.high_det_thresh, 0.6f);
+    EXPECT_FLOAT_EQ(cfg.streams[0].byte_track.low_det_thresh, 0.2f);
+    EXPECT_FLOAT_EQ(cfg.streams[0].byte_track.match_iou_thresh, 0.35f);
+    EXPECT_EQ(cfg.streams[0].byte_track.min_hits_to_confirm, 3);
+    EXPECT_EQ(cfg.streams[0].byte_track.max_lost_frames, 45);
+    // Defaults should still apply when tracker params are omitted.
+    EXPECT_FLOAT_EQ(cfg.streams[1].byte_track.high_det_thresh, 0.5f);
+    EXPECT_FLOAT_EQ(cfg.streams[1].byte_track.low_det_thresh, 0.1f);
+    EXPECT_FLOAT_EQ(cfg.streams[1].byte_track.match_iou_thresh, 0.3f);
+    EXPECT_EQ(cfg.streams[1].byte_track.min_hits_to_confirm, 2);
+    EXPECT_EQ(cfg.streams[1].byte_track.max_lost_frames, 30);
 
     // kafka
     EXPECT_EQ(cfg.kafka.brokers, "localhost:9092");
@@ -183,6 +194,29 @@ TEST(LoadConfig, InvalidTrackerThrows) {
         out << "    url: rtsp://localhost/test\n";
         out << "    model_id: m1\n";
         out << "    tracker: bad_tracker\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, InvalidByteTrackParamsThrow) {
+    const std::string path = "data/test_invalid_bytetrack_params.yaml";
+    {
+        std::ofstream out(path);
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "streams:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "    model_id: m1\n";
+        out << "    tracker: bytetrack\n";
+        out << "    tracker_params:\n";
+        out << "      bytetrack:\n";
+        out << "        high_det_thresh: 0.1\n";
+        out << "        low_det_thresh: 0.2\n";
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());

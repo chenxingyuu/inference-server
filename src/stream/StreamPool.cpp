@@ -31,6 +31,7 @@ void StreamPool::addStream(const StreamConfig& cfg) {
     entry.decoder  = std::make_unique<FFmpegDecoder>();
     entry.model_id = cfg.model_id;
     entry.tracker  = cfg.tracker;
+    entry.byte_track = cfg.byte_track;
 
     // Capture raw pointer before the lock is released
     FrameBuffer* buf = entry.buffer.get();
@@ -88,6 +89,13 @@ TrackerType StreamPool::getStreamTrackerType(const std::string& stream_id) const
     auto it = streams_.find(stream_id);
     if (it == streams_.end()) return TrackerType::None;
     return it->second.tracker;
+}
+
+ByteTrackConfig StreamPool::getStreamByteTrackConfig(const std::string& stream_id) const {
+    std::shared_lock lock(mutex_);
+    auto it = streams_.find(stream_id);
+    if (it == streams_.end()) return ByteTrackConfig{};
+    return it->second.byte_track;
 }
 
 } // namespace infer

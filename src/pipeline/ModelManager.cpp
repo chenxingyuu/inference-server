@@ -143,7 +143,8 @@ void ModelManager::startPipeline(ModelEntry& entry) {
         decoder_factory_,
         frame_archiver_,
         entry.tracker_manager,
-        [this](const std::string& stream_id) { return pool_.getStreamTrackerType(stream_id); });
+        [this](const std::string& stream_id) { return pool_.getStreamTrackerType(stream_id); },
+        [this](const std::string& stream_id) { return pool_.getStreamByteTrackConfig(stream_id); });
 
     // Wire cascade if this is a primary model with secondary classifiers
     if (!entry.cfg.cascade.empty()) {
@@ -174,7 +175,8 @@ void ModelManager::startPipeline(ModelEntry& entry) {
                 decoder_factory_,
                 frame_archiver_,
                 nullptr,
-                [](const std::string&) { return TrackerType::None; });
+                [](const std::string&) { return TrackerType::None; },
+                [](const std::string&) { return ByteTrackConfig{}; });
             sec_map[cas.model_id] = sec_group.get();
             entry.secondary_groups.push_back(std::move(sec_group));
         }

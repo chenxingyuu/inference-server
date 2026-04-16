@@ -159,6 +159,12 @@ curl http://localhost:8080/models/yolov8n_trt/stats
 - 在 `streams[].tracker` 配置追踪方式：`none`（默认）/ `bytetrack` / `deepsort`。
 - `bytetrack` 已实现，会在 Kafka 输出 `detections[].track_id` 可选字段。
 - `deepsort` 当前为占位配置，运行时会输出未实现提示并跳过追踪。
+- `bytetrack` 支持 stream 级参数（可选，未配置时使用默认值）：
+  - `streams[].tracker_params.bytetrack.high_det_thresh`（默认 `0.5`）
+  - `streams[].tracker_params.bytetrack.low_det_thresh`（默认 `0.1`）
+  - `streams[].tracker_params.bytetrack.match_iou_thresh`（默认 `0.3`）
+  - `streams[].tracker_params.bytetrack.min_hits_to_confirm`（默认 `2`）
+  - `streams[].tracker_params.bytetrack.max_lost_frames`（默认 `30`）
 
 ## Ascend 模型转换
 

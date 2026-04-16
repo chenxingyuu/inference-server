@@ -20,7 +20,8 @@ InferWorker::InferWorker(const ModelConfig&            model_cfg,
                           IPublisher&                    publisher,
                           std::shared_ptr<FrameArchiver> frame_archiver,
                           std::shared_ptr<TrackerManager> tracker_manager,
-                          std::function<TrackerType(const std::string&)> tracker_type_resolver)
+                          std::function<TrackerType(const std::string&)> tracker_type_resolver,
+                          std::function<ByteTrackConfig(const std::string&)> bytetrack_config_resolver)
     : model_cfg_(model_cfg)
     , backend_(std::move(backend))
     , decoder_(std::move(decoder))
@@ -28,6 +29,7 @@ InferWorker::InferWorker(const ModelConfig&            model_cfg,
     , frame_archiver_(std::move(frame_archiver))
     , tracker_manager_(std::move(tracker_manager))
     , tracker_type_resolver_(std::move(tracker_type_resolver))
+    , bytetrack_config_resolver_(std::move(bytetrack_config_resolver))
 {}
 
 InferWorker::~InferWorker() {
@@ -133,7 +135,10 @@ void InferWorker::workerLoop() {
 
                 if (tracker_manager_ && tracker_type_resolver_) {
                     const TrackerType tracker_type = tracker_type_resolver_(r.stream_id);
-                    tracker_manager_->apply(r.stream_id, tracker_type, r.frame_seq, r.detections);
+                    const ByteTrackConfig bt_cfg = bytetrack_config_resolver_
+                        ? bytetrack_config_resolver_(r.stream_id)
+                        : ByteTrackConfig{};
+                    tracker_manager_->apply(r.stream_id, tracker_type, bt_cfg, r.frame_seq, r.detections);
                 }
 
                 if (cascade_router_) {

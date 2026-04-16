@@ -40,6 +40,8 @@ public:
 
     // Returns tracker type assigned to the given stream, or TrackerType::None if not found.
     TrackerType getStreamTrackerType(const std::string& stream_id) const;
+    // Returns ByteTrack config assigned to the given stream, or defaults if not found.
+    ByteTrackConfig getStreamByteTrackConfig(const std::string& stream_id) const;
 
     int maxStreams() const noexcept { return max_streams_; }
 
@@ -49,6 +51,7 @@ private:
         std::unique_ptr<FrameBuffer>   buffer;
         std::string                    model_id;
         TrackerType                    tracker{TrackerType::None};
+        ByteTrackConfig                byte_track{};
     };
 
     int max_streams_;

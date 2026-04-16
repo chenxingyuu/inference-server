@@ -83,6 +83,13 @@ streams:
     max_reconnect_attempts: 5     # Phase 10: consecutive failures before DEGRADED
     use_hwdec: true
     tracker: "bytetrack"
+    tracker_params:
+      bytetrack:
+        high_det_thresh: 0.5
+        low_det_thresh: 0.1
+        match_iou_thresh: 0.3
+        min_hits_to_confirm: 2
+        max_lost_frames: 30
 
   - id: "cam_002"
     url: "rtsp://192.168.1.101/stream1"

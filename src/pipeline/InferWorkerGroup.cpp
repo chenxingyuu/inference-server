@@ -9,7 +9,8 @@ InferWorkerGroup::InferWorkerGroup(const ModelConfig&  model_cfg,
                                    DecoderFactory      decoder_factory,
                                    std::shared_ptr<FrameArchiver> frame_archiver,
                                    std::shared_ptr<TrackerManager> tracker_manager,
-                                   std::function<TrackerType(const std::string&)> tracker_type_resolver) {
+                                   std::function<TrackerType(const std::string&)> tracker_type_resolver,
+                                   std::function<ByteTrackConfig(const std::string&)> bytetrack_config_resolver) {
     const int count = std::max(1, model_cfg.instance_count);
 
     workers_.reserve(count);
@@ -31,7 +32,8 @@ InferWorkerGroup::InferWorkerGroup(const ModelConfig&  model_cfg,
             publisher,
             frame_archiver,
             tracker_manager,
-            tracker_type_resolver));
+            tracker_type_resolver,
+            bytetrack_config_resolver));
 
         LOG_INFO("InferWorkerGroup [{}]: instance {} → device {}",
                  model_cfg.id, i, instance_cfg.device_id);

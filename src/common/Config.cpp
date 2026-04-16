@@ -27,6 +27,27 @@ TrackerType parseTrackerType(const std::string& s) {
     throw std::runtime_error("Unknown tracker type: " + s);
 }
 
+void validateByteTrackConfig(const ByteTrackConfig& cfg) {
+    if (cfg.low_det_thresh < 0.0f || cfg.low_det_thresh > 1.0f) {
+        throw std::runtime_error("bytetrack.low_det_thresh must be in [0, 1]");
+    }
+    if (cfg.high_det_thresh < 0.0f || cfg.high_det_thresh > 1.0f) {
+        throw std::runtime_error("bytetrack.high_det_thresh must be in [0, 1]");
+    }
+    if (cfg.low_det_thresh > cfg.high_det_thresh) {
+        throw std::runtime_error("bytetrack.low_det_thresh must be <= high_det_thresh");
+    }
+    if (cfg.match_iou_thresh < 0.0f || cfg.match_iou_thresh > 1.0f) {
+        throw std::runtime_error("bytetrack.match_iou_thresh must be in [0, 1]");
+    }
+    if (cfg.min_hits_to_confirm < 1) {
+        throw std::runtime_error("bytetrack.min_hits_to_confirm must be >= 1");
+    }
+    if (cfg.max_lost_frames < 1) {
+        throw std::runtime_error("bytetrack.max_lost_frames must be >= 1");
+    }
+}
+
 const ModelConfig* AppConfig::findModel(const std::string& id) const {
     for (const auto& m : models)
         if (m.id == id) return &m;
@@ -135,6 +156,18 @@ AppConfig loadConfig(const std::string& yaml_path) {
         s.max_reconnect_attempts = sn["max_reconnect_attempts"].as<int>(5);
         s.use_hwdec              = sn["use_hwdec"].as<bool>(false);
         s.tracker                = parseTrackerType(sn["tracker"].as<std::string>("none"));
+        if (auto tp = sn["tracker_params"]) {
+            if (auto bt = tp["bytetrack"]) {
+                s.byte_track.high_det_thresh = bt["high_det_thresh"].as<float>(s.byte_track.high_det_thresh);
+                s.byte_track.low_det_thresh = bt["low_det_thresh"].as<float>(s.byte_track.low_det_thresh);
+                s.byte_track.match_iou_thresh = bt["match_iou_thresh"].as<float>(s.byte_track.match_iou_thresh);
+                s.byte_track.min_hits_to_confirm = bt["min_hits_to_confirm"].as<int>(s.byte_track.min_hits_to_confirm);
+                s.byte_track.max_lost_frames = bt["max_lost_frames"].as<int>(s.byte_track.max_lost_frames);
+            }
+        }
+        if (s.tracker == TrackerType::ByteTrack) {
+            validateByteTrackConfig(s.byte_track);
+        }
         cfg.streams.push_back(std::move(s));
     }
 

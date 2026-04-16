@@ -35,7 +35,8 @@ public:
                      DecoderFactory      decoder_factory,
                      std::shared_ptr<FrameArchiver> frame_archiver,
                      std::shared_ptr<TrackerManager> tracker_manager,
-                     std::function<TrackerType(const std::string&)> tracker_type_resolver);
+                     std::function<TrackerType(const std::string&)> tracker_type_resolver,
+                     std::function<ByteTrackConfig(const std::string&)> bytetrack_config_resolver);
     ~InferWorkerGroup() = default;
 
     void start();

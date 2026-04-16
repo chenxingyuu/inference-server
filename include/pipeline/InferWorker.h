@@ -28,7 +28,8 @@ public:
                 IPublisher&                    publisher,
                 std::shared_ptr<FrameArchiver> frame_archiver,
                 std::shared_ptr<TrackerManager> tracker_manager,
-                std::function<TrackerType(const std::string&)> tracker_type_resolver);
+                std::function<TrackerType(const std::string&)> tracker_type_resolver,
+                std::function<ByteTrackConfig(const std::string&)> bytetrack_config_resolver);
     ~InferWorker();
 
     void start();
@@ -59,6 +60,7 @@ private:
     std::shared_ptr<FrameArchiver> frame_archiver_;
     std::shared_ptr<TrackerManager> tracker_manager_;
     std::function<TrackerType(const std::string&)> tracker_type_resolver_;
+    std::function<ByteTrackConfig(const std::string&)> bytetrack_config_resolver_;
 
     std::queue<Batch>       queue_;
     std::mutex              mutex_;

@@ -205,8 +205,21 @@ void ManagementServer::registerHandlers() {
             sc.model_id          = body.at("model_id").get<std::string>();
             sc.sample_fps        = body.value("sample_fps", 5);
             sc.reconnect_delay_ms = body.value("reconnect_delay_ms", 3000);
+            sc.max_reconnect_delay_ms = body.value("max_reconnect_delay_ms", 60000);
+            sc.max_reconnect_attempts = body.value("max_reconnect_attempts", 5);
             sc.use_hwdec         = body.value("use_hwdec", false);
             sc.tracker           = parseTrackerType(body.value("tracker", std::string("none")));
+            if (body.contains("tracker_params") && body["tracker_params"].contains("bytetrack")) {
+                const auto& bt = body["tracker_params"]["bytetrack"];
+                sc.byte_track.high_det_thresh = bt.value("high_det_thresh", sc.byte_track.high_det_thresh);
+                sc.byte_track.low_det_thresh = bt.value("low_det_thresh", sc.byte_track.low_det_thresh);
+                sc.byte_track.match_iou_thresh = bt.value("match_iou_thresh", sc.byte_track.match_iou_thresh);
+                sc.byte_track.min_hits_to_confirm = bt.value("min_hits_to_confirm", sc.byte_track.min_hits_to_confirm);
+                sc.byte_track.max_lost_frames = bt.value("max_lost_frames", sc.byte_track.max_lost_frames);
+            }
+            if (sc.tracker == TrackerType::ByteTrack) {
+                validateByteTrackConfig(sc.byte_track);
+            }
 
             pool_.addStream(sc);
             LOG_INFO("ManagementServer: added stream {}", sc.id);

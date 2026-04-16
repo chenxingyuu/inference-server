@@ -222,3 +222,25 @@
 **关键决策**：
 - MPS 不提供 Docker 镜像（macOS 容器无法访问 Metal GPU）
 - 预处理与 `AscendBackend` 一致，现有 decoder 零改动
+
+---
+
+## Phase 12 — ByteTrack V2（stream 级参数化）
+
+**目标**：将简化版 IoU 贪心追踪升级为更稳定的 ByteTrack V2 风格实现，并支持按 `streams[]` 单独配置追踪阈值与生命周期参数。
+
+**新增**：
+- `ByteTrackConfig`：新增 stream 级追踪参数（阈值、确认门槛、丢失清理）
+- 配置接入：YAML 与 `POST /streams` 均支持 `tracker_params.bytetrack.*`
+- 追踪内核：两阶段关联 + 线性分配 + `Tracked/Lost/Removed` 状态机
+- 运行时更新：`TrackerManager` 检测 stream 参数变化后重建 tracker
+
+**关键决策**：
+- `min_hits_to_confirm` 生效后仅确认轨迹输出 `track_id`（默认 `2`）
+- 统一使用 `validateByteTrackConfig()` 做配置校验，保持 YAML/REST 行为一致
+- 修复速度预测更新振荡问题，提升多帧稳定性
+
+**测试与验证**：
+- 配置测试覆盖默认值、显式值、非法参数
+- 追踪测试覆盖确认门槛、全局匹配与配置热更新
+- `ctest --output-on-failure -R "(config|tracker)"`、`scripts/validate-repo.sh` 均通过

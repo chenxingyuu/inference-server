@@ -40,6 +40,13 @@ streams:
     reconnect_delay_ms: 1000
     use_hwdec: false
     tracker: bytetrack
+    tracker_params:
+      bytetrack:
+        high_det_thresh: 0.6
+        low_det_thresh: 0.2
+        match_iou_thresh: 0.35
+        min_hits_to_confirm: 3
+        max_lost_frames: 45
 
   - id: cam_02
     url: rtsp://localhost/cam2
