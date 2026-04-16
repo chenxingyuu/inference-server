@@ -32,29 +32,64 @@ models:
     input_size: [224, 224]
     class_names: [sedan, suv, truck, bus, van]
 
-streams:
+sources:
   - id: cam_01
     url: rtsp://localhost/cam1
-    model_id: yolo_det
     sample_fps: 10
     reconnect_delay_ms: 1000
     use_hwdec: false
-    tracker: bytetrack
-    tracker_params:
-      bytetrack:
-        high_det_thresh: 0.6
-        low_det_thresh: 0.2
-        match_iou_thresh: 0.35
-        min_hits_to_confirm: 3
-        max_lost_frames: 45
-
   - id: cam_02
     url: rtsp://localhost/cam2
-    model_id: yolo_det
     sample_fps: 5
     reconnect_delay_ms: 2000
     use_hwdec: true
-    tracker: none
+
+pipelines:
+  - id: pipe_01
+    source_id: cam_01
+    nodes:
+      - id: cam_01
+        type: source.rtsp
+      - id: decode_1
+        type: decode.ffmpeg
+      - id: archive_1
+        type: archive.raw
+      - id: pre_1
+        type: preprocess.yolo
+      - id: infer_1
+        type: infer.engine
+        with:
+          model_id: yolo_det
+      - id: post_1
+        type: postprocess.yolo
+      - id: track_1
+        type: track.bytetrack
+      - id: join_1
+        type: join.byFrameId
+      - id: sink_1
+        type: sink.kafka
+    edges:
+      - from: cam_01
+        to: decode_1
+      - from: decode_1
+        to: archive_1
+        queue:
+          capacity: 128
+          drop_policy: drop_oldest
+      - from: decode_1
+        to: pre_1
+      - from: pre_1
+        to: infer_1
+      - from: infer_1
+        to: post_1
+      - from: post_1
+        to: track_1
+      - from: track_1
+        to: join_1
+      - from: archive_1
+        to: join_1
+      - from: join_1
+        to: sink_1
 
 kafka:
   brokers: localhost:9092

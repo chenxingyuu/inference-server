@@ -63,10 +63,9 @@ protected:
         ModelConfig m1; m1.id = "det_01";
         ModelConfig m2; m2.id = "cls_01";
         cfg.models = {m1, m2};
-
-        StreamConfig s1; s1.id = "cam_01";
-        StreamConfig s2; s2.id = "cam_02";
-        cfg.streams = {s1, s2};
+        PipelineSourceConfig s1; s1.id = "cam_01";
+        PipelineSourceConfig s2; s2.id = "cam_02";
+        cfg.sources = {s1, s2};
     }
     AppConfig cfg;
 };
@@ -82,13 +81,13 @@ TEST_F(AppConfigFindTest, FindMissingModelReturnsNull) {
 }
 
 TEST_F(AppConfigFindTest, FindExistingStream) {
-    const StreamConfig* s = cfg.findStream("cam_02");
+    const PipelineSourceConfig* s = cfg.findSource("cam_02");
     ASSERT_NE(s, nullptr);
     EXPECT_EQ(s->id, "cam_02");
 }
 
 TEST_F(AppConfigFindTest, FindMissingStreamReturnsNull) {
-    EXPECT_EQ(cfg.findStream("cam_99"), nullptr);
+    EXPECT_EQ(cfg.findSource("cam_99"), nullptr);
 }
 
 // ── loadConfig from YAML ──────────────────────────────────────────────────
@@ -132,26 +131,21 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cls.id,         "classifier_01");
     EXPECT_EQ(cls.model_type, ModelType::Classifier);
 
-    // streams
-    ASSERT_EQ(cfg.streams.size(), 2u);
-    EXPECT_EQ(cfg.streams[0].id,        "cam_01");
-    EXPECT_EQ(cfg.streams[0].model_id,  "yolo_det");
-    EXPECT_EQ(cfg.streams[0].sample_fps, 10);
-    EXPECT_FALSE(cfg.streams[0].use_hwdec);
-    EXPECT_TRUE(cfg.streams[1].use_hwdec);
-    EXPECT_EQ(cfg.streams[0].tracker, TrackerType::ByteTrack);
-    EXPECT_EQ(cfg.streams[1].tracker, TrackerType::None);
-    EXPECT_FLOAT_EQ(cfg.streams[0].byte_track.high_det_thresh, 0.6f);
-    EXPECT_FLOAT_EQ(cfg.streams[0].byte_track.low_det_thresh, 0.2f);
-    EXPECT_FLOAT_EQ(cfg.streams[0].byte_track.match_iou_thresh, 0.35f);
-    EXPECT_EQ(cfg.streams[0].byte_track.min_hits_to_confirm, 3);
-    EXPECT_EQ(cfg.streams[0].byte_track.max_lost_frames, 45);
-    // Defaults should still apply when tracker params are omitted.
-    EXPECT_FLOAT_EQ(cfg.streams[1].byte_track.high_det_thresh, 0.5f);
-    EXPECT_FLOAT_EQ(cfg.streams[1].byte_track.low_det_thresh, 0.1f);
-    EXPECT_FLOAT_EQ(cfg.streams[1].byte_track.match_iou_thresh, 0.3f);
-    EXPECT_EQ(cfg.streams[1].byte_track.min_hits_to_confirm, 2);
-    EXPECT_EQ(cfg.streams[1].byte_track.max_lost_frames, 30);
+    // sources
+    ASSERT_EQ(cfg.sources.size(), 2u);
+    EXPECT_EQ(cfg.sources[0].id, "cam_01");
+    EXPECT_EQ(cfg.sources[0].sample_fps, 10);
+    EXPECT_FALSE(cfg.sources[0].use_hwdec);
+    EXPECT_TRUE(cfg.sources[1].use_hwdec);
+
+    // pipelines
+    ASSERT_EQ(cfg.pipelines.size(), 1u);
+    EXPECT_EQ(cfg.pipelines[0].id, "pipe_01");
+    EXPECT_EQ(cfg.pipelines[0].source_id, "cam_01");
+    ASSERT_EQ(cfg.pipelines[0].nodes.size(), 9u);
+    ASSERT_EQ(cfg.pipelines[0].edges.size(), 9u);
+    EXPECT_EQ(cfg.pipelines[0].nodes[4].type, "infer.engine");
+    EXPECT_EQ(cfg.pipelines[0].nodes[4].with.at("model_id"), "yolo_det");
 
     // kafka
     EXPECT_EQ(cfg.kafka.brokers, "localhost:9092");
@@ -180,43 +174,61 @@ TEST(LoadConfig, MissingFileThrows) {
     EXPECT_THROW(loadConfig("nonexistent.yaml"), std::runtime_error);
 }
 
-TEST(LoadConfig, InvalidTrackerThrows) {
+TEST(LoadConfig, InvalidEdgePolicyThrows) {
     const std::string path = "data/test_invalid_tracker.yaml";
     {
         std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
         out << "models:\n";
         out << "  - id: m1\n";
         out << "    version: yolov8\n";
         out << "    backend: tensorrt\n";
         out << "    input_size: [640, 640]\n";
-        out << "streams:\n";
-        out << "  - id: cam_1\n";
-        out << "    url: rtsp://localhost/test\n";
-        out << "    model_id: m1\n";
-        out << "    tracker: bad_tracker\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    source_id: cam_1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "        queue:\n";
+        out << "          drop_policy: bad_policy\n";
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());
 }
 
-TEST(LoadConfig, InvalidByteTrackParamsThrow) {
+TEST(LoadConfig, InvalidPipelineGraphThrows) {
     const std::string path = "data/test_invalid_bytetrack_params.yaml";
     {
         std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
         out << "models:\n";
         out << "  - id: m1\n";
         out << "    version: yolov8\n";
         out << "    backend: tensorrt\n";
         out << "    input_size: [640, 640]\n";
-        out << "streams:\n";
-        out << "  - id: cam_1\n";
-        out << "    url: rtsp://localhost/test\n";
-        out << "    model_id: m1\n";
-        out << "    tracker: bytetrack\n";
-        out << "    tracker_params:\n";
-        out << "      bytetrack:\n";
-        out << "        high_det_thresh: 0.1\n";
-        out << "        low_det_thresh: 0.2\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    source_id: cam_1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: stage_2\n";
+        out << "        type: decode.ffmpeg\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: stage_2\n";
+        out << "      - from: stage_2\n";
+        out << "        to: cam_1\n";
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());

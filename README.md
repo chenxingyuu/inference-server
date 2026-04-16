@@ -13,21 +13,19 @@
 ## 架构概览
 
 ```text
-RTSP -> FFmpegDecoder(可选HW解码) -> FrameBuffer
-     -> BatchScheduler(按 model_id 聚合)
-     -> InferWorkerGroup
-        -> TRTBackend / AscendBackend
-     -> YOLO/Classifier Decoder
-     -> (可选) CascadeRouter + ResultMerger
-     -> KafkaPublisher / AttributePublisher
-     -> ManagementServer (/healthz /metrics /streams /models)
+RTSP(source) -> decode.ffmpeg -> (fan-out)
+            -> archive.raw (可选)
+            -> preprocess.yolo -> infer.engine -> postprocess.yolo
+            -> track.bytetrack (可选)
+            -> join.byFrameId (可选)
+            -> sink.kafka
+            -> ManagementServer (/healthz /metrics /pipelines)
 ```
 
 运行时关键点：
 
-- 流管理与模型管理解耦：流可热增删，模型可热加载/热替换。
-- `ModelManager` 统一维护模型状态（`unloaded/loading/ready/draining/unloading`）。
-- 支持 detector -> classifier 级联，二级模型由主模型内部托管，不挂到 `streams.model_id`。
+- Pipeline 可编排（DAG）：用 `sources + pipelines(nodes/edges)` 声明拓扑，支持分支并行与汇合。
+- 模型配置仍集中在 `models`，由 `infer.engine` stage 引用（`with.model_id`）。
 
 ## 依赖
 
@@ -99,43 +97,36 @@ curl http://localhost:8080/healthz
 curl http://localhost:8080/metrics
 ```
 
-### 流管理
+### Pipeline 管理
 
 ```bash
-# 列出流
-curl http://localhost:8080/streams
+# 列出 pipeline 与状态
+curl http://localhost:8080/pipelines
 
-# 添加流
-curl -X POST http://localhost:8080/streams \
-  -H "Content-Type: application/json" \
-  -d '{"id":"cam_003","url":"rtsp://...","model_id":"yolov8n_trt","tracker":"bytetrack"}'
-
-# 删除流
-curl -X DELETE http://localhost:8080/streams/cam_003
+# 启动 / 停止某条 pipeline
+curl -X POST http://localhost:8080/pipelines/cam_001_pipeline/start
+curl -X POST http://localhost:8080/pipelines/cam_001_pipeline/stop
 ```
 
-### 模型管理
+## Pipeline 配置（新格式）
 
-```bash
-# 列出模型与状态
-curl http://localhost:8080/models
+配置文件以 `sources` 描述输入源，以 `pipelines` 描述可编排 DAG（nodes/edges）。
+示例见 `config/config.cpu.yaml` / `config/config.gpu.yaml` / `config/config.yaml`。
 
-# 加载模型
-curl -X POST http://localhost:8080/models \
-  -H "Content-Type: application/json" \
-  -d '{"id":"yolov8n_trt","backend":"tensorrt","version":"yolov8","engine_path":"/models/yolov8n_b16.engine","batch_size":16}'
+常见 stage（首批）：
+- `source.rtsp`：RTSP/文件输入（内部使用 `FFmpegDecoder`）
+- `decode.ffmpeg`：解码阶段（当前为占位 passthrough，解码由 source 完成）
+- `archive.raw`：原图归档（复用 `FrameArchiver`）
+- `preprocess.yolo` / `postprocess.yolo`：占位 passthrough（后续可落地真实算子）
+- `infer.engine`：推理 stage（引用 `models[].id`）
+- `track.bytetrack`：ByteTrack 追踪
+- `join.byFrameId`：归档信息回填到推理结果（按 frame id join）
+- `sink.kafka`：Kafka 输出
 
-# 热替换模型
-curl -X PUT http://localhost:8080/models/yolov8n_trt \
-  -H "Content-Type: application/json" \
-  -d '{"backend":"tensorrt","version":"yolov8","engine_path":"/models/yolov8n_b16_v2.engine","batch_size":16}'
+### ONNX Runtime（CPU/MPS）注意事项
 
-# 卸载模型
-curl -X DELETE http://localhost:8080/models/yolov8n_trt
-
-# 查询模型统计
-curl http://localhost:8080/models/yolov8n_trt/stats
-```
+当前 `OnnxBackend` 默认 **按 batch=1 运行**（一些 ORT 版本在输入 shape 自省上可能不稳定；且多数导出的 YOLO ONNX 为静态 batch=1）。
+如果需要 batch>1，请导出支持 batching 的 ONNX 并在后端能力就绪后放开该限制。
 
 ## 核心指标
 
@@ -156,15 +147,10 @@ curl http://localhost:8080/models/yolov8n_trt/stats
 
 ## 目标追踪（可选）
 
-- 在 `streams[].tracker` 配置追踪方式：`none`（默认）/ `bytetrack` / `deepsort`。
+- 在 pipeline 中通过 `track.bytetrack` stage 启用追踪；`deepsort` 仍为占位。
 - `bytetrack` 已实现，会在 Kafka 输出 `detections[].track_id` 可选字段。
 - `deepsort` 当前为占位配置，运行时会输出未实现提示并跳过追踪。
-- `bytetrack` 支持 stream 级参数（可选，未配置时使用默认值）：
-  - `streams[].tracker_params.bytetrack.high_det_thresh`（默认 `0.5`）
-  - `streams[].tracker_params.bytetrack.low_det_thresh`（默认 `0.1`）
-  - `streams[].tracker_params.bytetrack.match_iou_thresh`（默认 `0.3`）
-  - `streams[].tracker_params.bytetrack.min_hits_to_confirm`（默认 `2`）
-  - `streams[].tracker_params.bytetrack.max_lost_frames`（默认 `30`）
+- `track.bytetrack.with.*` 支持配置阈值与生命周期参数（同默认值语义）。
 
 ## Ascend 模型转换
 

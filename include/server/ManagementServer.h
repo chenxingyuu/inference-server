@@ -1,7 +1,6 @@
 #pragma once
 
-#include "stream/StreamPool.h"
-#include "pipeline/ModelManager.h"
+#include "pipeline/PipelineManager.h"
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -15,22 +14,14 @@ namespace infer {
 // Lightweight HTTP management server backed by cpp-httplib.
 //
 // Endpoints:
-//   GET  /healthz                  → 200 OK  (liveness probe — always OK if process is alive)
-//   GET  /health                   → 200/207/503 readiness probe with stream health summary
+//   GET  /healthz                  → 200 OK
 //   GET  /metrics                  → Prometheus text format
-//   GET  /streams                  → JSON list of active stream IDs
-//   POST /streams                  → Add stream
-//   DELETE /streams/{id}           → Remove stream
-//   GET  /streams/{id}/health      → Per-stream health detail (Phase 10)
-//
-//   GET  /models                   → JSON list of loaded models + state
-//   POST /models                   → Load new model  body: ModelConfig JSON
-//   DELETE /models/{id}            → Unload model (drains in-flight batches)
-//   PUT  /models/{id}              → Hot-swap model  body: ModelConfig JSON
-//   GET  /models/{id}/stats        → Per-model inference statistics
+//   GET  /pipelines                → list pipeline state
+//   POST /pipelines/{id}/start     → start pipeline
+//   POST /pipelines/{id}/stop      → stop pipeline
 class ManagementServer {
 public:
-    ManagementServer(int port, StreamPool& pool, ModelManager& model_manager);
+    ManagementServer(int port, PipelineManager& pipeline_manager);
     ~ManagementServer();
 
     // Starts the server in a background thread (non-blocking).
@@ -43,8 +34,7 @@ private:
     void registerHandlers();
 
     int                              port_;
-    StreamPool&                      pool_;
-    ModelManager&                    model_manager_;
+    PipelineManager&                 pipeline_manager_;
     std::unique_ptr<httplib::Server> srv_;
     std::thread                      thread_;
     std::atomic<bool>                running_{false};

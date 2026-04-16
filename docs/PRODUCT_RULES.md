@@ -4,9 +4,9 @@ Durable product-level constraints for `inference-server`.
 
 ## Core Invariants
 
-- The service supports dynamic stream management through HTTP endpoints.
-- Inference behavior is model-scoped and batch-scheduled by `model_id`.
-- Telemetry endpoints (`/healthz`, `/metrics`, `/streams`) remain available.
+- The service supports dynamic pipeline management through HTTP endpoints.
+- Inference behavior is model-scoped and driven by `pipelines[].nodes` referencing `models[].id`.
+- Telemetry endpoints (`/healthz`, `/metrics`, `/pipelines`) remain available.
 - Runtime changes must preserve existing backend split (`TensorRT` vs `Ascend`).
 
 ## Change Discipline

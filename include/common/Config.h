@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <stdexcept>
+#include <optional>
 #include "common/Types.h"
 
 namespace infer {
@@ -77,6 +78,38 @@ struct StreamConfig {
     ByteTrackConfig byte_track{};
 };
 
+enum class EdgeDropPolicy { Block, DropOldest, DropNewest };
+
+struct PipelineSourceConfig {
+    std::string id;
+    std::string url;
+    int         sample_fps{5};
+    int         reconnect_delay_ms{3000};
+    int         max_reconnect_delay_ms{60000};
+    int         max_reconnect_attempts{5};
+    bool        use_hwdec{false};
+};
+
+struct StageConfig {
+    std::string id;
+    std::string type;
+    std::map<std::string, std::string> with;
+};
+
+struct EdgeConfig {
+    std::string     from;
+    std::string     to;
+    int             capacity{256};
+    EdgeDropPolicy  drop_policy{EdgeDropPolicy::Block};
+};
+
+struct PipelineConfig {
+    std::string id;
+    std::string source_id;
+    std::vector<StageConfig> nodes;
+    std::vector<EdgeConfig>  edges;
+};
+
 struct KafkaConfig {
     std::string brokers{"kafka:9092"};
     std::string topic{"inference-results"};
@@ -115,12 +148,16 @@ struct AppConfig {
     ServerConfig            server;
     std::vector<ModelConfig> models;
     std::vector<StreamConfig> streams;
+    std::vector<PipelineSourceConfig> sources;
+    std::vector<PipelineConfig> pipelines;
     KafkaConfig             kafka;
     FrameArchiveConfig      frame_archive;
 
     // Find by id helpers
     const ModelConfig* findModel(const std::string& id) const;
     const StreamConfig* findStream(const std::string& id) const;
+    const PipelineSourceConfig* findSource(const std::string& id) const;
+    const PipelineConfig* findPipeline(const std::string& id) const;
 };
 
 // Parse config.yaml → AppConfig. Throws std::runtime_error on invalid config.
@@ -134,6 +171,7 @@ DeviceType parseDeviceType(const std::string& s);
 
 // Convert string → TrackerType
 TrackerType parseTrackerType(const std::string& s);
+EdgeDropPolicy parseEdgeDropPolicy(const std::string& s);
 // Validate stream-scoped ByteTrack config. Throws std::runtime_error on invalid values.
 void validateByteTrackConfig(const ByteTrackConfig& cfg);
 

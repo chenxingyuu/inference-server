@@ -142,6 +142,10 @@ set(DECODER_SOURCES
 )
 
 set(PIPELINE_SOURCES
+    src/pipeline/EdgeQueue.cpp
+    src/pipeline/GraphExecutor.cpp
+    src/pipeline/StageFactory.cpp
+    src/pipeline/PipelineManager.cpp
     src/pipeline/BatchScheduler.cpp
     src/pipeline/InferWorker.cpp
     src/pipeline/InferWorkerGroup.cpp

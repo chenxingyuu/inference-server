@@ -4,15 +4,16 @@
 
 ## Runtime Pipeline
 
-1. Stream decode (`FFmpegDecoder` / optional HW decode via NVDEC).
-2. Buffer and schedule by model (`FrameBuffer`, `BatchScheduler`).
-3. Backend inference (`TRTBackend` or `AscendBackend`).
-4. YOLO decode and postprocess (`IYOLODecoder` / `ClassifierDecoder`).
-5. Optional cascade: `CascadeRouter` → secondary classifier → `ResultMerger`.
-6. Optional per-stream tracking (`none` / `bytetrack`, `deepsort` placeholder).
-7. Optional frame archiving (`FrameArchiver` → local JPEG + MinIO).
-8. Async publish to Kafka (`KafkaPublisher`).
-9. Background heartbeat emission (`HeartbeatPublisher`) and management endpoints (`ManagementServer`).
+The runtime is a **configurable in-process DAG pipeline**:
+
+1. Source ingest (`source.rtsp` using `FFmpegDecoder`; optional HW decode via NVDEC).
+2. Fan-out to parallel branches (e.g. `archive.raw` and inference path).
+3. Optional frame archiving (`archive.raw` via `FrameArchiver` → local JPEG + MinIO).
+4. Inference (`infer.engine` using `TRTBackend` / `AscendBackend` / `OnnxBackend`) with per-edge backpressure.
+5. YOLO decode (`IYOLODecoder` / `ClassifierDecoder`) and optional tracking (`track.bytetrack`).
+6. Optional join/merge (`join.byFrameId`) to enrich inference results with archive metadata.
+7. Publish (`sink.kafka` via `KafkaPublisher`).
+8. Background heartbeat emission (`HeartbeatPublisher`) and management endpoints (`ManagementServer`).
 
 ## Key Singletons
 
@@ -25,7 +26,7 @@
 
 - **Metrics** (`GET /metrics`): Prometheus text format scraped by Prometheus every 15 s.
 - **Heartbeat** (`inference-heartbeat` Kafka topic): per-stream and engine-level heartbeat every 5 s. Downstream can distinguish: `STREAMING`+no-frames=no targets; `RECONNECTING/DEGRADED`=camera issue; heartbeat stops=engine down.
-- **Management API** (`GET /health`, `GET /streams/{id}/health`): readiness probe and per-stream detail.
+- **Management API** (`GET /healthz`, `GET /pipelines`): liveness probe and pipeline-level operations.
 
 ## Architecture Boundaries
 

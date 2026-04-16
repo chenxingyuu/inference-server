@@ -79,6 +79,13 @@ void OnnxBackend::loadModel(const ModelConfig& cfg) {
     for (const auto& n : input_names_owned_)  input_names_.push_back(n.c_str());
     for (const auto& n : output_names_owned_) output_names_.push_back(n.c_str());
 
+    // NOTE: Some ORT builds can segfault in GetShape()/type introspection on load.
+    // Keep batch sizing fully config-driven and safe by default.
+    //
+    // Additionally, many exported YOLO ONNX models have a static batch=1 input.
+    // Clamp ORT backend to bs=1 unless the model was explicitly exported for batching.
+    max_batch_size_ = 1;
+
     // ── Determine spatial dimensions from config ─────────────────────────────
     // Runtime evidence shows some ORT builds can crash in GetShape() on load.
     // Keep input shape source explicit and deterministic from config/defaults.

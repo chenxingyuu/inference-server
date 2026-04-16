@@ -26,23 +26,58 @@ models:
     preferred_batch_sizes: [4, 8, 16]
     max_queue_delay_us: 10000
 
-streams:
+sources:
   - id: "cam_001"
     url: "rtsp://192.168.3.145:554/01-day-left.mp4"
-    model_id: "yolov8n_trt"
     sample_fps: 5
     reconnect_delay_ms: 3000
     max_reconnect_delay_ms: 60000
     max_reconnect_attempts: 5
     use_hwdec: true
-    tracker: "bytetrack"
-    tracker_params:
-      bytetrack:
-        high_det_thresh: 0.5
-        low_det_thresh: 0.1
-        match_iou_thresh: 0.3
-        min_hits_to_confirm: 2
-        max_lost_frames: 30
+
+pipelines:
+  - id: "cam_001_pipeline"
+    source_id: "cam_001"
+    nodes:
+      - id: "cam_001"
+        type: "source.rtsp"
+      - id: "decode_1"
+        type: "decode.ffmpeg"
+      - id: "archive_1"
+        type: "archive.raw"
+      - id: "pre_1"
+        type: "preprocess.yolo"
+      - id: "infer_1"
+        type: "infer.engine"
+        with:
+          model_id: "yolov8n_trt"
+      - id: "post_1"
+        type: "postprocess.yolo"
+      - id: "track_1"
+        type: "track.bytetrack"
+      - id: "join_1"
+        type: "join.byFrameId"
+      - id: "sink_1"
+        type: "sink.kafka"
+    edges:
+      - from: "cam_001"
+        to: "decode_1"
+      - from: "decode_1"
+        to: "archive_1"
+      - from: "decode_1"
+        to: "pre_1"
+      - from: "pre_1"
+        to: "infer_1"
+      - from: "infer_1"
+        to: "post_1"
+      - from: "post_1"
+        to: "track_1"
+      - from: "track_1"
+        to: "join_1"
+      - from: "archive_1"
+        to: "join_1"
+      - from: "join_1"
+        to: "sink_1"
 
 kafka:
   brokers: "192.168.3.135:9092"
