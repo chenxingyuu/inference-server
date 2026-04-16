@@ -1,0 +1,66 @@
+# GPU / TensorRT 模板（需 NVIDIA 环境与 BUILD_TRT_BACKEND=ON，见 docker/Dockerfile.tensorrt）
+#
+# 使用方式：
+#   本地：  ./build/infer_server config/config.gpu.yaml
+#   Docker：默认可将本文件作为 /config/config.yaml 挂载，或传入对应路径。
+#
+# 将 TensorRT engine 放到 models/ 下，并按实际路径修改 engine_path。
+
+server:
+  stream_pool_threads: 32
+  max_streams: 100
+  management_port: 8080
+
+models:
+  - id: "yolov8n_trt"
+    version: yolov8
+    backend: tensorrt
+    engine_path: "/models/yolov8n_b16.engine"
+    input_size: [640, 640]
+    batch_size: 16
+    conf_thresh: 0.4
+    nms_thresh: 0.45
+    device_id: 0
+    num_classes: 80
+    instance_count: 1
+    preferred_batch_sizes: [4, 8, 16]
+    max_queue_delay_us: 10000
+
+streams:
+  - id: "cam_001"
+    url: "rtsp://192.168.3.145:554/01-day-left.mp4"
+    model_id: "yolov8n_trt"
+    sample_fps: 5
+    reconnect_delay_ms: 3000
+    max_reconnect_delay_ms: 60000
+    max_reconnect_attempts: 5
+    use_hwdec: true
+    tracker: "bytetrack"
+
+kafka:
+  brokers: "192.168.3.135:9092"
+  topic: "inference-results"
+  batch_size: 100
+  linger_ms: 5
+  compression: "lz4"
+  queue_capacity: 10000
+  heartbeat_topic: "inference-heartbeat"
+  heartbeat_interval_ms: 5000
+
+frame_archive:
+  enabled: true
+  local_dir: "./data/frames"
+  save_interval: 1
+  jpeg_quality: 90
+  queue_capacity: 4096
+  minio:
+    enabled: false
+    endpoint: "minio:9000"
+    bucket: "inference-frames"
+    access_key: "<CHANGE_ME_ACCESS_KEY>"
+    secret_key: "<CHANGE_ME_SECRET_KEY>"
+    region: "us-east-1"
+    use_ssl: false
+    connect_timeout_ms: 1500
+    request_timeout_ms: 3000
+    max_retries: 2

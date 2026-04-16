@@ -1,0 +1,68 @@
+# CPU / ONNX Runtime 模板（需编译 BUILD_ONNX_BACKEND=ON，见 docker/Dockerfile.cpu）
+#
+# 使用方式：
+#   本地：  ./build/infer_server config/config.cpu.yaml
+#   Docker：默认入口为 /config/config.yaml，可二选一：
+#     - 将本文件复制/软链为 config/config.yaml，或
+#     - 覆盖启动参数，例如：docker run ... infer_server /config/config.cpu.yaml
+#
+# 将导出的 YOLO ONNX 放到 models/ 下，并按实际文件名修改 onnx_path。
+
+server:
+  stream_pool_threads: 16
+  max_streams: 50
+  management_port: 8080
+
+models:
+  - id: "yolov8n_cpu"
+    version: yolov8
+    backend: cpu
+    onnx_path: "models/yolov8n.onnx"
+    input_size: [640, 640]
+    batch_size: 4
+    conf_thresh: 0.4
+    nms_thresh: 0.45
+    device_id: 0
+    num_classes: 80
+    instance_count: 1
+    preferred_batch_sizes: [1, 2, 4]
+    max_queue_delay_us: 15000
+
+streams:
+  - id: "cam_001"
+    url: "rtsp://192.168.3.145:554/01-day-left.mp4"
+    model_id: "yolov8n_cpu"
+    sample_fps: 5
+    reconnect_delay_ms: 3000
+    max_reconnect_delay_ms: 60000
+    max_reconnect_attempts: 5
+    use_hwdec: false
+    tracker: "none"
+
+kafka:
+  brokers: "192.168.3.135:9092"
+  topic: "inference-results"
+  batch_size: 100
+  linger_ms: 5
+  compression: "lz4"
+  queue_capacity: 10000
+  heartbeat_topic: "inference-heartbeat"
+  heartbeat_interval_ms: 5000
+
+frame_archive:
+  enabled: false
+  local_dir: "./data/frames"
+  save_interval: 1
+  jpeg_quality: 90
+  queue_capacity: 4096
+  minio:
+    enabled: false
+    endpoint: "minio:9000"
+    bucket: "inference-frames"
+    access_key: ""
+    secret_key: ""
+    region: "us-east-1"
+    use_ssl: false
+    connect_timeout_ms: 1500
+    request_timeout_ms: 3000
+    max_retries: 2
