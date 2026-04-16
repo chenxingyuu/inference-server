@@ -1,6 +1,6 @@
 # inference-server
 
-`inference-server` 是一个 C++ 实时视频推理服务，面向多路 RTSP 输入，支持 TensorRT 和 Ascend 双后端、模型热管理（load/unload/swap）、级联分类和 Prometheus 指标暴露。
+`inference-server` 是一个 C++ 实时视频推理服务，面向多路 RTSP 输入，支持 TensorRT、Ascend、ONNX Runtime（CPU/MPS）三种推理后端、模型热管理（load/unload/swap）、级联分类和 Prometheus 指标暴露。
 
 ## 文档导航
 
@@ -45,6 +45,7 @@ RTSP -> FFmpegDecoder(可选HW解码) -> FrameBuffer
 | TensorRT | >= 8.5 | TensorRT 后端必需 |
 | CUDA Toolkit | >= 11.8 | TensorRT 后端必需 |
 | Ascend CANN | 6.x/8.x（按镜像） | Ascend 后端必需 |
+| ONNX Runtime | >= 1.18（自动下载） | CPU / MPS 后端必需 |
 
 ## 本地编译
 
@@ -67,6 +68,19 @@ cmake -B build \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
+
+### CPU / MPS 构建（无 GPU）
+
+```bash
+cmake -B build \
+  -DBUILD_TRT_BACKEND=OFF \
+  -DBUILD_ASCEND_BACKEND=OFF \
+  -DBUILD_ONNX_BACKEND=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+ONNX Runtime 会由 CMake 自动下载（v1.18.0）。macOS Apple Silicon 若需 MPS 加速，追加 `-DBUILD_ONNX_BACKEND_COREML=ON`。
 
 ### 可选：构建测试
 
@@ -101,6 +115,15 @@ DOCKER_BUILDKIT=1 docker build \
   .
 ```
 
+### CPU 镜像构建
+
+```bash
+DOCKER_BUILDKIT=1 docker build \
+  -t inference-server:cpu \
+  -f docker/Dockerfile.cpu \
+  .
+```
+
 ### Compose 启动
 
 ```bash
@@ -109,6 +132,9 @@ docker compose -f docker/docker-compose.nvidia.yml up -d
 
 # Ascend 方案（含 Kafka）
 docker compose -f docker/docker-compose.ascend.yml up -d
+
+# CPU 方案（无 GPU，含 Kafka + Prometheus + Grafana）
+docker compose -f docker/docker-compose.cpu.yml up -d
 ```
 
 ## 启动与配置
