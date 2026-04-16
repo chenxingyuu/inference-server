@@ -7,6 +7,9 @@ Durable product-level constraints for `inference-server`.
 - The service supports dynamic pipeline management through HTTP endpoints.
 - Inference behavior is model-scoped and driven by `pipelines[].nodes` referencing `models[].id`.
 - Telemetry endpoints (`/healthz`, `/metrics`, `/pipelines`) remain available.
+- Stream lifecycle semantics are externally observable:
+  - Heartbeat continues to emit per-stream `stream_state`
+  - Control events are emitted to the dedicated Kafka control topic (default `inference-control`)
 - Runtime changes must preserve existing backend split (`TensorRT` vs `Ascend`).
 
 ## Change Discipline

@@ -31,6 +31,7 @@ public:
         cfg.sample_fps = source_.sample_fps;
         cfg.reconnect_delay_ms = source_.reconnect_delay_ms;
         cfg.max_reconnect_delay_ms = source_.max_reconnect_delay_ms;
+        cfg.degraded_threshold = source_.degraded_threshold;
         cfg.max_reconnect_attempts = source_.max_reconnect_attempts;
         cfg.use_hwdec = source_.use_hwdec;
         decoder_.start(cfg, [this](Frame frame) {

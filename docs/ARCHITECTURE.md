@@ -20,12 +20,14 @@ The runtime is a **configurable in-process DAG pipeline**:
 | Singleton | Role |
 |-----------|------|
 | `Metrics` | Prometheus-format counters and histograms; written from hot paths via atomics |
-| `StreamHealthRegistry` | Per-stream state machine (`CONNECTING → STREAMING → RECONNECTING → DEGRADED → STOPPED`); written by `FFmpegDecoder`, read by `HeartbeatPublisher` and `ManagementServer` |
+| `StreamHealthRegistry` | Per-stream state machine (`CONNECTING → STREAMING → RECONNECTING → DEGRADED → FAILED → STOPPED`); written by `FFmpegDecoder`, read by `HeartbeatPublisher` and `ManagementServer` |
+| `ControlEventBus` | Best-effort stream control event emission (wired to `ControlPublisher` in `main`) |
 
 ## Observability
 
 - **Metrics** (`GET /metrics`): Prometheus text format scraped by Prometheus every 15 s.
 - **Heartbeat** (`inference-heartbeat` Kafka topic): per-stream and engine-level heartbeat every 5 s. Downstream can distinguish: `STREAMING`+no-frames=no targets; `RECONNECTING/DEGRADED`=camera issue; heartbeat stops=engine down.
+- **Control events** (`inference-control` Kafka topic): stream lifecycle events (`stream_dropped`, `stream_recovered`, `stream_failed_terminal`) emitted by `FFmpegDecoder`.
 - **Management API** (`GET /healthz`, `GET /pipelines`): liveness probe and pipeline-level operations.
 
 ## Architecture Boundaries

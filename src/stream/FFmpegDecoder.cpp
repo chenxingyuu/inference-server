@@ -2,6 +2,7 @@
 #include "stream/StreamHealthRegistry.h"
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
+#include "publisher/ControlEventBus.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -255,14 +256,28 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
     LOG_INFO("[{}] decode thread started: {} hwdec={}", cfg.id, cfg.url, cfg.use_hwdec);
 
     auto& reg = StreamHealthRegistry::get();
-    reg.onStreamAdded(cfg.id, cfg.max_reconnect_attempts);
+    reg.onStreamAdded(cfg.id, cfg.degraded_threshold, cfg.max_reconnect_attempts);
 
     const int sample_interval = std::max(1, 25 / std::max(1, cfg.sample_fps));
 
     while (!stop_flag_.load()) {
         if (!openStream(cfg)) {
             reg.onReconnectFailed(cfg.id);
-            uint32_t failures = reg.getHealth(cfg.id).consecutive_failures;
+            const auto h = reg.getHealth(cfg.id);
+            if (h.state == StreamState::FAILED) {
+                ControlEventBus::get().emit(
+                    ControlEventType::StreamFailedTerminal,
+                    cfg.id,
+                    h.state,
+                    nowEpoch(),
+                    static_cast<int>(h.consecutive_failures),
+                    cfg.max_reconnect_attempts,
+                    "max reconnect attempts reached");
+                LOG_ERROR("[{}] reached terminal reconnect failure (attempt {}), stopping decoder thread",
+                          cfg.id, h.consecutive_failures);
+                break;
+            }
+            uint32_t failures = h.consecutive_failures;
             int64_t delay = backoffDelayMs(cfg.reconnect_delay_ms,
                                            cfg.max_reconnect_delay_ms, failures);
             LOG_WARN("[{}] open failed (attempt {}), retry in {}ms",
@@ -276,8 +291,18 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
             StreamState cur = reg.getHealth(cfg.id).state;
             if (cur == StreamState::CONNECTING)
                 reg.onStreamOpened(cfg.id);
-            else
+            else {
                 reg.onReconnectSucceeded(cfg.id);
+                const auto hh = reg.getHealth(cfg.id);
+                ControlEventBus::get().emit(
+                    ControlEventType::StreamRecovered,
+                    cfg.id,
+                    hh.state,
+                    nowEpoch(),
+                    static_cast<int>(hh.consecutive_failures),
+                    cfg.max_reconnect_attempts,
+                    "");
+            }
         }
 
         readAndDecode(cb, sample_interval);
@@ -285,6 +310,15 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
 
         if (!stop_flag_.load()) {
             reg.onStreamDropped(cfg.id);
+            const auto h = reg.getHealth(cfg.id);
+            ControlEventBus::get().emit(
+                ControlEventType::StreamDropped,
+                cfg.id,
+                h.state,
+                nowEpoch(),
+                static_cast<int>(h.consecutive_failures),
+                cfg.max_reconnect_attempts,
+                "stream dropped");
             uint32_t failures = reg.getHealth(cfg.id).consecutive_failures;
             int64_t delay = backoffDelayMs(cfg.reconnect_delay_ms,
                                            cfg.max_reconnect_delay_ms, failures);

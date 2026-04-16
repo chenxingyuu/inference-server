@@ -14,7 +14,8 @@ enum class StreamState {
     STREAMING    = 1,
     RECONNECTING = 2,
     DEGRADED     = 3,
-    STOPPED      = 4,
+    FAILED       = 4,
+    STOPPED      = 5,
 };
 
 // Convert StreamState to string for JSON / logging
@@ -24,6 +25,7 @@ inline const char* streamStateStr(StreamState s) {
         case StreamState::STREAMING:    return "STREAMING";
         case StreamState::RECONNECTING: return "RECONNECTING";
         case StreamState::DEGRADED:     return "DEGRADED";
+        case StreamState::FAILED:       return "FAILED";
         case StreamState::STOPPED:      return "STOPPED";
     }
     return "UNKNOWN";
@@ -45,7 +47,7 @@ public:
     static StreamHealthRegistry& get();
 
     // Called by StreamPool::addStream before the decoder thread starts
-    void onStreamAdded(const std::string& id, int degraded_threshold = 5);
+    void onStreamAdded(const std::string& id, int degraded_threshold = 5, int max_reconnect_attempts = 0);
 
     // Called by FFmpegDecoder when openStream() succeeds for the first time
     void onStreamOpened(const std::string& id);
@@ -88,6 +90,7 @@ private:
     struct Entry {
         StreamHealth health;
         int          degraded_threshold{5};
+        int          max_reconnect_attempts{0};
     };
 
     static double now();

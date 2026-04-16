@@ -72,7 +72,8 @@ struct StreamConfig {
     int         sample_fps{5};
     int         reconnect_delay_ms{3000};
     int         max_reconnect_delay_ms{60000};  // Phase 10: exponential backoff ceiling
-    int         max_reconnect_attempts{5};       // Phase 10: consecutive failures before DEGRADED
+    int         degraded_threshold{5};           // consecutive failures before DEGRADED
+    int         max_reconnect_attempts{5};       // consecutive failures before FAILED (terminal)
     bool        use_hwdec{false};  // true → NVDEC hardware decode
     TrackerType tracker{TrackerType::None};
     ByteTrackConfig byte_track{};
@@ -86,6 +87,7 @@ struct PipelineSourceConfig {
     int         sample_fps{5};
     int         reconnect_delay_ms{3000};
     int         max_reconnect_delay_ms{60000};
+    int         degraded_threshold{5};
     int         max_reconnect_attempts{5};
     bool        use_hwdec{false};
 };
@@ -120,6 +122,8 @@ struct KafkaConfig {
     // Phase 10: heartbeat
     std::string heartbeat_topic{"inference-heartbeat"};
     int         heartbeat_interval_ms{5000};
+    // Phase 14: control topic
+    std::string control_topic{"inference-control"};
 };
 
 struct MinioConfig {

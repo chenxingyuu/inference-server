@@ -216,6 +216,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
         s.sample_fps             = sn["sample_fps"].as<int>(5);
         s.reconnect_delay_ms     = sn["reconnect_delay_ms"].as<int>(3000);
         s.max_reconnect_delay_ms = sn["max_reconnect_delay_ms"].as<int>(60000);
+        s.degraded_threshold     = sn["degraded_threshold"].as<int>(5);
         s.max_reconnect_attempts = sn["max_reconnect_attempts"].as<int>(5);
         s.use_hwdec              = sn["use_hwdec"].as<bool>(false);
         cfg.sources.push_back(std::move(s));
@@ -256,6 +257,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
         cfg.kafka.queue_capacity        = kn["queue_capacity"].as<int>(10000);
         cfg.kafka.heartbeat_topic       = kn["heartbeat_topic"].as<std::string>("inference-heartbeat");
         cfg.kafka.heartbeat_interval_ms = kn["heartbeat_interval_ms"].as<int>(5000);
+        cfg.kafka.control_topic         = kn["control_topic"].as<std::string>("inference-control");
     }
     if (auto an = root["frame_archive"]) {
         cfg.frame_archive.enabled        = an["enabled"].as<bool>(false);

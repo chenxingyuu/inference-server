@@ -92,6 +92,23 @@ TEST_F(StreamHealthTest, UnknownStreamReturnsStoppedHealth) {
     EXPECT_EQ(h.state, StreamState::STOPPED);
 }
 
+TEST_F(StreamHealthTest, TerminalFailureTransitionsToFailedAndCannotRecover) {
+    StreamHealthRegistry::get().onStreamAdded("cam_01", /*degraded_threshold=*/2, /*max_reconnect_attempts=*/2);
+    StreamHealthRegistry::get().onStreamOpened("cam_01");
+    StreamHealthRegistry::get().onStreamDropped("cam_01");
+
+    // Hit threshold.
+    StreamHealthRegistry::get().onReconnectFailed("cam_01");
+    StreamHealthRegistry::get().onReconnectFailed("cam_01");
+
+    auto h = StreamHealthRegistry::get().getHealth("cam_01");
+    EXPECT_EQ(h.state, StreamState::FAILED);
+
+    // After terminal failure, a reconnect success should NOT flip the state back.
+    StreamHealthRegistry::get().onReconnectSucceeded("cam_01");
+    EXPECT_EQ(StreamHealthRegistry::get().getHealth("cam_01").state, StreamState::FAILED);
+}
+
 // ── Frame tracking ─────────────────────────────────────────────────────────
 
 TEST_F(StreamHealthTest, FrameDecodedUpdatesTimestampAndCounter) {
@@ -145,4 +162,5 @@ TEST(StreamStateStr, AllStatesHaveStrings) {
     EXPECT_STREQ(streamStateStr(StreamState::RECONNECTING), "RECONNECTING");
     EXPECT_STREQ(streamStateStr(StreamState::DEGRADED),     "DEGRADED");
     EXPECT_STREQ(streamStateStr(StreamState::STOPPED),      "STOPPED");
+    EXPECT_STREQ(streamStateStr(StreamState::FAILED),       "FAILED");
 }

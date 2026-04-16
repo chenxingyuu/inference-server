@@ -52,6 +52,7 @@ sources:
     sample_fps: 5
     reconnect_delay_ms: 3000
     max_reconnect_delay_ms: 60000
+    degraded_threshold: 5
     max_reconnect_attempts: 5
     use_hwdec: false
 
@@ -120,6 +121,7 @@ kafka:
   queue_capacity: 10000
   heartbeat_topic: "inference-heartbeat"
   heartbeat_interval_ms: 5000
+  control_topic: "inference-control"
 
 frame_archive:
   enabled: false

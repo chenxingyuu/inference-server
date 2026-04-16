@@ -260,3 +260,20 @@
 - 配置测试覆盖默认值、显式值、非法参数
 - 追踪测试覆盖确认门槛、全局匹配与配置热更新
 - `ctest --output-on-failure -R "(config|tracker)"`、`scripts/validate-repo.sh` 均通过
+
+---
+
+## Phase 14 — 断流产品化（终态 + Control Topic）
+
+**目标**：上游流中断时不再“无限重连且语义模糊”，而是做到可终止、可观测、下游可明确区分。
+
+**新增**：
+- `StreamState` 新增终态 `FAILED`
+- `sources[].degraded_threshold`：连续失败达到阈值进入 `DEGRADED`
+- `sources[].max_reconnect_attempts`：连续失败达到阈值进入 `FAILED`，并停止重连（需手动/API 介入恢复）
+- `KafkaConfig.control_topic`（默认 `inference-control`）：发送控制事件
+  - `stream_dropped` / `stream_recovered` / `stream_failed_terminal`
+
+**关键决策**：
+- 达到 `max_reconnect_attempts` 后进入终态并停止重连，避免长期无效重试与噪音
+- 控制事件独立 topic，不污染主推理结果流

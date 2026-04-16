@@ -3,6 +3,7 @@
 #include "pipeline/PipelineManager.h"
 #include "publisher/KafkaPublisher.h"
 #include "publisher/HeartbeatPublisher.h"
+#include "publisher/ControlEventBus.h"
 #include "server/ManagementServer.h"
 #include "archive/FrameArchiver.h"
 #include <curl/curl.h>
@@ -70,6 +71,16 @@ int main(int argc, char* argv[]) {
         heartbeat.reset();
     }
 
+    // ── Start control publisher (Phase 14) ───────────────────────────────────
+    std::shared_ptr<infer::ControlPublisher> control;
+    try {
+        control = std::make_shared<infer::ControlPublisher>(cfg.kafka.brokers, cfg.kafka.control_topic);
+        infer::ControlEventBus::get().setPublisher(control);
+    } catch (const std::exception& e) {
+        LOG_WARN("ControlPublisher init failed (non-fatal): {}", e.what());
+        control.reset();
+    }
+
     // ── Start management HTTP server ──────────────────────────────────────────
     infer::ManagementServer mgmt_server(cfg.server.management_port, pipeline_manager);
     mgmt_server.start();
@@ -88,6 +99,8 @@ int main(int argc, char* argv[]) {
     mgmt_server.stop();
 
     if (heartbeat) heartbeat->stop();
+    infer::ControlEventBus::get().clearPublisher();
+    control.reset();
 
     pipeline_manager.stopAll();
     publisher->flush();

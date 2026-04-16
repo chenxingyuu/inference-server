@@ -163,6 +163,8 @@ set(PUBLISHER_SOURCES
     src/publisher/KafkaPublisher.cpp
     src/publisher/AttributePublisher.cpp
     src/publisher/HeartbeatPublisher.cpp
+    src/publisher/ControlPublisher.cpp
+    src/publisher/ControlEventBus.cpp
 )
 
 set(ARCHIVE_SOURCES

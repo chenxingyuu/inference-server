@@ -97,6 +97,10 @@ curl http://localhost:8080/healthz
 curl http://localhost:8080/metrics
 ```
 
+Kafka 可观测 topic：
+- `inference-heartbeat`：引擎与 stream 心跳（含 `stream_state`）
+- `inference-control`：stream 控制事件（断流/恢复/终态失败）
+
 ### Pipeline 管理
 
 ```bash
