@@ -4,12 +4,28 @@
 
 ## Runtime Pipeline
 
-1. Stream decode (`FFmpegDecoder` / optional HW decode).
+1. Stream decode (`FFmpegDecoder` / optional HW decode via NVDEC).
 2. Buffer and schedule by model (`FrameBuffer`, `BatchScheduler`).
 3. Backend inference (`TRTBackend` or `AscendBackend`).
-4. YOLO decode and postprocess.
-5. Optional per-stream tracking (`none` / `bytetrack`, `deepsort` placeholder).
-6. Async publish to Kafka and expose management endpoints.
+4. YOLO decode and postprocess (`IYOLODecoder` / `ClassifierDecoder`).
+5. Optional cascade: `CascadeRouter` → secondary classifier → `ResultMerger`.
+6. Optional per-stream tracking (`none` / `bytetrack`, `deepsort` placeholder).
+7. Optional frame archiving (`FrameArchiver` → local JPEG + MinIO).
+8. Async publish to Kafka (`KafkaPublisher`).
+9. Background heartbeat emission (`HeartbeatPublisher`) and management endpoints (`ManagementServer`).
+
+## Key Singletons
+
+| Singleton | Role |
+|-----------|------|
+| `Metrics` | Prometheus-format counters and histograms; written from hot paths via atomics |
+| `StreamHealthRegistry` | Per-stream state machine (`CONNECTING → STREAMING → RECONNECTING → DEGRADED → STOPPED`); written by `FFmpegDecoder`, read by `HeartbeatPublisher` and `ManagementServer` |
+
+## Observability
+
+- **Metrics** (`GET /metrics`): Prometheus text format scraped by Prometheus every 15 s.
+- **Heartbeat** (`inference-heartbeat` Kafka topic): per-stream and engine-level heartbeat every 5 s. Downstream can distinguish: `STREAMING`+no-frames=no targets; `RECONNECTING/DEGRADED`=camera issue; heartbeat stops=engine down.
+- **Management API** (`GET /health`, `GET /streams/{id}/health`): readiness probe and per-stream detail.
 
 ## Architecture Boundaries
 

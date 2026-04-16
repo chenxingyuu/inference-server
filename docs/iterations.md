@@ -188,3 +188,21 @@
 - 主推理线程只做归档任务入队，不做写盘与上传，保持检测路径低延迟
 - 单事件发布默认最终一致：MinIO 开启时 `frame_upload_state=pending`，失败仅记指标
 - MinIO key 按 `stream_id/timestamp_frameSeq.jpg` 幂等命名，便于重放与追溯
+
+---
+
+## Phase 10 — 稳定性与可观测性
+
+**目标**：让下游区分三种沉默（引擎挂 / 摄像头断 / 无目标）；消除重连风暴；补全流级可观测性。
+
+**新增**：
+- `StreamHealthRegistry`：全局单例状态机，`CONNECTING → STREAMING → RECONNECTING → DEGRADED → STOPPED`，`FFmpegDecoder` 在关键点调用
+- `HeartbeatPublisher`：独立后台线程，每 5s 向 `inference-heartbeat` topic 发心跳，含 `stream_state` / `consecutive_failures` / `frames_since_last_hb`；引擎级心跳（`stream_id=null`）作为进程存活信号
+- `Metrics` 新增流级 gauge：`stream_state` / `stream_reconnect_count` / `stream_consecutive_failures` / `stream_last_frame_age_seconds`（在心跳循环中刷新）
+- `ManagementServer` 新增 `GET /health`（readiness probe，200/207/503）和 `GET /streams/{id}/health`
+- 指数退避重连：`delay = min(base × 2^failures, max_reconnect_delay_ms)` + ±10% jitter
+
+**关键决策**：
+- `HeartbeatPublisher` 使用独立 Kafka producer，不复用 `KafkaPublisher`（语义分离，独立 topic）
+- Metrics 刷新放在心跳循环，不在解码热路径上操作锁
+- `/healthz` 保持无条件 200（K8s liveness），`/health` 作为 readiness probe
