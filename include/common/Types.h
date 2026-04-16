@@ -106,6 +106,9 @@ struct InferResult {
     double                   frame_ts{0.0};
     double                   infer_ts{0.0};
     double                   latency_ms{0.0};
+    double                   queue_latency_ms{0.0}; // capture → InferWorker dequeue
+    double                   infer_ms{0.0};          // backend preprocess + forward pass
+    double                   decode_ms{0.0};          // NMS + bbox decode
     std::string              model_id;
     std::vector<Detection>   detections;
     uint64_t                 frame_seq{0};  // detection index for cascade secondary routing

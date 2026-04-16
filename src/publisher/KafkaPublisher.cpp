@@ -115,15 +115,18 @@ std::string KafkaPublisher::serialize(const InferResult& r) const {
         dets.push_back(std::move(det));
     }
     json msg = {
-        {"stream_id",  r.stream_id},
-        {"frame_ts",   r.frame_ts},
-        {"infer_ts",   r.infer_ts},
-        {"latency_ms", r.latency_ms},
-        {"model_id",   r.model_id},
-        {"detections", dets},
-        {"frame_local_path", r.frame_local_path},
-        {"frame_url", r.frame_url},
-        {"frame_upload_state", r.frame_upload_state}
+        {"stream_id",         r.stream_id},
+        {"frame_ts",          r.frame_ts},
+        {"infer_ts",          r.infer_ts},
+        {"latency_ms",        r.latency_ms},
+        {"queue_latency_ms",  r.queue_latency_ms},
+        {"infer_ms",          r.infer_ms},
+        {"decode_ms",         r.decode_ms},
+        {"model_id",          r.model_id},
+        {"detections",        dets},
+        {"frame_local_path",  r.frame_local_path},
+        {"frame_url",         r.frame_url},
+        {"frame_upload_state",r.frame_upload_state}
     };
     return msg.dump();
 }
