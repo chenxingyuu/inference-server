@@ -76,6 +76,7 @@ cmake -B build \
   -DBUILD_TRT_BACKEND=OFF \
   -DBUILD_ASCEND_BACKEND=OFF \
   -DBUILD_ONNX_BACKEND=ON \
+  -DBUILD_ONNX_BACKEND_COREML=ON \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
