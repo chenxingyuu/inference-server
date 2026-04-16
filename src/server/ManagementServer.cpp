@@ -1,7 +1,9 @@
 #include "server/ManagementServer.h"
+#include "stream/StreamHealthRegistry.h"
 #include "metrics/Metrics.h"
 #include "common/Logger.h"
 #include "common/Config.h"
+#include <chrono>
 
 // cpp-httplib single-header HTTP server
 #define CPPHTTPLIB_OPENSSL_SUPPORT 0
@@ -81,8 +83,99 @@ ManagementServer::~ManagementServer() {
 
 void ManagementServer::registerHandlers() {
     // ── GET /healthz ─────────────────────────────────────────────────────────
+    // Liveness probe: always 200 if the process is alive.
     srv_->Get("/healthz", [](const httplib::Request&, httplib::Response& res) {
         res.set_content("OK\n", "text/plain");
+        res.status = 200;
+    });
+
+    // ── GET /health ───────────────────────────────────────────────────────────
+    // Readiness probe: reflects per-stream health state.
+    // 200 = ok (all streams STREAMING or CONNECTING)
+    // 207 = degraded (at least one DEGRADED stream, but engine is running)
+    // 503 = critical (no streams STREAMING at all)
+    srv_->Get("/health", [this](const httplib::Request&, httplib::Response& res) {
+        auto all = StreamHealthRegistry::get().getAllHealth();
+
+        int streaming_count   = 0;
+        int reconnecting_count = 0;
+        int degraded_count    = 0;
+
+        for (const auto& [id, h] : all) {
+            switch (h.state) {
+                case StreamState::STREAMING:    ++streaming_count;    break;
+                case StreamState::RECONNECTING: ++reconnecting_count; break;
+                case StreamState::DEGRADED:     ++degraded_count;     break;
+                default: break;
+            }
+        }
+
+        auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now() - start_time_).count();
+
+        std::string status;
+        int http_status;
+        if (degraded_count > 0) {
+            status = "degraded";
+            http_status = 207;
+        } else if (!all.empty() && streaming_count == 0) {
+            status = "critical";
+            http_status = 503;
+        } else {
+            status = "ok";
+            http_status = 200;
+        }
+
+        json body = {
+            {"status",             status},
+            {"active_streams",     static_cast<int>(all.size())},
+            {"streaming_count",    streaming_count},
+            {"reconnecting_count", reconnecting_count},
+            {"degraded_count",     degraded_count},
+            {"engine_uptime_seconds", static_cast<int64_t>(uptime)}
+        };
+        res.set_content(body.dump(), "application/json");
+        res.status = http_status;
+    });
+
+    // ── GET /streams/{id}/health ──────────────────────────────────────────────
+    // Per-stream health detail. Must be registered BEFORE generic DELETE /streams/(.+)
+    // so that the pattern does not shadow it — httplib matches routes in order.
+    srv_->Get(R"(/streams/([^/]+)/health)", [](const httplib::Request& req,
+                                               httplib::Response& res) {
+        std::string id = req.matches[1];
+        auto h = StreamHealthRegistry::get().getHealth(id);
+
+        // If state is STOPPED and the stream was never registered, treat as 404.
+        // (A legitimately stopped stream still returns data with state=STOPPED.)
+        auto all = StreamHealthRegistry::get().getAllHealth();
+        bool found = false;
+        for (const auto& [sid, _] : all)
+            if (sid == id) { found = true; break; }
+
+        if (!found) {
+            json err = {{"error", "stream not found: " + id}};
+            res.set_content(err.dump(), "application/json");
+            res.status = 404;
+            return;
+        }
+
+        double now_ts = std::chrono::duration<double>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        double last_frame_age = (h.last_frame_ts > 0.0)
+            ? (now_ts - h.last_frame_ts) : -1.0;
+        double state_dur = (h.state_changed_at > 0.0)
+            ? (now_ts - h.state_changed_at) : 0.0;
+
+        json body = {
+            {"stream_id",              id},
+            {"state",                  streamStateStr(h.state)},
+            {"reconnect_count",        h.reconnect_count},
+            {"consecutive_failures",   h.consecutive_failures},
+            {"last_frame_age_seconds", last_frame_age},
+            {"state_duration_seconds", state_dur}
+        };
+        res.set_content(body.dump(), "application/json");
         res.status = 200;
     });
 

@@ -128,20 +128,24 @@ AppConfig loadConfig(const std::string& yaml_path) {
         s.url               = sn["url"].as<std::string>();
         s.model_id          = sn["model_id"].as<std::string>();
         s.sample_fps        = sn["sample_fps"].as<int>(5);
-        s.reconnect_delay_ms = sn["reconnect_delay_ms"].as<int>(3000);
-        s.use_hwdec         = sn["use_hwdec"].as<bool>(false);
-        s.tracker           = parseTrackerType(sn["tracker"].as<std::string>("none"));
+        s.reconnect_delay_ms     = sn["reconnect_delay_ms"].as<int>(3000);
+        s.max_reconnect_delay_ms = sn["max_reconnect_delay_ms"].as<int>(60000);
+        s.max_reconnect_attempts = sn["max_reconnect_attempts"].as<int>(5);
+        s.use_hwdec              = sn["use_hwdec"].as<bool>(false);
+        s.tracker                = parseTrackerType(sn["tracker"].as<std::string>("none"));
         cfg.streams.push_back(std::move(s));
     }
 
     // ── kafka ─────────────────────────────────────────────────────────────────
     if (auto kn = root["kafka"]) {
-        cfg.kafka.brokers        = kn["brokers"].as<std::string>("kafka:9092");
-        cfg.kafka.topic          = kn["topic"].as<std::string>("inference-results");
-        cfg.kafka.batch_size     = kn["batch_size"].as<int>(100);
-        cfg.kafka.linger_ms      = kn["linger_ms"].as<int>(5);
-        cfg.kafka.compression    = kn["compression"].as<std::string>("lz4");
-        cfg.kafka.queue_capacity = kn["queue_capacity"].as<int>(10000);
+        cfg.kafka.brokers               = kn["brokers"].as<std::string>("kafka:9092");
+        cfg.kafka.topic                 = kn["topic"].as<std::string>("inference-results");
+        cfg.kafka.batch_size            = kn["batch_size"].as<int>(100);
+        cfg.kafka.linger_ms             = kn["linger_ms"].as<int>(5);
+        cfg.kafka.compression           = kn["compression"].as<std::string>("lz4");
+        cfg.kafka.queue_capacity        = kn["queue_capacity"].as<int>(10000);
+        cfg.kafka.heartbeat_topic       = kn["heartbeat_topic"].as<std::string>("inference-heartbeat");
+        cfg.kafka.heartbeat_interval_ms = kn["heartbeat_interval_ms"].as<int>(5000);
     }
 
     // ── frame_archive ──────────────────────────────────────────────────────────

@@ -59,6 +59,8 @@ struct StreamConfig {
     std::string model_id;
     int         sample_fps{5};
     int         reconnect_delay_ms{3000};
+    int         max_reconnect_delay_ms{60000};  // Phase 10: exponential backoff ceiling
+    int         max_reconnect_attempts{5};       // Phase 10: consecutive failures before DEGRADED
     bool        use_hwdec{false};  // true → NVDEC hardware decode
     TrackerType tracker{TrackerType::None};
 };
@@ -70,6 +72,9 @@ struct KafkaConfig {
     int         linger_ms{5};
     std::string compression{"lz4"};
     int         queue_capacity{10000};
+    // Phase 10: heartbeat
+    std::string heartbeat_topic{"inference-heartbeat"};
+    int         heartbeat_interval_ms{5000};
 };
 
 struct MinioConfig {

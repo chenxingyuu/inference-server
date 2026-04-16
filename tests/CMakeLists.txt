@@ -26,6 +26,9 @@ add_library(infer_testable STATIC
     ${CMAKE_SOURCE_DIR}/src/tracker/ByteTrackTracker.cpp
     ${CMAKE_SOURCE_DIR}/src/tracker/TrackerManager.cpp
     ${CMAKE_SOURCE_DIR}/src/pipeline/ResultMerger.cpp
+    # Phase 10: no hardware dependencies
+    ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
 )
 
 target_include_directories(infer_testable PUBLIC
@@ -60,3 +63,27 @@ add_infer_test(test_iou_nms)
 add_infer_test(test_yolov5_decoder)
 add_infer_test(test_result_merger)
 add_infer_test(test_tracker)
+
+# Phase 10: stream health state machine (no hardware deps)
+add_infer_test(test_stream_health)
+add_infer_test(test_reconnect_backoff)
+
+# Phase 10: heartbeat JSON serialization (needs rdkafka for linking HeartbeatPublisher.cpp)
+add_executable(test_heartbeat_publisher test_heartbeat_publisher.cpp
+    ${CMAKE_SOURCE_DIR}/src/publisher/HeartbeatPublisher.cpp
+    ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+)
+target_include_directories(test_heartbeat_publisher PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${RDKAFKA_INCLUDE_DIRS}
+)
+target_link_libraries(test_heartbeat_publisher PRIVATE
+    GTest::gtest_main
+    nlohmann_json::nlohmann_json
+    spdlog::spdlog
+    ${RDKAFKA_LIBRARIES}
+    Threads::Threads
+)
+add_test(NAME test_heartbeat_publisher COMMAND test_heartbeat_publisher
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)

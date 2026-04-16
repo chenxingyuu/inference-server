@@ -81,6 +81,7 @@ set(STREAM_SOURCES
     src/stream/FFmpegDecoder.cpp
     src/stream/FrameBuffer.cpp
     src/stream/StreamPool.cpp
+    src/stream/StreamHealthRegistry.cpp
 )
 
 set(INFER_SOURCES
@@ -122,6 +123,7 @@ set(TRACKER_SOURCES
 set(PUBLISHER_SOURCES
     src/publisher/KafkaPublisher.cpp
     src/publisher/AttributePublisher.cpp
+    src/publisher/HeartbeatPublisher.cpp
 )
 
 set(ARCHIVE_SOURCES

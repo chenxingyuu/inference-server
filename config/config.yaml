@@ -78,7 +78,9 @@ streams:
     url: "rtsp://192.168.1.100/stream1"
     model_id: "yolov8n_trt"
     sample_fps: 5
-    reconnect_delay_ms: 3000
+    reconnect_delay_ms: 3000      # initial reconnect delay (ms)
+    max_reconnect_delay_ms: 60000 # Phase 10: exponential backoff ceiling (ms)
+    max_reconnect_attempts: 5     # Phase 10: consecutive failures before DEGRADED
     use_hwdec: true
     tracker: "bytetrack"
 
@@ -87,6 +89,8 @@ streams:
     model_id: "yolov8n_trt"
     sample_fps: 5
     reconnect_delay_ms: 3000
+    max_reconnect_delay_ms: 60000
+    max_reconnect_attempts: 5
     use_hwdec: true
     tracker: "none"
 
@@ -97,6 +101,9 @@ kafka:
   linger_ms: 5
   compression: "lz4"
   queue_capacity: 10000
+  # Phase 10: heartbeat — allows downstream to distinguish 3 silence conditions
+  heartbeat_topic: "inference-heartbeat"
+  heartbeat_interval_ms: 5000
 
 frame_archive:
   enabled: true

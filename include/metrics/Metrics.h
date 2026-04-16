@@ -34,6 +34,13 @@ public:
     void incFramesUploadFailed();
     void setFrameArchiveQueueDepth(uint64_t depth);
 
+    // ── Phase 10: stream-level health gauges ──────────────────────────────────
+    // Updated by HeartbeatPublisher on each heartbeat interval (not on hot path).
+    void setStreamState(const std::string& stream_id, uint32_t state);
+    void setStreamReconnectCount(const std::string& stream_id, uint32_t n);
+    void setStreamConsecutiveFailures(const std::string& stream_id, uint32_t n);
+    void setStreamLastFrameAgeSeconds(const std::string& stream_id, double age);
+
     // ── Exposition ────────────────────────────────────────────────────────────
     // Returns the full Prometheus text format (OpenMetrics compatible).
     std::string serialize() const;
@@ -73,6 +80,24 @@ private:
         void snapshot(std::unordered_map<std::string, uint64_t>& out) const;
     };
 
+    // Labeled gauge map: label_value → uint64 (state, counts)
+    struct LabeledGaugeUint {
+        mutable std::mutex                         mu;
+        std::unordered_map<std::string, uint64_t> data;
+
+        void set(const std::string& label, uint64_t v);
+        void snapshot(std::unordered_map<std::string, uint64_t>& out) const;
+    };
+
+    // Labeled gauge map: label_value → double (age in seconds, etc.)
+    struct LabeledGaugeDouble {
+        mutable std::mutex                       mu;
+        std::unordered_map<std::string, double> data;
+
+        void set(const std::string& label, double v);
+        void snapshot(std::unordered_map<std::string, double>& out) const;
+    };
+
     // Labeled histogram map: label_value → Histogram
     struct LabeledHistogram {
         mutable std::mutex                           mu;
@@ -96,6 +121,12 @@ private:
     std::atomic<uint64_t> frames_upload_failed_{0};
     std::atomic<uint64_t> frame_archive_queue_depth_{0};
 
+    // Phase 10: stream-level health gauges
+    LabeledGaugeUint   stream_state_;
+    LabeledGaugeUint   stream_reconnect_count_;
+    LabeledGaugeUint   stream_consecutive_failures_;
+    LabeledGaugeDouble stream_last_frame_age_;
+
     // Serialization helpers
     static std::string serializeCounter(
         const std::string& name,
@@ -111,6 +142,18 @@ private:
         const std::string& name,
         const std::string& help,
         uint64_t value);
+
+    static std::string serializeLabeledGaugeUint(
+        const std::string& name,
+        const std::string& help,
+        const std::string& label_name,
+        const std::unordered_map<std::string, uint64_t>& data);
+
+    static std::string serializeLabeledGaugeDouble(
+        const std::string& name,
+        const std::string& help,
+        const std::string& label_name,
+        const std::unordered_map<std::string, double>& data);
 
     static std::string serializeHistogram(
         const std::string& name,

@@ -5,6 +5,7 @@
 #include "decoder/DecoderFactory.h"
 #include "pipeline/ModelManager.h"
 #include "publisher/KafkaPublisher.h"
+#include "publisher/HeartbeatPublisher.h"
 #include "server/ManagementServer.h"
 #include "archive/FrameArchiver.h"
 #include <curl/curl.h>
@@ -111,6 +112,16 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // ── Start heartbeat publisher (Phase 10) ─────────────────────────────────
+    std::unique_ptr<infer::HeartbeatPublisher> heartbeat;
+    try {
+        heartbeat = std::make_unique<infer::HeartbeatPublisher>(cfg.kafka);
+        heartbeat->start();
+    } catch (const std::exception& e) {
+        LOG_WARN("HeartbeatPublisher init failed (non-fatal): {}", e.what());
+        heartbeat.reset();
+    }
+
     // ── Start management HTTP server ──────────────────────────────────────────
     infer::ManagementServer mgmt_server(
         cfg.server.management_port, pool, model_manager);
@@ -128,6 +139,8 @@ int main(int argc, char* argv[]) {
     LOG_INFO("Shutting down…");
 
     mgmt_server.stop();
+
+    if (heartbeat) heartbeat->stop();
 
     // Unload all models (drains queues before destroying workers)
     for (const auto& [id, _] : model_manager.listModels()) {

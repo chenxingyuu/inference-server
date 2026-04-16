@@ -1,4 +1,5 @@
 #include "stream/FFmpegDecoder.h"
+#include "stream/StreamHealthRegistry.h"
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
 
@@ -221,6 +222,7 @@ bool FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
                         }
 
                         Metrics::get().incFramesDecoded(stream_id_);
+                        StreamHealthRegistry::get().onFrameDecoded(stream_id_, f.meta.capture_ts);
                         cb(std::move(f));
                         ok = true;
                     }
@@ -236,31 +238,62 @@ bool FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
     return ok;
 }
 
+// Compute exponential backoff delay in milliseconds.
+// delay = min(base * 2^failures, ceiling), with ±10% jitter.
+static int64_t backoffDelayMs(int base_ms, int ceiling_ms, uint32_t failures) {
+    int64_t delay = static_cast<int64_t>(base_ms) * (1LL << std::min(failures, 6u));
+    delay = std::min(delay, static_cast<int64_t>(ceiling_ms));
+    // ±10% jitter to avoid thundering herd
+    int64_t jitter = (delay / 10);
+    if (jitter > 0)
+        delay += (static_cast<int64_t>(rand()) % (jitter * 2 + 1)) - jitter;
+    return std::max(delay, static_cast<int64_t>(base_ms));
+}
+
 void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
     running_.store(true);
     LOG_INFO("[{}] decode thread started: {} hwdec={}", cfg.id, cfg.url, cfg.use_hwdec);
+
+    auto& reg = StreamHealthRegistry::get();
+    reg.onStreamAdded(cfg.id, cfg.max_reconnect_attempts);
 
     const int sample_interval = std::max(1, 25 / std::max(1, cfg.sample_fps));
 
     while (!stop_flag_.load()) {
         if (!openStream(cfg)) {
-            LOG_WARN("[{}] open failed, retry in {}ms", cfg.id, cfg.reconnect_delay_ms);
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(cfg.reconnect_delay_ms));
+            reg.onReconnectFailed(cfg.id);
+            uint32_t failures = reg.getHealth(cfg.id).consecutive_failures;
+            int64_t delay = backoffDelayMs(cfg.reconnect_delay_ms,
+                                           cfg.max_reconnect_delay_ms, failures);
+            LOG_WARN("[{}] open failed (attempt {}), retry in {}ms",
+                     cfg.id, failures, delay);
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
             continue;
+        }
+
+        // Distinguish first open (CONNECTING) from reconnect (RECONNECTING/DEGRADED)
+        {
+            StreamState cur = reg.getHealth(cfg.id).state;
+            if (cur == StreamState::CONNECTING)
+                reg.onStreamOpened(cfg.id);
+            else
+                reg.onReconnectSucceeded(cfg.id);
         }
 
         readAndDecode(cb, sample_interval);
         closeStream();
 
         if (!stop_flag_.load()) {
-            LOG_WARN("[{}] stream dropped, reconnecting in {}ms",
-                     cfg.id, cfg.reconnect_delay_ms);
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(cfg.reconnect_delay_ms));
+            reg.onStreamDropped(cfg.id);
+            uint32_t failures = reg.getHealth(cfg.id).consecutive_failures;
+            int64_t delay = backoffDelayMs(cfg.reconnect_delay_ms,
+                                           cfg.max_reconnect_delay_ms, failures);
+            LOG_WARN("[{}] stream dropped, reconnecting in {}ms", cfg.id, delay);
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
         }
     }
 
+    reg.onStreamRemoved(cfg.id);
     LOG_INFO("[{}] decode thread stopped", cfg.id);
     running_.store(false);
 }

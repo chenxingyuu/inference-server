@@ -135,6 +135,46 @@ void Metrics::setFrameArchiveQueueDepth(uint64_t depth) {
     frame_archive_queue_depth_.store(depth, std::memory_order_relaxed);
 }
 
+// ── Phase 10: stream-level health gauges ──────────────────────────────────────
+
+void Metrics::LabeledGaugeUint::set(const std::string& label, uint64_t v) {
+    std::lock_guard lock(mu);
+    data[label] = v;
+}
+
+void Metrics::LabeledGaugeUint::snapshot(
+    std::unordered_map<std::string, uint64_t>& out) const {
+    std::lock_guard lock(mu);
+    out = data;
+}
+
+void Metrics::LabeledGaugeDouble::set(const std::string& label, double v) {
+    std::lock_guard lock(mu);
+    data[label] = v;
+}
+
+void Metrics::LabeledGaugeDouble::snapshot(
+    std::unordered_map<std::string, double>& out) const {
+    std::lock_guard lock(mu);
+    out = data;
+}
+
+void Metrics::setStreamState(const std::string& stream_id, uint32_t state) {
+    stream_state_.set(stream_id, state);
+}
+
+void Metrics::setStreamReconnectCount(const std::string& stream_id, uint32_t n) {
+    stream_reconnect_count_.set(stream_id, n);
+}
+
+void Metrics::setStreamConsecutiveFailures(const std::string& stream_id, uint32_t n) {
+    stream_consecutive_failures_.set(stream_id, n);
+}
+
+void Metrics::setStreamLastFrameAgeSeconds(const std::string& stream_id, double age) {
+    stream_last_frame_age_.set(stream_id, age);
+}
+
 // ── Serialization ─────────────────────────────────────────────────────────────
 
 std::string Metrics::serializeCounter(
@@ -173,6 +213,35 @@ std::string Metrics::serializeSimpleGauge(
     oss << "# HELP " << name << " " << help << "\n";
     oss << "# TYPE " << name << " gauge\n";
     oss << name << " " << value << "\n";
+    return oss.str();
+}
+
+std::string Metrics::serializeLabeledGaugeUint(
+    const std::string& name,
+    const std::string& help,
+    const std::string& label_name,
+    const std::unordered_map<std::string, uint64_t>& data)
+{
+    std::ostringstream oss;
+    oss << "# HELP " << name << " " << help << "\n";
+    oss << "# TYPE " << name << " gauge\n";
+    for (const auto& [label, val] : data)
+        oss << name << "{" << label_name << "=\"" << label << "\"} " << val << "\n";
+    return oss.str();
+}
+
+std::string Metrics::serializeLabeledGaugeDouble(
+    const std::string& name,
+    const std::string& help,
+    const std::string& label_name,
+    const std::unordered_map<std::string, double>& data)
+{
+    std::ostringstream oss;
+    oss << "# HELP " << name << " " << help << "\n";
+    oss << "# TYPE " << name << " gauge\n";
+    for (const auto& [label, val] : data)
+        oss << name << "{" << label_name << "=\"" << label << "\"} "
+            << std::fixed << std::setprecision(3) << val << "\n";
     return oss.str();
 }
 
@@ -255,6 +324,33 @@ std::string Metrics::serialize() const {
         infer_batches_.snapshot(snap);
         out << serializeCounter("infer_batches_total",
             "Total inference batches processed per model", "model_id", snap);
+    }
+
+    // Phase 10: stream-level health gauges
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        stream_state_.snapshot(snap);
+        out << serializeLabeledGaugeUint("stream_state",
+            "Current stream state (0=CONNECTING 1=STREAMING 2=RECONNECTING 3=DEGRADED 4=STOPPED)",
+            "stream_id", snap);
+    }
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        stream_reconnect_count_.snapshot(snap);
+        out << serializeLabeledGaugeUint("stream_reconnect_count",
+            "Total successful reconnects since start", "stream_id", snap);
+    }
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        stream_consecutive_failures_.snapshot(snap);
+        out << serializeLabeledGaugeUint("stream_consecutive_failures",
+            "Consecutive reconnect failures (cleared on success)", "stream_id", snap);
+    }
+    {
+        std::unordered_map<std::string, double> snap;
+        stream_last_frame_age_.snapshot(snap);
+        out << serializeLabeledGaugeDouble("stream_last_frame_age_seconds",
+            "Seconds since last decoded frame arrived", "stream_id", snap);
     }
 
     return out.str();
