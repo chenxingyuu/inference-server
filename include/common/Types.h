@@ -51,6 +51,10 @@ struct StreamMeta {
     std::string stream_id;
     std::string model_id;
     double      capture_ts{0.0};  // epoch seconds at capture
+    // Monotonic timestamp captured alongside capture_ts.
+    // Used for duration math (latency) without being affected by NTP/clock jumps.
+    // Unit: nanoseconds since an unspecified steady_clock epoch.
+    uint64_t    capture_mono_ns{0};
     uint64_t    frame_seq{0};
     int         orig_width{0};
     int         orig_height{0};
@@ -112,6 +116,8 @@ struct InferResult {
     std::string              model_id;
     std::vector<Detection>   detections;
     uint64_t                 frame_seq{0};  // detection index for cascade secondary routing
+    // Internal-only monotonic capture timestamp (ns). Not serialized.
+    uint64_t                 frame_mono_ns{0};
     std::string              frame_local_path;   // local archived frame path
     std::string              frame_url;          // optional MinIO URL
     std::string              frame_upload_state; // pending/uploaded/failed/disabled

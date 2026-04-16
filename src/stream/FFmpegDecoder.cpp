@@ -24,6 +24,12 @@ double nowEpoch() {
     using namespace std::chrono;
     return duration<double>(system_clock::now().time_since_epoch()).count();
 }
+
+uint64_t nowSteadyNs() {
+    using namespace std::chrono;
+    return static_cast<uint64_t>(
+        duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count());
+}
 } // namespace
 
 AVPixelFormat FFmpegDecoder::getHWFormat(AVCodecContext* /*ctx*/, const AVPixelFormat* pix_fmts) {
@@ -181,6 +187,7 @@ bool FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
                         Frame f;
                         f.meta.stream_id   = stream_id_;
                         f.meta.capture_ts  = nowEpoch();
+                        f.meta.capture_mono_ns = nowSteadyNs();
                         f.meta.frame_seq   = frame_seq_;
                         f.meta.orig_width  = codec_ctx_->width;
                         f.meta.orig_height = codec_ctx_->height;

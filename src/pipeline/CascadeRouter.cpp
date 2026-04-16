@@ -128,7 +128,7 @@ void CascadeRouter::route(const InferResult& result,
                 mini_batch.gpu_frames.push_back(std::move(crop_gb));
                 mini_batch.metas.push_back(StreamMeta{
                     result.stream_id, cas.model_id,
-                    result.frame_ts, static_cast<uint64_t>(i), img_w, img_h});
+                    result.frame_ts, result.frame_mono_ns, static_cast<uint64_t>(i), img_w, img_h});
                 mini_batch.is_gpu = true;
                 secondary->enqueue(std::move(mini_batch));
 #endif
@@ -145,6 +145,7 @@ void CascadeRouter::route(const InferResult& result,
                 sm.stream_id   = result.stream_id;
                 sm.model_id    = cas.model_id;
                 sm.capture_ts  = result.frame_ts;
+                sm.capture_mono_ns = result.frame_mono_ns;
                 sm.frame_seq   = static_cast<uint64_t>(i);  // det_idx
                 sm.orig_width  = img_w;
                 sm.orig_height = img_h;

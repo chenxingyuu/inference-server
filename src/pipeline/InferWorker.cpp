@@ -82,6 +82,9 @@ void InferWorker::workerLoop() {
         if (batch.empty()) continue;
 
         const double dequeue_ts = nowEpoch();
+        const uint64_t dequeue_mono_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
 
         try {
             auto infer_start = std::chrono::steady_clock::now();
@@ -90,6 +93,9 @@ void InferWorker::workerLoop() {
             backend_->infer(batch, output);
 
             auto infer_end = std::chrono::steady_clock::now();
+            const uint64_t infer_end_mono_ns = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    infer_end.time_since_epoch()).count());
             const double infer_ms = std::chrono::duration<double, std::milli>(
                 infer_end - infer_start).count();
             Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
@@ -107,10 +113,17 @@ void InferWorker::workerLoop() {
                 InferResult r;
                 r.stream_id       = batch.metas[i].stream_id;
                 r.frame_ts        = batch.metas[i].capture_ts;
+                r.frame_mono_ns   = batch.metas[i].capture_mono_ns;
                 r.frame_seq       = batch.metas[i].frame_seq;
                 r.infer_ts        = infer_ts;
-                r.latency_ms      = (infer_ts - r.frame_ts) * 1000.0;
-                r.queue_latency_ms = (dequeue_ts - r.frame_ts) * 1000.0;
+                if (r.frame_mono_ns != 0) {
+                    r.queue_latency_ms = (static_cast<double>(dequeue_mono_ns - r.frame_mono_ns)) / 1e6;
+                    r.latency_ms       = (static_cast<double>(infer_end_mono_ns - r.frame_mono_ns)) / 1e6;
+                } else {
+                    // Fallback: compute using epoch seconds (can be affected by system clock jumps).
+                    r.queue_latency_ms = (dequeue_ts - r.frame_ts) * 1000.0;
+                    r.latency_ms       = (infer_ts - r.frame_ts) * 1000.0;
+                }
                 r.infer_ms        = infer_ms;
                 r.decode_ms       = decode_ms;
                 r.model_id        = model_cfg_.id;
