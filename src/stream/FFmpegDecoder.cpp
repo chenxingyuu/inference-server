@@ -104,7 +104,7 @@ bool FFmpegDecoder::openStream(const StreamConfig& cfg) {
         codec = avcodec_find_decoder(vs->codecpar->codec_id);
     }
     if (!codec) {
-        LOG_ERROR("[{}] no decoder for codec_id {}", stream_id_, vs->codecpar->codec_id);
+        LOG_ERROR("[{}] no decoder for codec_id {}", stream_id_, static_cast<int>(vs->codecpar->codec_id));
         closeStream();
         return false;
     }

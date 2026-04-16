@@ -2,7 +2,7 @@
 #include "metrics/Metrics.h"
 #include "common/Logger.h"
 #include <nlohmann/json.hpp>
-#include <rdkafka.h>
+#include <librdkafka/rdkafka.h>
 #include <chrono>
 #include <stdexcept>
 

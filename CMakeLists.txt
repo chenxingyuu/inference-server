@@ -195,6 +195,11 @@ target_include_directories(infer_core PUBLIC
     ${Boost_INCLUDE_DIRS}
 )
 
+target_link_directories(infer_core PUBLIC
+    ${FFMPEG_LIBRARY_DIRS}
+    ${RDKAFKA_LIBRARY_DIRS}
+)
+
 target_link_libraries(infer_core PUBLIC
     Threads::Threads
     ${FFMPEG_LIBRARIES}
