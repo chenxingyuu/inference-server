@@ -47,170 +47,46 @@ RTSP -> FFmpegDecoder(可选HW解码) -> FrameBuffer
 | Ascend CANN | 6.x/8.x（按镜像） | Ascend 后端必需 |
 | ONNX Runtime | >= 1.18（自动下载） | CPU / MPS 后端必需 |
 
-## 本地编译
 
-### TensorRT 构建
+## Makefile 快速命令
 
-```bash
-cmake -B build \
-  -DBUILD_TRT_BACKEND=ON \
-  -DBUILD_ASCEND_BACKEND=OFF \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-```
-
-### Ascend 构建
+项目根目录提供了统一的 `Makefile`，默认后端为 CPU（ONNX）。
 
 ```bash
-cmake -B build \
-  -DBUILD_TRT_BACKEND=OFF \
-  -DBUILD_ASCEND_BACKEND=ON \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
+# 查看所有常用目标
+make help
+
+# 本地构建（默认 CPU）
+make build
+
+# 指定后端构建
+make build-cpu
+make build-gpu
+make build-npu
+make build-tests
+
+# 本地运行（默认使用 config/config.cpu.yaml）
+make run
+
+# 覆盖配置文件运行
+make run CONFIG=config/config.cpu.yaml
+
+# 质量门禁与测试
+make validate
+make test
+make clean
+
+# Docker Compose 启停
+make up
+make down
+make up-cpu
+make down-cpu
+
+# Docker 镜像构建
+make docker-build-cpu
+make docker-build-gpu
+make docker-build-npu
 ```
-
-### CPU / MPS 构建（无 GPU）
-
-```bash
-cmake -B build \
-  -DBUILD_TRT_BACKEND=OFF \
-  -DBUILD_ASCEND_BACKEND=OFF \
-  -DBUILD_ONNX_BACKEND=ON \
-  -DBUILD_ONNX_BACKEND_COREML=ON \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-```
-
-ONNX Runtime 会由 CMake 自动下载（v1.18.0）。macOS Apple Silicon 若需 MPS 加速，追加 `-DBUILD_ONNX_BACKEND_COREML=ON`。
-
-### 可选：构建测试
-
-```bash
-cmake -B build \
-  -DBUILD_TESTS=ON \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-## Docker 使用
-
-### TensorRT 镜像构建
-
-```bash
-DOCKER_BUILDKIT=1 docker build \
-  -t inference-server:tensorrt \
-  -f docker/Dockerfile.tensorrt \
-  --build-arg CUDA_DEVEL_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04 \
-  --build-arg CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
-  .
-```
-
-### Ascend 镜像构建
-
-```bash
-DOCKER_BUILDKIT=1 docker build \
-  -t inference-server:ascend \
-  -f docker/Dockerfile.ascend \
-  --build-arg ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11 \
-  .
-```
-
-### CPU 镜像构建
-
-```bash
-DOCKER_BUILDKIT=1 docker build \
-  -t inference-server:cpu \
-  -f docker/Dockerfile.cpu \
-  .
-```
-
-### Compose 启动
-
-```bash
-# TensorRT 方案（含 Kafka + Prometheus + Grafana）
-docker compose -f docker/docker-compose.nvidia.yml up -d
-
-# Ascend 方案（含 Kafka）
-docker compose -f docker/docker-compose.ascend.yml up -d
-
-# CPU 方案（无 GPU，含 Kafka + Prometheus + Grafana）
-docker compose -f docker/docker-compose.cpu.yml up -d
-```
-
-## 启动与配置
-
-默认启动命令：
-
-```bash
-./build/infer_server /config/config.yaml
-```
-
-配置文件路径：`config/config.yaml`。
-
-关键配置片段（已包含 detector + cascade classifier 示例）：
-
-```yaml
-server:
-  stream_pool_threads: 32
-  max_streams: 100
-  management_port: 8080
-
-models:
-  - id: "yolov8n_trt"
-    version: yolov8
-    backend: tensorrt
-    engine_path: "/models/yolov8n_b16.engine"
-    batch_size: 16
-    instance_count: 1
-    preferred_batch_sizes: [4, 8, 16]
-    max_queue_delay_us: 10000
-    cascade:
-      - model_id: "cls_vehicle"
-        trigger_classes: [2, 5, 7]
-        crop_expand: 0.05
-        attribute_key: "vehicle_type"
-
-  - id: "cls_vehicle"
-    model_type: classifier
-    backend: tensorrt
-    engine_path: "/models/cls_vehicle.engine"
-    batch_size: 32
-    class_names: ["sedan", "suv", "bus", "truck", "other"]
-
-streams:
-  - id: "cam_001"
-    url: "rtsp://192.168.1.100/stream1"
-    model_id: "yolov8n_trt"
-    sample_fps: 5
-    reconnect_delay_ms: 3000
-    use_hwdec: true
-    tracker: "bytetrack"
-
-kafka:
-  brokers: "kafka:9092"
-  topic: "inference-results"
-
-frame_archive:
-  enabled: true
-  local_dir: "/data/frames"
-  save_interval: 1
-  jpeg_quality: 90
-  queue_capacity: 4096
-  minio:
-    enabled: true
-    endpoint: "minio:9000"
-    bucket: "inference-frames"
-    access_key: "<CHANGE_ME_ACCESS_KEY>"
-    secret_key: "<CHANGE_ME_SECRET_KEY>"
-    region: "us-east-1"
-    use_ssl: false
-```
-
-Kafka 单事件会新增可选字段：
-- `frame_local_path`：本地归档路径（检测发布不等待上传）
-- `frame_url`：MinIO 目标 URL（上传成功与否不阻塞发布）
-- `frame_upload_state`：`pending` / `failed` / `disabled`
 
 ## HTTP 管理接口
 
