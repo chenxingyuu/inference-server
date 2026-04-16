@@ -115,7 +115,7 @@ struct InferResult {
 };
 
 // ── Device type ───────────────────────────────────────────────────────────────
-enum class DeviceType { CPU, CUDA, Ascend };
+enum class DeviceType { CPU, CUDA, Ascend, MPS };
 
 // ── YOLO model version ────────────────────────────────────────────────────────
 enum class YOLOVersion { v5, v8, v11, v26, Unknown };

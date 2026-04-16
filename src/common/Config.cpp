@@ -16,6 +16,7 @@ DeviceType parseDeviceType(const std::string& s) {
     if (s == "tensorrt" || s == "cuda" || s == "trt") return DeviceType::CUDA;
     if (s == "ascend" || s == "acl")                  return DeviceType::Ascend;
     if (s == "cpu")                                    return DeviceType::CPU;
+    if (s == "mps" || s == "metal")                   return DeviceType::MPS;
     throw std::runtime_error("Unknown device type: " + s);
 }
 
@@ -62,6 +63,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
         m.version     = parseYOLOVersion(mn["version"].as<std::string>("yolov8"));
         m.backend     = parseDeviceType(mn["backend"].as<std::string>("tensorrt"));
         m.engine_path = mn["engine_path"].as<std::string>("");
+        m.onnx_path   = mn["onnx_path"].as<std::string>("");
         m.batch_size  = mn["batch_size"].as<int>(16);
         m.conf_thresh = mn["conf_thresh"].as<float>(0.4f);
         m.nms_thresh  = mn["nms_thresh"].as<float>(0.45f);

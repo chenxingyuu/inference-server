@@ -1,0 +1,66 @@
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+# Plain Ubuntu — no CUDA, no Ascend SDK required.
+# ONNX Runtime is downloaded automatically via CMake FetchContent.
+ARG BASE_IMAGE=ubuntu:22.04
+FROM ${BASE_IMAGE} AS builder
+ARG APT_MIRROR=
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    if [ -n "${APT_MIRROR}" ]; then \
+    sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    cmake ninja-build pkg-config git ca-certificates \
+    ccache \
+    libssl-dev \
+    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+    libopencv-dev \
+    libyaml-cpp-dev \
+    nlohmann-json3-dev \
+    libspdlog-dev \
+    libboost-dev \
+    librdkafka-dev \
+    libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
+    cmake -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DBUILD_TRT_BACKEND=OFF \
+    -DBUILD_ASCEND_BACKEND=OFF \
+    -DBUILD_ONNX_BACKEND=ON \
+    && cmake --build build --parallel $(nproc)
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM ${BASE_IMAGE}
+ARG APT_MIRROR=
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    if [ -n "${APT_MIRROR}" ]; then \
+    sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    libavcodec58 libavformat58 libavutil56 libswscale5 \
+    libopencv-core4.5d libopencv-imgproc4.5d \
+    libyaml-cpp0.7 \
+    librdkafka1 \
+    libspdlog1 \
+    libcurl4 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binary and the ONNX Runtime shared library downloaded by FetchContent
+COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server
+COPY --from=builder /src/build/_deps/onnxruntime_download-src/lib/libonnxruntime.so* \
+    /usr/local/lib/
+RUN ldconfig
+
+VOLUME ["/models", "/config"]
+ENTRYPOINT ["/usr/local/bin/infer_server", "/config/config.yaml"]

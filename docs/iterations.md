@@ -206,3 +206,19 @@
 - `HeartbeatPublisher` 使用独立 Kafka producer，不复用 `KafkaPublisher`（语义分离，独立 topic）
 - Metrics 刷新放在心跳循环，不在解码热路径上操作锁
 - `/healthz` 保持无条件 200（K8s liveness），`/health` 作为 readiness probe
+
+---
+
+## Phase 11 — CPU / MPS 推理后端（ONNX Runtime）
+
+**目标**：无 GPU 的开发机和 CI 环境可跑完整链路，验证 decoder / pipeline 不再依赖硬件。
+
+**新增**：
+- `OnnxBackend`：实现 `IInferBackend`，CPU EP 跨平台可用，MPS EP 走 CoreML（macOS Apple Silicon，`BUILD_ONNX_BACKEND_COREML=ON`，未编译时自动降级 CPU）
+- `DeviceType::MPS`、`ModelConfig.onnx_path`
+- `CMakeLists.txt`：`BUILD_ONNX_BACKEND` / `BUILD_ONNX_BACKEND_COREML` 选项；`find_package` 优先，找不到自动 FetchContent 下载 ORT v1.18.0
+- `docker/Dockerfile.cpu` + `docker/docker-compose.cpu.yml`：无 CUDA 依赖的 CPU 推理栈
+
+**关键决策**：
+- MPS 不提供 Docker 镜像（macOS 容器无法访问 Metal GPU）
+- 预处理与 `AscendBackend` 一致，现有 decoder 零改动

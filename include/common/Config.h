@@ -30,6 +30,9 @@ struct ModelConfig {
     // Ascend: batch_size -> .om path
     std::map<int, std::string> om_paths;
 
+    // ONNX Runtime (CPU / MPS)
+    std::string onnx_path;
+
     InferShape  input_shape{};
     int         batch_size{16};
     float       conf_thresh{0.4f};

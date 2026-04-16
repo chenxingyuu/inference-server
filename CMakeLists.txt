@@ -9,10 +9,12 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ── Build options ──────────────────────────────────────────────────────────────
-option(BUILD_TRT_BACKEND    "Build TensorRT backend"    ON)
-option(BUILD_ASCEND_BACKEND "Build Ascend ACL backend"  OFF)
-option(BUILD_TESTS          "Build unit tests"           OFF)
-option(ENABLE_ASAN          "Enable AddressSanitizer"   OFF)
+option(BUILD_TRT_BACKEND         "Build TensorRT backend"                 ON)
+option(BUILD_ASCEND_BACKEND      "Build Ascend ACL backend"               OFF)
+option(BUILD_ONNX_BACKEND        "Build ONNX Runtime backend (CPU + MPS)" OFF)
+option(BUILD_ONNX_BACKEND_COREML "Enable CoreML EP for MPS (macOS only)"  OFF)
+option(BUILD_TESTS               "Build unit tests"                        OFF)
+option(ENABLE_ASAN               "Enable AddressSanitizer"                 OFF)
 
 # ── Module path ───────────────────────────────────────────────────────────────
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
@@ -60,6 +62,36 @@ if(BUILD_ASCEND_BACKEND)
     find_package(AscendCL REQUIRED)
 endif()
 
+if(BUILD_ONNX_BACKEND)
+    # Try system-installed onnxruntime first, then fall back to FetchContent
+    find_package(onnxruntime QUIET)
+    if(NOT onnxruntime_FOUND)
+        include(FetchContent)
+        if(APPLE)
+            set(_ORT_ARCHIVE "onnxruntime-osx-arm64-1.18.0.tgz")
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            set(_ORT_ARCHIVE "onnxruntime-linux-x64-1.18.0.tgz")
+        else()
+            message(FATAL_ERROR "BUILD_ONNX_BACKEND: unsupported platform for auto-download; install onnxruntime manually")
+        endif()
+        FetchContent_Declare(onnxruntime_download
+            URL "https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/${_ORT_ARCHIVE}"
+        )
+        FetchContent_MakeAvailable(onnxruntime_download)
+        # Create an imported target mirroring the installed package layout
+        add_library(onnxruntime SHARED IMPORTED)
+        if(APPLE)
+            set(_ORT_LIB "${onnxruntime_download_SOURCE_DIR}/lib/libonnxruntime.dylib")
+        else()
+            set(_ORT_LIB "${onnxruntime_download_SOURCE_DIR}/lib/libonnxruntime.so")
+        endif()
+        set_target_properties(onnxruntime PROPERTIES
+            IMPORTED_LOCATION "${_ORT_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_download_SOURCE_DIR}/include"
+        )
+    endif()
+endif()
+
 # ── cpp-httplib (header-only HTTP server) ──────────────────────────────────────
 include(FetchContent)
 FetchContent_Declare(
@@ -94,6 +126,9 @@ if(BUILD_TRT_BACKEND)
 endif()
 if(BUILD_ASCEND_BACKEND)
     list(APPEND INFER_SOURCES src/infer/AscendBackend.cpp)
+endif()
+if(BUILD_ONNX_BACKEND)
+    list(APPEND INFER_SOURCES src/infer/OnnxBackend.cpp)
 endif()
 
 set(DECODER_SOURCES
@@ -173,11 +208,14 @@ target_link_libraries(infer_core PUBLIC
     $<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer>
     $<$<BOOL:${BUILD_TRT_BACKEND}>:CUDA::cudart>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:AscendCL::ascendcl>
+    $<$<BOOL:${BUILD_ONNX_BACKEND}>:onnxruntime>
 )
 
 target_compile_definitions(infer_core PUBLIC
     $<$<BOOL:${BUILD_TRT_BACKEND}>:BUILD_TRT_BACKEND>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:BUILD_ASCEND_BACKEND>
+    $<$<BOOL:${BUILD_ONNX_BACKEND}>:BUILD_ONNX_BACKEND>
+    $<$<BOOL:${BUILD_ONNX_BACKEND_COREML}>:BUILD_ONNX_BACKEND_COREML>
 )
 
 # ── Executable ────────────────────────────────────────────────────────────────
