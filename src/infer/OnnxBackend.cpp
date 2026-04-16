@@ -73,26 +73,23 @@ void OnnxBackend::loadModel(const ModelConfig& cfg) {
         output_names_owned_.emplace_back(
             session_->GetOutputNameAllocated(i, alloc).get());
     }
-
     // Build raw pointer views (ORT API takes const char**)
     input_names_.clear();
     output_names_.clear();
     for (const auto& n : input_names_owned_)  input_names_.push_back(n.c_str());
     for (const auto& n : output_names_owned_) output_names_.push_back(n.c_str());
 
-    // ── Determine spatial dimensions from model metadata ─────────────────────
-    // Input shape is typically [-1, 3, H, W]; fall back to config values if dynamic.
-    auto in_info  = session_->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo();
-    auto in_shape = in_info.GetShape();  // vector<int64_t>
-
-    if (in_shape.size() == 4) {
-        if (in_shape[2] > 0) input_h_ = static_cast<int>(in_shape[2]);
-        if (in_shape[3] > 0) input_w_ = static_cast<int>(in_shape[3]);
-    }
-    // Override with explicit config values when provided
+    // ── Determine spatial dimensions from config ─────────────────────────────
+    // Runtime evidence shows some ORT builds can crash in GetShape() on load.
+    // Keep input shape source explicit and deterministic from config/defaults.
     if (cfg.input_shape.height > 0) input_h_ = cfg.input_shape.height;
     if (cfg.input_shape.width  > 0) input_w_ = cfg.input_shape.width;
 
+    if (input_h_ <= 0 || input_w_ <= 0) {
+        throw std::runtime_error(
+            "OnnxBackend: invalid input height/width (" + std::to_string(input_h_) + "×" +
+            std::to_string(input_w_) + "); check model input shape vs config input_size");
+    }
     // ── Pre-allocate staging buffer ───────────────────────────────────────────
     input_staging_.resize(
         static_cast<size_t>(max_batch_size_) * 3 * input_h_ * input_w_, 0.0f);

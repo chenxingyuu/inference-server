@@ -6,13 +6,13 @@ namespace infer {
 YOLOv8Decoder::YOLOv8Decoder(int num_classes)
     : num_classes_(num_classes) {}
 
-// output layout: [4 + num_classes, num_anchors]  (transposed from TRT export)
+// output layout: [4 + num_classes, num_anchors]
+// box coords are cx/cy/w/h (ultralytics raw ONNX export, no built-in NMS)
 std::vector<Detection> YOLOv8Decoder::decodeSingle(
     const float* data, int num_anchors,
     float conf_thresh, float nms_thresh,
     int img_w, int img_h)
 {
-    const int rows = 4 + num_classes_;
     std::vector<Detection> dets;
 
     for (int a = 0; a < num_anchors; ++a) {
@@ -25,10 +25,14 @@ std::vector<Detection> YOLOv8Decoder::decodeSingle(
         }
         if (best_prob < conf_thresh) continue;
 
-        float x1 = data[0 * num_anchors + a];
-        float y1 = data[1 * num_anchors + a];
-        float x2 = data[2 * num_anchors + a];
-        float y2 = data[3 * num_anchors + a];
+        float cx = data[0 * num_anchors + a];
+        float cy = data[1 * num_anchors + a];
+        float w  = data[2 * num_anchors + a];
+        float h  = data[3 * num_anchors + a];
+        float x1 = cx - w * 0.5f;
+        float y1 = cy - h * 0.5f;
+        float x2 = cx + w * 0.5f;
+        float y2 = cy + h * 0.5f;
 
         Detection d;
         d.class_id   = best_cls;
@@ -55,7 +59,7 @@ std::vector<std::vector<Detection>> YOLOv8Decoder::decode(
     float             nms_thresh)
 {
     const int num_anchors = 8400;
-    const int rows        = 4 + num_classes_;
+    const int rows        = 4 + num_classes_; // stride per batch element
     const int img_w       = shape.width;
     const int img_h       = shape.height;
 

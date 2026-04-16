@@ -73,16 +73,22 @@ add_executable(test_heartbeat_publisher test_heartbeat_publisher.cpp
     ${CMAKE_SOURCE_DIR}/src/publisher/HeartbeatPublisher.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+    ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
 )
 target_include_directories(test_heartbeat_publisher PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${RDKAFKA_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_link_directories(test_heartbeat_publisher PRIVATE
+    ${RDKAFKA_LIBRARY_DIRS}
 )
 target_link_libraries(test_heartbeat_publisher PRIVATE
     GTest::gtest_main
     nlohmann_json::nlohmann_json
     spdlog::spdlog
     ${RDKAFKA_LIBRARIES}
+    ${OpenCV_LIBS}
     Threads::Threads
 )
 add_test(NAME test_heartbeat_publisher COMMAND test_heartbeat_publisher

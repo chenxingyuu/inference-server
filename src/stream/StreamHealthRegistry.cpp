@@ -40,7 +40,7 @@ void StreamHealthRegistry::onStreamDropped(const std::string& id) {
     auto it = map_.find(id);
     if (it == map_.end()) return;
     auto& h = it->second.health;
-    if (h.state == StreamState::STREAMING) {
+    if (h.state == StreamState::STREAMING || h.state == StreamState::CONNECTING) {
         h.state            = StreamState::RECONNECTING;
         h.state_changed_at = now();
     }

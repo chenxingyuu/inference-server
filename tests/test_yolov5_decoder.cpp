@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "decoder/YOLOv5Decoder.h"
+#include "decoder/YOLOv8Decoder.h"
 #include "decoder/ClassifierDecoder.h"
 #include "decoder/DecoderFactory.h"
 #include "common/Config.h"
@@ -209,6 +210,150 @@ TEST(ClassifierDecoder, ZeroClassesThrows) {
     cfg.model_type  = ModelType::Classifier;
     cfg.num_classes = 0;
     EXPECT_THROW(ClassifierDecoder dec(cfg), std::runtime_error);
+}
+
+// ── YOLOv8Decoder ─────────────────────────────────────────────────────────
+//
+// Output layout: [4 + num_classes, num_anchors]  (column-major by anchor)
+// Box coords are cx/cy/w/h in pixel space (ultralytics raw ONNX export).
+
+static std::vector<float> makeYolov8Output(int num_classes,
+                                            int batch_size  = 1,
+                                            int num_anchors = 8400) {
+    const int rows = 4 + num_classes;
+    return std::vector<float>(
+        static_cast<size_t>(batch_size) * rows * num_anchors, 0.f);
+}
+
+// Place one anchor prediction at column `anchor_idx`.
+// cx, cy, w, h are in pixels.
+static void placeV8Prediction(std::vector<float>& buf,
+                               int batch_idx, int anchor_idx,
+                               int num_classes, int true_class,
+                               float cx, float cy, float bw, float bh,
+                               float cls_score,
+                               int num_anchors = 8400) {
+    const int rows   = 4 + num_classes;
+    float*    base   = buf.data() +
+                       static_cast<ptrdiff_t>(batch_idx) * rows * num_anchors;
+    base[0 * num_anchors + anchor_idx] = cx;
+    base[1 * num_anchors + anchor_idx] = cy;
+    base[2 * num_anchors + anchor_idx] = bw;
+    base[3 * num_anchors + anchor_idx] = bh;
+    base[(4 + true_class) * num_anchors + anchor_idx] = cls_score;
+}
+
+TEST(YOLOv8Decoder, EmptyOutputNoPredictions) {
+    YOLOv8Decoder dec(3);
+    auto buf = makeYolov8Output(3);
+    InferShape shape; shape.width = 640; shape.height = 640;
+
+    auto results = dec.decode(buf.data(), 1, shape, 0.4f, 0.45f);
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].empty());
+}
+
+TEST(YOLOv8Decoder, CxCyWhConvertedToCorners) {
+    // A box centered at (320,240) with size 100×80 should become
+    // x1=270, y1=200, x2=370, y2=280
+    const int num_classes = 2;
+    YOLOv8Decoder dec(num_classes);
+    auto buf = makeYolov8Output(num_classes);
+
+    placeV8Prediction(buf, 0, 0, num_classes, /*class=*/1,
+                      /*cx=*/320.f, /*cy=*/240.f,
+                      /*bw=*/100.f, /*bh=*/ 80.f,
+                      /*score=*/0.9f);
+
+    InferShape shape; shape.width = 640; shape.height = 640;
+    auto results = dec.decode(buf.data(), 1, shape, 0.5f, 0.45f);
+
+    ASSERT_EQ(results.size(), 1u);
+    ASSERT_EQ(results[0].size(), 1u);
+    const auto& bbox = results[0][0].bbox;
+    EXPECT_FLOAT_EQ(bbox.x1, 270.f);  // cx - w/2
+    EXPECT_FLOAT_EQ(bbox.y1, 200.f);  // cy - h/2
+    EXPECT_FLOAT_EQ(bbox.x2, 370.f);  // cx + w/2
+    EXPECT_FLOAT_EQ(bbox.y2, 280.f);  // cy + h/2
+}
+
+TEST(YOLOv8Decoder, X1LessThanX2AfterConversion) {
+    // Sanity check: for any valid input, x1 < x2 and y1 < y2
+    const int num_classes = 1;
+    YOLOv8Decoder dec(num_classes);
+    auto buf = makeYolov8Output(num_classes);
+
+    placeV8Prediction(buf, 0, 0, num_classes, 0,
+                      /*cx=*/381.f, /*cy=*/278.f,
+                      /*bw=*/248.f, /*bh=*/160.f,
+                      /*score=*/0.9f);
+
+    InferShape shape; shape.width = 640; shape.height = 640;
+    auto results = dec.decode(buf.data(), 1, shape, 0.5f, 0.45f);
+
+    ASSERT_EQ(results[0].size(), 1u);
+    const auto& bbox = results[0][0].bbox;
+    EXPECT_LT(bbox.x1, bbox.x2);
+    EXPECT_LT(bbox.y1, bbox.y2);
+}
+
+TEST(YOLOv8Decoder, NmsSuppressesNearDuplicates) {
+    // 11 nearly-identical boxes (mirroring the original bug report)
+    const int num_classes = 5;
+    YOLOv8Decoder dec(num_classes);
+    auto buf = makeYolov8Output(num_classes);
+
+    for (int i = 0; i < 11; ++i) {
+        placeV8Prediction(buf, 0, i, num_classes, /*class=*/4,
+                          /*cx=*/382.f + i * 0.1f, /*cy=*/278.f + i * 0.05f,
+                          /*bw=*/248.f,             /*bh=*/160.f,
+                          /*score=*/0.9f - i * 0.01f);
+    }
+
+    InferShape shape; shape.width = 640; shape.height = 640;
+    auto results = dec.decode(buf.data(), 1, shape, 0.5f, 0.45f);
+
+    ASSERT_EQ(results.size(), 1u);
+    // All 11 boxes heavily overlap → NMS should keep exactly 1
+    EXPECT_EQ(results[0].size(), 1u);
+}
+
+TEST(YOLOv8Decoder, LowConfidenceFilteredOut) {
+    const int num_classes = 1;
+    YOLOv8Decoder dec(num_classes);
+    auto buf = makeYolov8Output(num_classes);
+
+    placeV8Prediction(buf, 0, 0, num_classes, 0,
+                      320.f, 240.f, 100.f, 80.f, /*score=*/0.2f);
+
+    InferShape shape; shape.width = 640; shape.height = 640;
+    auto results = dec.decode(buf.data(), 1, shape, 0.5f, 0.45f);
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].empty());
+}
+
+TEST(YOLOv8Decoder, MultiBatchIndependent) {
+    const int num_classes = 1;
+    const int batch_size  = 2;
+    YOLOv8Decoder dec(num_classes);
+    auto buf = makeYolov8Output(num_classes, batch_size);
+
+    // Image 0: one detection
+    placeV8Prediction(buf, 0, 0, num_classes, 0,
+                      320.f, 240.f, 100.f, 80.f, 0.9f);
+    // Image 1: all zeros → below threshold
+
+    InferShape shape; shape.width = 640; shape.height = 640;
+    auto results = dec.decode(buf.data(), batch_size, shape, 0.5f, 0.45f);
+
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_EQ(results[0].size(), 1u);
+    EXPECT_TRUE(results[1].empty());
+}
+
+TEST(YOLOv8Decoder, Version) {
+    YOLOv8Decoder dec(80);
+    EXPECT_EQ(dec.version(), YOLOVersion::v8);
 }
 
 // ── DecoderFactory ────────────────────────────────────────────────────────
