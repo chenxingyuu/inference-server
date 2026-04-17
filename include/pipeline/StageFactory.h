@@ -18,6 +18,8 @@ public:
         const PipelineSourceConfig& source;
         IPublisher& publisher;
         std::shared_ptr<FrameArchiver> frame_archiver;
+        int ingest_sample_fps{5};
+        bool ingest_use_hwdec{false};
     };
 
     static std::unique_ptr<IStage> create(const StageConfig& cfg, const Context& ctx);

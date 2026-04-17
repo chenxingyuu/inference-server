@@ -143,12 +143,13 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cls.id,         "classifier_01");
     EXPECT_EQ(cls.model_type, ModelType::Classifier);
 
-    // sources
+    // sources (ingest: sample_fps / use_hwdec live on tasks)
     ASSERT_EQ(cfg.sources.size(), 2u);
     EXPECT_EQ(cfg.sources[0].id, "cam_01");
-    EXPECT_EQ(cfg.sources[0].sample_fps, 10);
-    EXPECT_FALSE(cfg.sources[0].use_hwdec);
-    EXPECT_TRUE(cfg.sources[1].use_hwdec);
+    EXPECT_EQ(cfg.sources[0].url, "rtsp://localhost/cam1");
+    EXPECT_EQ(cfg.sources[0].reconnect_delay_ms, 1000);
+    EXPECT_EQ(cfg.sources[1].id, "cam_02");
+    EXPECT_EQ(cfg.sources[1].reconnect_delay_ms, 2000);
 
     // pipelines (templates, no source_id)
     ASSERT_EQ(cfg.pipelines.size(), 1u);
@@ -163,6 +164,8 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cfg.tasks[0].id, "task_pipe_01");
     EXPECT_EQ(cfg.tasks[0].source_id, "cam_01");
     EXPECT_EQ(cfg.tasks[0].pipeline_id, "pipe_01");
+    EXPECT_EQ(cfg.tasks[0].sample_fps, 10);
+    EXPECT_FALSE(cfg.tasks[0].use_hwdec);
     const TaskConfig* t = cfg.findTask("task_pipe_01");
     ASSERT_NE(t, nullptr);
     EXPECT_EQ(t->pipeline_id, "pipe_01");
@@ -374,6 +377,70 @@ TEST(LoadConfig, TaskUnknownPipelineThrows) {
         out << "  - id: t1\n";
         out << "    source_id: cam_1\n";
         out << "    pipeline_id: no_such_pipe\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, DeprecatedSourceSampleFpsThrows) {
+    const std::string path = "data/test_deprecated_source_sample_fps.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "    sample_fps: 5\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, TaskSampleFpsBelowOneThrows) {
+    const std::string path = "data/test_task_bad_sample_fps.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+        out << "    sample_fps: 0\n";
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());

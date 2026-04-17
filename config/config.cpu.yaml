@@ -49,12 +49,10 @@ models:
 sources:
   - id: "cam_001"
     url: "rtsp://192.168.3.145:554/01-day-left.mp4"
-    sample_fps: 5
     reconnect_delay_ms: 3000
     max_reconnect_delay_ms: 60000
     degraded_threshold: 5
     max_reconnect_attempts: 5
-    use_hwdec: false
 
 pipelines:
   - id: "pipeline_default"
@@ -115,6 +113,8 @@ tasks:
   - id: "task_cam_001"
     source_id: "cam_001"
     pipeline_id: "pipeline_default"
+    sample_fps: 5
+    use_hwdec: false
 
 kafka:
   brokers: "192.168.3.135:9092"

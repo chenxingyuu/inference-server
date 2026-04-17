@@ -89,6 +89,9 @@ void validateTasks(const AppConfig& cfg) {
         if (!cfg.findPipeline(t.pipeline_id)) {
             throw std::runtime_error("task pipeline not found: " + t.pipeline_id + " (task " + t.id + ")");
         }
+        if (t.sample_fps < 1) {
+            throw std::runtime_error("task.sample_fps must be >= 1 (task " + t.id + ")");
+        }
     }
 }
 
@@ -245,15 +248,23 @@ AppConfig loadConfig(const std::string& yaml_path) {
         cfg.models.push_back(std::move(m));
     }
     for (const auto& sn : root["sources"]) {
+        if (sn["sample_fps"]) {
+            throw std::runtime_error(
+                "sources[].sample_fps is no longer supported; set tasks[].sample_fps per task (source id=" +
+                sn["id"].as<std::string>("") + ")");
+        }
+        if (sn["use_hwdec"]) {
+            throw std::runtime_error(
+                "sources[].use_hwdec is no longer supported; set tasks[].use_hwdec per task (source id=" +
+                sn["id"].as<std::string>("") + ")");
+        }
         PipelineSourceConfig s;
         s.id                     = sn["id"].as<std::string>();
         s.url                    = sn["url"].as<std::string>();
-        s.sample_fps             = sn["sample_fps"].as<int>(5);
         s.reconnect_delay_ms     = sn["reconnect_delay_ms"].as<int>(3000);
         s.max_reconnect_delay_ms = sn["max_reconnect_delay_ms"].as<int>(60000);
         s.degraded_threshold     = sn["degraded_threshold"].as<int>(5);
         s.max_reconnect_attempts = sn["max_reconnect_attempts"].as<int>(5);
-        s.use_hwdec              = sn["use_hwdec"].as<bool>(false);
         cfg.sources.push_back(std::move(s));
     }
     for (const auto& pn : root["pipelines"]) {
@@ -288,6 +299,8 @@ AppConfig loadConfig(const std::string& yaml_path) {
             t.id = tn["id"].as<std::string>();
             t.source_id = tn["source_id"].as<std::string>();
             t.pipeline_id = tn["pipeline_id"].as<std::string>();
+            t.sample_fps = tn["sample_fps"].as<int>(5);
+            t.use_hwdec = tn["use_hwdec"].as<bool>(false);
             cfg.tasks.push_back(std::move(t));
         }
     }

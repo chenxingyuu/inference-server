@@ -35,14 +35,10 @@ models:
 sources:
   - id: cam_01
     url: rtsp://localhost/cam1
-    sample_fps: 10
     reconnect_delay_ms: 1000
-    use_hwdec: false
   - id: cam_02
     url: rtsp://localhost/cam2
-    sample_fps: 5
     reconnect_delay_ms: 2000
-    use_hwdec: true
 
 pipelines:
   - id: pipe_01
@@ -94,6 +90,8 @@ tasks:
   - id: task_pipe_01
     source_id: cam_01
     pipeline_id: pipe_01
+    sample_fps: 10
+    use_hwdec: false
 
 kafka:
   brokers: localhost:9092

@@ -41,7 +41,7 @@ float getFloatWithDefault(const std::map<std::string, std::string>& kv, const st
 
 std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Context& ctx) {
     if (cfg.type == "source.rtsp") {
-        return std::make_unique<SourceRtspStage>(cfg.id, ctx.source);
+        return std::make_unique<SourceRtspStage>(cfg.id, ctx.source, ctx.ingest_sample_fps, ctx.ingest_use_hwdec);
     }
     if (cfg.type == "decode.ffmpeg" || cfg.type == "preprocess.yolo" || cfg.type == "postprocess.yolo") {
         return std::make_unique<PassthroughStage>(cfg.id);

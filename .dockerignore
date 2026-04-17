@@ -4,6 +4,7 @@
 .vscode
 
 build
+build_agent
 cmake-build-*
 out
 dist

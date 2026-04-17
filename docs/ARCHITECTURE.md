@@ -4,7 +4,7 @@
 
 ## Runtime Pipeline
 
-The runtime is a **configurable in-process DAG** driven by **tasks** (each task binds one `source_id` to one reusable `pipeline_id` template):
+The runtime is a **configurable in-process DAG** driven by **tasks** (each task binds one `source_id` to one reusable `pipeline_id` template). Per-task **`sample_fps`** and **`use_hwdec`** control RTSP ingest rate and FFmpeg hardware decode for that task’s `source.rtsp` instance; **`sources`** entries carry `url` and reconnect policy only (deprecated `sources[].sample_fps` / `sources[].use_hwdec` keys are rejected at load time).
 
 1. Source ingest (`source.rtsp` using `FFmpegDecoder`; optional HW decode via NVDEC).
 2. Fan-out to parallel branches (e.g. `archive.raw` and inference path).

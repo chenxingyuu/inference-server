@@ -76,20 +76,16 @@ models:
 sources:
   - id: "cam_001"
     url: "rtsp://192.168.1.100/stream1"
-    sample_fps: 5
     reconnect_delay_ms: 3000
     max_reconnect_delay_ms: 60000
     degraded_threshold: 5
     max_reconnect_attempts: 5
-    use_hwdec: true
   - id: "cam_002"
     url: "rtsp://192.168.1.101/stream1"
-    sample_fps: 5
     reconnect_delay_ms: 3000
     max_reconnect_delay_ms: 60000
     degraded_threshold: 5
     max_reconnect_attempts: 5
-    use_hwdec: true
 
 pipelines:
   - id: "pipeline_full"
@@ -165,9 +161,13 @@ tasks:
   - id: "task_cam_001"
     source_id: "cam_001"
     pipeline_id: "pipeline_full"
+    sample_fps: 5
+    use_hwdec: true
   - id: "task_cam_002"
     source_id: "cam_002"
     pipeline_id: "pipeline_lite"
+    sample_fps: 5
+    use_hwdec: true
 
 kafka:
   brokers: "kafka:9092"

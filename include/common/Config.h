@@ -84,12 +84,10 @@ enum class EdgeDropPolicy { Block, DropOldest, DropNewest };
 struct PipelineSourceConfig {
     std::string id;
     std::string url;
-    int         sample_fps{5};
     int         reconnect_delay_ms{3000};
     int         max_reconnect_delay_ms{60000};
     int         degraded_threshold{5};
     int         max_reconnect_attempts{5};
-    bool        use_hwdec{false};
 };
 
 struct StageConfig {
@@ -115,6 +113,8 @@ struct TaskConfig {
     std::string id;
     std::string source_id;
     std::string pipeline_id;
+    int         sample_fps{5};
+    bool        use_hwdec{false};
 };
 
 struct KafkaConfig {

@@ -114,7 +114,8 @@ curl -X POST http://localhost:8080/tasks/task_cam_001/stop
 
 ## Pipeline 配置（新格式）
 
-配置文件以 `sources` 描述输入源，以 `pipelines` 描述可编排 DAG 模板（nodes/edges），以 `tasks` 绑定「哪路源跑哪张图」。
+配置文件以 `sources` 描述输入源（`id`、`url` 与重连相关字段），以 `pipelines` 描述可编排 DAG 模板（nodes/edges），以 `tasks` 绑定「哪路源跑哪张图」。
+每条 `tasks` 可单独设置 **`sample_fps`**（默认 `5`，须 ≥ 1）与 **`use_hwdec`**（默认 `false`）；二者已从 `sources` 迁出，若在 `sources` 下仍写 `sample_fps` / `use_hwdec`，加载配置时会报错提示迁移到对应 task。
 示例见 `config/config.cpu.yaml` / `config/config.gpu.yaml` / `config/config.yaml`。
 
 常见 stage（首批）：

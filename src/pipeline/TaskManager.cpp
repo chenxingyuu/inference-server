@@ -18,7 +18,7 @@ void TaskManager::loadAll() {
         PipelineConfig runtime_cfg = *pipeline_tpl;
         runtime_cfg.id = task.id;
         auto executor = std::make_unique<GraphExecutor>(runtime_cfg);
-        StageFactory::Context ctx{cfg_, *source, publisher_, frame_archiver_};
+        StageFactory::Context ctx{cfg_, *source, publisher_, frame_archiver_, task.sample_fps, task.use_hwdec};
         for (const auto& node : runtime_cfg.nodes) {
             executor->addStage(StageFactory::create(node, ctx));
         }

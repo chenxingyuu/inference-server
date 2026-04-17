@@ -6,8 +6,12 @@
 
 namespace infer {
 
-SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src)
-    : id_(std::move(id)), source_(src), max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(src.sample_fps * 2))) {}
+SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src, int sample_fps, bool use_hwdec)
+    : id_(std::move(id))
+    , source_(src)
+    , sample_fps_(sample_fps)
+    , use_hwdec_(use_hwdec)
+    , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps * 2))) {}
 
 std::string SourceRtspStage::id() const { return id_; }
 
@@ -19,12 +23,12 @@ void SourceRtspStage::start() {
     StreamConfig cfg;
     cfg.id = source_.id;
     cfg.url = source_.url;
-    cfg.sample_fps = source_.sample_fps;
+    cfg.sample_fps = sample_fps_;
     cfg.reconnect_delay_ms = source_.reconnect_delay_ms;
     cfg.max_reconnect_delay_ms = source_.max_reconnect_delay_ms;
     cfg.degraded_threshold = source_.degraded_threshold;
     cfg.max_reconnect_attempts = source_.max_reconnect_attempts;
-    cfg.use_hwdec = source_.use_hwdec;
+    cfg.use_hwdec = use_hwdec_;
     decoder_.start(cfg, [this](Frame frame) {
         std::lock_guard<std::mutex> lock(mu_);
         if (queue_.size() >= max_queue_size_) {
