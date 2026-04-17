@@ -145,6 +145,12 @@ set(PIPELINE_SOURCES
     src/pipeline/EdgeQueue.cpp
     src/pipeline/GraphExecutor.cpp
     src/pipeline/StageFactory.cpp
+    src/pipeline/stages/ArchiveRawStage.cpp
+    src/pipeline/stages/InferEngineStage.cpp
+    src/pipeline/stages/JoinByFrameStage.cpp
+    src/pipeline/stages/SinkKafkaStage.cpp
+    src/pipeline/stages/SourceRtspStage.cpp
+    src/pipeline/stages/TrackByteTrackStage.cpp
     src/pipeline/TaskManager.cpp
     src/pipeline/BatchScheduler.cpp
     src/pipeline/InferWorker.cpp

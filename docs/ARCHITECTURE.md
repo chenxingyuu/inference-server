@@ -33,6 +33,7 @@ The runtime is a **configurable in-process DAG** driven by **tasks** (each task 
 ## Architecture Boundaries
 
 - `include/` and `src/`: service runtime and backend implementations.
+- Pipeline stage implementations live under `include/pipeline/stages/` and `src/pipeline/stages/`; `StageFactory` wires YAML `type` strings to those classes.
 - `config/`: runtime configuration and observability manifests.
 - `docker/`: build/runtime containerization.
 - `scripts/`: operational utilities.
