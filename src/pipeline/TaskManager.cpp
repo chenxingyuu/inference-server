@@ -10,6 +10,14 @@ TaskManager::TaskManager(const AppConfig& cfg,
 
 void TaskManager::loadAll() {
     std::lock_guard<std::mutex> lock(mu_);
+    // Stop running executors before destroying them so their worker threads are
+    // joined cleanly and no thread is inside stage->process() during teardown.
+    for (auto& [_, entry] : entries_) {
+        if (entry.state == State::Running) {
+            entry.executor->stop();
+            entry.state = State::Stopped;
+        }
+    }
     entries_.clear();
     for (const auto& task : cfg_.tasks) {
         auto source = cfg_.findSource(task.source_id);

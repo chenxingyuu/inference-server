@@ -31,6 +31,7 @@ InferEngineStage::InferEngineStage(std::string id,
     , backend_(std::move(backend))
     , decoder_(std::move(decoder)) {
     batch_deadline_ = std::chrono::steady_clock::now() + std::chrono::microseconds(model_cfg_.max_queue_delay_us);
+    max_pending_ = std::max(2, model_cfg_.batch_size) * 2;
 }
 
 std::string InferEngineStage::id() const { return id_; }
@@ -48,6 +49,10 @@ void InferEngineStage::stop() {
 
 void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
     if (input.frame) {
+        if (static_cast<int>(pending_events_.size()) >= max_pending_) {
+            LOG_WARN("InferEngineStage[{}]: pending queue full ({} frames), dropping oldest", id_, max_pending_);
+            pending_events_.erase(pending_events_.begin());
+        }
         pending_events_.push_back(input);
     }
     const auto now = std::chrono::steady_clock::now();
@@ -174,6 +179,10 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
             }
         } else {
             LOG_ERROR("InferEngineStage[{}]: inference failed: {}", id_, err);
+            // Emit envelopes without infer_result so downstream stages are not starved.
+            for (int i = 0; i < flush_count; ++i) {
+                emit(pending_events_[i]);
+            }
         }
     }
     pending_events_.erase(pending_events_.begin(), pending_events_.begin() + flush_count);

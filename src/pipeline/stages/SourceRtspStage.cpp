@@ -18,8 +18,8 @@ std::string SourceRtspStage::id() const { return id_; }
 bool SourceRtspStage::isSource() const { return true; }
 
 void SourceRtspStage::start() {
-    if (running_) return;
-    running_ = true;
+    bool expected = false;
+    if (!running_.compare_exchange_strong(expected, true)) return;
     StreamConfig cfg;
     cfg.id = source_.id;
     cfg.url = source_.url;
@@ -39,7 +39,8 @@ void SourceRtspStage::start() {
 }
 
 void SourceRtspStage::stop() {
-    running_ = false;
+    bool expected = true;
+    if (!running_.compare_exchange_strong(expected, false)) return;
     decoder_.stop();
 }
 

@@ -31,6 +31,7 @@ private:
     std::unique_ptr<IYOLODecoder> decoder_;
     std::vector<EventEnvelope> pending_events_;
     std::chrono::steady_clock::time_point batch_deadline_;
+    int max_pending_{0}; // set in constructor: 2 * batch_size
     bool fallback_to_single_infer_{false};
     bool loaded_{false};
 };

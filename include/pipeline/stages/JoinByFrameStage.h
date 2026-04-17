@@ -21,6 +21,7 @@ private:
         std::optional<InferResult> infer;
         std::optional<ArchiveInfo> archive;
         std::chrono::steady_clock::time_point created_at{};
+        bool initialized{false};
     };
     std::string id_;
     std::mutex mu_;

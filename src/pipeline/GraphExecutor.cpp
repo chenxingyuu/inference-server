@@ -46,12 +46,15 @@ void GraphExecutor::start() {
 
 void GraphExecutor::stop() {
     if (!running_.exchange(false)) return;
+    // Unblock all queue pop() calls so worker threads can observe running_=false.
     for (auto& [_, q] : edges_) q->stop();
-    for (auto& [_, stage] : stages_) stage->stop();
+    // Join first: ensures no worker is inside stage->process() before we release resources.
     for (auto& t : worker_threads_) {
         if (t.joinable()) t.join();
     }
     worker_threads_.clear();
+    // Safe to release stage resources now that no worker thread is running.
+    for (auto& [_, stage] : stages_) stage->stop();
 }
 
 void GraphExecutor::runNodeWorker(const std::string& node_id) {
