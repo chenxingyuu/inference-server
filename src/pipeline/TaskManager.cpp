@@ -1,30 +1,33 @@
-#include "pipeline/PipelineManager.h"
+#include "pipeline/TaskManager.h"
 #include "pipeline/StageFactory.h"
 
 namespace infer {
 
-PipelineManager::PipelineManager(const AppConfig& cfg,
-                                 IPublisher& publisher,
-                                 std::shared_ptr<FrameArchiver> frame_archiver)
+TaskManager::TaskManager(const AppConfig& cfg,
+                         IPublisher& publisher,
+                         std::shared_ptr<FrameArchiver> frame_archiver)
     : cfg_(cfg), publisher_(publisher), frame_archiver_(std::move(frame_archiver)) {}
 
-void PipelineManager::loadAll() {
+void TaskManager::loadAll() {
     std::lock_guard<std::mutex> lock(mu_);
     entries_.clear();
-    for (const auto& pipeline_cfg : cfg_.pipelines) {
-        auto source = cfg_.findSource(pipeline_cfg.source_id);
-        if (!source) continue;
-        auto executor = std::make_unique<GraphExecutor>(pipeline_cfg);
+    for (const auto& task : cfg_.tasks) {
+        auto source = cfg_.findSource(task.source_id);
+        auto pipeline_tpl = cfg_.findPipeline(task.pipeline_id);
+        if (!source || !pipeline_tpl) continue;
+        PipelineConfig runtime_cfg = *pipeline_tpl;
+        runtime_cfg.id = task.id;
+        auto executor = std::make_unique<GraphExecutor>(runtime_cfg);
         StageFactory::Context ctx{cfg_, *source, publisher_, frame_archiver_};
-        for (const auto& node : pipeline_cfg.nodes) {
+        for (const auto& node : runtime_cfg.nodes) {
             executor->addStage(StageFactory::create(node, ctx));
         }
         executor->build();
-        entries_[pipeline_cfg.id] = Entry{std::move(executor), State::Stopped};
+        entries_[task.id] = Entry{std::move(executor), State::Stopped};
     }
 }
 
-void PipelineManager::startAll() {
+void TaskManager::startAll() {
     std::lock_guard<std::mutex> lock(mu_);
     for (auto& [_, entry] : entries_) {
         if (entry.state == State::Running) continue;
@@ -33,7 +36,7 @@ void PipelineManager::startAll() {
     }
 }
 
-void PipelineManager::stopAll() {
+void TaskManager::stopAll() {
     std::lock_guard<std::mutex> lock(mu_);
     for (auto& [_, entry] : entries_) {
         if (entry.state == State::Stopped) continue;
@@ -42,9 +45,9 @@ void PipelineManager::stopAll() {
     }
 }
 
-bool PipelineManager::start(const std::string& pipeline_id) {
+bool TaskManager::start(const std::string& task_id) {
     std::lock_guard<std::mutex> lock(mu_);
-    auto it = entries_.find(pipeline_id);
+    auto it = entries_.find(task_id);
     if (it == entries_.end()) return false;
     if (it->second.state == State::Stopped) {
         it->second.executor->start();
@@ -53,9 +56,9 @@ bool PipelineManager::start(const std::string& pipeline_id) {
     return true;
 }
 
-bool PipelineManager::stop(const std::string& pipeline_id) {
+bool TaskManager::stop(const std::string& task_id) {
     std::lock_guard<std::mutex> lock(mu_);
-    auto it = entries_.find(pipeline_id);
+    auto it = entries_.find(task_id);
     if (it == entries_.end()) return false;
     if (it->second.state == State::Running) {
         it->second.executor->stop();
@@ -64,7 +67,7 @@ bool PipelineManager::stop(const std::string& pipeline_id) {
     return true;
 }
 
-std::vector<std::pair<std::string, PipelineManager::State>> PipelineManager::listPipelines() const {
+std::vector<std::pair<std::string, TaskManager::State>> TaskManager::listTasks() const {
     std::lock_guard<std::mutex> lock(mu_);
     std::vector<std::pair<std::string, State>> out;
     out.reserve(entries_.size());

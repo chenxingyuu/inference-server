@@ -1,6 +1,6 @@
 #pragma once
 
-#include "pipeline/PipelineManager.h"
+#include "pipeline/TaskManager.h"
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -16,12 +16,12 @@ namespace infer {
 // Endpoints:
 //   GET  /healthz                  → 200 OK
 //   GET  /metrics                  → Prometheus text format
-//   GET  /pipelines                → list pipeline state
-//   POST /pipelines/{id}/start     → start pipeline
-//   POST /pipelines/{id}/stop      → stop pipeline
+//   GET  /tasks                    → list task state
+//   POST /tasks/{id}/start         → start task
+//   POST /tasks/{id}/stop          → stop task
 class ManagementServer {
 public:
-    ManagementServer(int port, PipelineManager& pipeline_manager);
+    ManagementServer(int port, TaskManager& task_manager);
     ~ManagementServer();
 
     // Starts the server in a background thread (non-blocking).
@@ -34,7 +34,7 @@ private:
     void registerHandlers();
 
     int                              port_;
-    PipelineManager&                 pipeline_manager_;
+    TaskManager&                     task_manager_;
     std::unique_ptr<httplib::Server> srv_;
     std::thread                      thread_;
     std::atomic<bool>                running_{false};

@@ -10,14 +10,14 @@ namespace infer {
 using json = nlohmann::json;
 
 namespace {
-std::string stateStr(PipelineManager::State s) {
-    return s == PipelineManager::State::Running ? "running" : "stopped";
+std::string stateStr(TaskManager::State s) {
+    return s == TaskManager::State::Running ? "running" : "stopped";
 }
 } // namespace
 
-ManagementServer::ManagementServer(int port, PipelineManager& pipeline_manager)
+ManagementServer::ManagementServer(int port, TaskManager& task_manager)
     : port_(port)
-    , pipeline_manager_(pipeline_manager)
+    , task_manager_(task_manager)
     , srv_(std::make_unique<httplib::Server>()) {
     registerHandlers();
 }
@@ -35,19 +35,19 @@ void ManagementServer::registerHandlers() {
         res.status = 200;
     });
 
-    srv_->Get("/pipelines", [this](const httplib::Request&, httplib::Response& res) {
+    srv_->Get("/tasks", [this](const httplib::Request&, httplib::Response& res) {
         json arr = json::array();
-        for (const auto& [id, state] : pipeline_manager_.listPipelines()) {
+        for (const auto& [id, state] : task_manager_.listTasks()) {
             arr.push_back({{"id", id}, {"state", stateStr(state)}});
         }
         res.set_content(arr.dump(), "application/json");
         res.status = 200;
     });
 
-    srv_->Post(R"(/pipelines/([^/]+)/start)", [this](const httplib::Request& req, httplib::Response& res) {
+    srv_->Post(R"(/tasks/([^/]+)/start)", [this](const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
-        if (!pipeline_manager_.start(id)) {
-            res.set_content(json({{"error", "pipeline not found: " + id}}).dump(), "application/json");
+        if (!task_manager_.start(id)) {
+            res.set_content(json({{"error", "task not found: " + id}}).dump(), "application/json");
             res.status = 404;
             return;
         }
@@ -55,10 +55,10 @@ void ManagementServer::registerHandlers() {
         res.status = 200;
     });
 
-    srv_->Post(R"(/pipelines/([^/]+)/stop)", [this](const httplib::Request& req, httplib::Response& res) {
+    srv_->Post(R"(/tasks/([^/]+)/stop)", [this](const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
-        if (!pipeline_manager_.stop(id)) {
-            res.set_content(json({{"error", "pipeline not found: " + id}}).dump(), "application/json");
+        if (!task_manager_.stop(id)) {
+            res.set_content(json({{"error", "task not found: " + id}}).dump(), "application/json");
             res.status = 404;
             return;
         }

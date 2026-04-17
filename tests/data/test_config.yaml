@@ -46,7 +46,6 @@ sources:
 
 pipelines:
   - id: pipe_01
-    source_id: cam_01
     nodes:
       - id: cam_01
         type: source.rtsp
@@ -90,6 +89,11 @@ pipelines:
         to: join_1
       - from: join_1
         to: sink_1
+
+tasks:
+  - id: task_pipe_01
+    source_id: cam_01
+    pipeline_id: pipe_01
 
 kafka:
   brokers: localhost:9092

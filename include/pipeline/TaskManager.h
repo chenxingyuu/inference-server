@@ -10,21 +10,21 @@
 
 namespace infer {
 
-class PipelineManager {
+class TaskManager {
 public:
     enum class State { Stopped, Running };
 
-    PipelineManager(const AppConfig& cfg,
-                    IPublisher& publisher,
-                    std::shared_ptr<FrameArchiver> frame_archiver);
+    TaskManager(const AppConfig& cfg,
+                IPublisher& publisher,
+                std::shared_ptr<FrameArchiver> frame_archiver);
 
     void loadAll();
     void startAll();
     void stopAll();
-    bool start(const std::string& pipeline_id);
-    bool stop(const std::string& pipeline_id);
+    bool start(const std::string& task_id);
+    bool stop(const std::string& task_id);
 
-    std::vector<std::pair<std::string, State>> listPipelines() const;
+    std::vector<std::pair<std::string, State>> listTasks() const;
 
 private:
     struct Entry {

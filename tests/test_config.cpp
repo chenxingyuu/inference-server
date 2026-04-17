@@ -90,6 +90,18 @@ TEST_F(AppConfigFindTest, FindMissingStreamReturnsNull) {
     EXPECT_EQ(cfg.findSource("cam_99"), nullptr);
 }
 
+TEST_F(AppConfigFindTest, FindTask) {
+    TaskConfig t;
+    t.id = "t1";
+    t.source_id = "cam_01";
+    t.pipeline_id = "pipe_01";
+    cfg.tasks.push_back(t);
+    const TaskConfig* found = cfg.findTask("t1");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->source_id, "cam_01");
+    EXPECT_EQ(cfg.findTask("none"), nullptr);
+}
+
 // ── loadConfig from YAML ──────────────────────────────────────────────────
 
 TEST(LoadConfig, ParsesFullYaml) {
@@ -138,14 +150,23 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_FALSE(cfg.sources[0].use_hwdec);
     EXPECT_TRUE(cfg.sources[1].use_hwdec);
 
-    // pipelines
+    // pipelines (templates, no source_id)
     ASSERT_EQ(cfg.pipelines.size(), 1u);
     EXPECT_EQ(cfg.pipelines[0].id, "pipe_01");
-    EXPECT_EQ(cfg.pipelines[0].source_id, "cam_01");
     ASSERT_EQ(cfg.pipelines[0].nodes.size(), 9u);
     ASSERT_EQ(cfg.pipelines[0].edges.size(), 9u);
     EXPECT_EQ(cfg.pipelines[0].nodes[4].type, "infer.engine");
     EXPECT_EQ(cfg.pipelines[0].nodes[4].with.at("model_id"), "yolo_det");
+
+    // tasks
+    ASSERT_EQ(cfg.tasks.size(), 1u);
+    EXPECT_EQ(cfg.tasks[0].id, "task_pipe_01");
+    EXPECT_EQ(cfg.tasks[0].source_id, "cam_01");
+    EXPECT_EQ(cfg.tasks[0].pipeline_id, "pipe_01");
+    const TaskConfig* t = cfg.findTask("task_pipe_01");
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->pipeline_id, "pipe_01");
+    EXPECT_EQ(cfg.findTask("missing"), nullptr);
 
     // kafka
     EXPECT_EQ(cfg.kafka.brokers, "localhost:9092");
@@ -188,7 +209,6 @@ TEST(LoadConfig, InvalidEdgePolicyThrows) {
         out << "    input_size: [640, 640]\n";
         out << "pipelines:\n";
         out << "  - id: p1\n";
-        out << "    source_id: cam_1\n";
         out << "    nodes:\n";
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
@@ -199,6 +219,161 @@ TEST(LoadConfig, InvalidEdgePolicyThrows) {
         out << "        to: sink_1\n";
         out << "        queue:\n";
         out << "          drop_policy: bad_policy\n";
+        out << "tasks:\n";
+        out << "  - id: task1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, MissingTasksKeyThrows) {
+    const std::string path = "data/test_no_tasks_key.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, EmptyTasksThrows) {
+    const std::string path = "data/test_empty_tasks.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks: []\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, DuplicateTaskIdThrows) {
+    const std::string path = "data/test_dup_tasks.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: same_id\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+        out << "  - id: same_id\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, TaskUnknownSourceThrows) {
+    const std::string path = "data/test_task_bad_source.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: no_such_cam\n";
+        out << "    pipeline_id: p1\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, TaskUnknownPipelineThrows) {
+    const std::string path = "data/test_task_bad_pipeline.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: no_such_pipe\n";
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());
@@ -218,7 +393,6 @@ TEST(LoadConfig, InvalidPipelineGraphThrows) {
         out << "    input_size: [640, 640]\n";
         out << "pipelines:\n";
         out << "  - id: p1\n";
-        out << "    source_id: cam_1\n";
         out << "    nodes:\n";
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
@@ -229,6 +403,10 @@ TEST(LoadConfig, InvalidPipelineGraphThrows) {
         out << "        to: stage_2\n";
         out << "      - from: stage_2\n";
         out << "        to: cam_1\n";
+        out << "tasks:\n";
+        out << "  - id: task1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());

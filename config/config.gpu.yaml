@@ -37,8 +37,7 @@ sources:
     use_hwdec: true
 
 pipelines:
-  - id: "cam_001_pipeline"
-    source_id: "cam_001"
+  - id: "pipeline_default"
     nodes:
       - id: "cam_001"
         type: "source.rtsp"
@@ -79,6 +78,11 @@ pipelines:
         to: "join_1"
       - from: "join_1"
         to: "sink_1"
+
+tasks:
+  - id: "task_cam_001"
+    source_id: "cam_001"
+    pipeline_id: "pipeline_default"
 
 kafka:
   brokers: "192.168.3.135:9092"

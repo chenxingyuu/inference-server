@@ -16,7 +16,7 @@ std::string scalarToString(const YAML::Node& node) {
     return node.as<std::string>();
 }
 
-void validatePipelines(const AppConfig& cfg) {
+void validateSources(const AppConfig& cfg) {
     std::unordered_set<std::string> source_ids;
     for (const auto& src : cfg.sources) {
         if (src.id.empty()) throw std::runtime_error("source.id must not be empty");
@@ -24,13 +24,15 @@ void validatePipelines(const AppConfig& cfg) {
             throw std::runtime_error("duplicate source id: " + src.id);
         }
     }
+}
+
+void validatePipelineGraphs(const AppConfig& cfg) {
     std::unordered_set<std::string> pipeline_ids;
     for (const auto& p : cfg.pipelines) {
         if (p.id.empty()) throw std::runtime_error("pipeline.id must not be empty");
         if (!pipeline_ids.insert(p.id).second) {
             throw std::runtime_error("duplicate pipeline id: " + p.id);
         }
-        if (!cfg.findSource(p.source_id)) throw std::runtime_error("pipeline source not found: " + p.source_id);
         if (p.nodes.empty()) throw std::runtime_error("pipeline.nodes must not be empty: " + p.id);
         std::unordered_set<std::string> node_ids;
         std::unordered_map<std::string, int> indegree;
@@ -67,6 +69,33 @@ void validatePipelines(const AppConfig& cfg) {
             throw std::runtime_error("pipeline graph has cycle: " + p.id);
         }
     }
+}
+
+void validateTasks(const AppConfig& cfg) {
+    if (cfg.tasks.empty()) {
+        throw std::runtime_error("tasks must not be empty");
+    }
+    std::unordered_set<std::string> task_ids;
+    for (const auto& t : cfg.tasks) {
+        if (t.id.empty()) throw std::runtime_error("task.id must not be empty");
+        if (!task_ids.insert(t.id).second) {
+            throw std::runtime_error("duplicate task id: " + t.id);
+        }
+        if (t.source_id.empty()) throw std::runtime_error("task.source_id must not be empty: " + t.id);
+        if (t.pipeline_id.empty()) throw std::runtime_error("task.pipeline_id must not be empty: " + t.id);
+        if (!cfg.findSource(t.source_id)) {
+            throw std::runtime_error("task source not found: " + t.source_id + " (task " + t.id + ")");
+        }
+        if (!cfg.findPipeline(t.pipeline_id)) {
+            throw std::runtime_error("task pipeline not found: " + t.pipeline_id + " (task " + t.id + ")");
+        }
+    }
+}
+
+void validateAppConfig(const AppConfig& cfg) {
+    validateSources(cfg);
+    validatePipelineGraphs(cfg);
+    validateTasks(cfg);
 }
 
 } // namespace
@@ -143,6 +172,12 @@ const PipelineSourceConfig* AppConfig::findSource(const std::string& id) const {
 const PipelineConfig* AppConfig::findPipeline(const std::string& id) const {
     for (const auto& p : pipelines)
         if (p.id == id) return &p;
+    return nullptr;
+}
+
+const TaskConfig* AppConfig::findTask(const std::string& id) const {
+    for (const auto& t : tasks)
+        if (t.id == id) return &t;
     return nullptr;
 }
 
@@ -224,7 +259,6 @@ AppConfig loadConfig(const std::string& yaml_path) {
     for (const auto& pn : root["pipelines"]) {
         PipelineConfig p;
         p.id = pn["id"].as<std::string>();
-        p.source_id = pn["source_id"].as<std::string>();
         for (const auto& nn : pn["nodes"]) {
             StageConfig st;
             st.id = nn["id"].as<std::string>();
@@ -247,6 +281,15 @@ AppConfig loadConfig(const std::string& yaml_path) {
             p.edges.push_back(std::move(e));
         }
         cfg.pipelines.push_back(std::move(p));
+    }
+    if (auto tasks_node = root["tasks"]) {
+        for (const auto& tn : tasks_node) {
+            TaskConfig t;
+            t.id = tn["id"].as<std::string>();
+            t.source_id = tn["source_id"].as<std::string>();
+            t.pipeline_id = tn["pipeline_id"].as<std::string>();
+            cfg.tasks.push_back(std::move(t));
+        }
     }
     if (auto kn = root["kafka"]) {
         cfg.kafka.brokers               = kn["brokers"].as<std::string>("kafka:9092");
@@ -281,7 +324,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
             cfg.frame_archive.minio.max_retries        = mn["max_retries"].as<int>(2);
         }
     }
-    validatePipelines(cfg);
+    validateAppConfig(cfg);
     return cfg;
 }
 

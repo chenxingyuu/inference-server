@@ -19,12 +19,12 @@ RTSP(source) -> decode.ffmpeg -> (fan-out)
             -> track.bytetrack (可选)
             -> join.byFrameId (可选)
             -> sink.kafka
-            -> ManagementServer (/healthz /metrics /pipelines)
+            -> ManagementServer (/healthz /metrics /tasks)
 ```
 
 运行时关键点：
 
-- Pipeline 可编排（DAG）：用 `sources + pipelines(nodes/edges)` 声明拓扑，支持分支并行与汇合。
+- Pipeline 可编排（DAG）：用 `sources` + `pipelines`（图模板）+ `tasks`（`source_id` + `pipeline_id`）声明拓扑与运行实例，支持分支并行与汇合。
 - 模型配置仍集中在 `models`，由 `infer.engine` stage 引用（`with.model_id`）。
 
 ## 依赖
@@ -101,20 +101,20 @@ Kafka 可观测 topic：
 - `inference-heartbeat`：引擎与 stream 心跳（含 `stream_state`）
 - `inference-control`：stream 控制事件（断流/恢复/终态失败）
 
-### Pipeline 管理
+### Task 管理
 
 ```bash
-# 列出 pipeline 与状态
-curl http://localhost:8080/pipelines
+# 列出 task 与状态
+curl http://localhost:8080/tasks
 
-# 启动 / 停止某条 pipeline
-curl -X POST http://localhost:8080/pipelines/cam_001_pipeline/start
-curl -X POST http://localhost:8080/pipelines/cam_001_pipeline/stop
+# 启动 / 停止某个 task（id 与配置中 tasks[].id 一致，例如 task_cam_001）
+curl -X POST http://localhost:8080/tasks/task_cam_001/start
+curl -X POST http://localhost:8080/tasks/task_cam_001/stop
 ```
 
 ## Pipeline 配置（新格式）
 
-配置文件以 `sources` 描述输入源，以 `pipelines` 描述可编排 DAG（nodes/edges）。
+配置文件以 `sources` 描述输入源，以 `pipelines` 描述可编排 DAG 模板（nodes/edges），以 `tasks` 绑定「哪路源跑哪张图」。
 示例见 `config/config.cpu.yaml` / `config/config.gpu.yaml` / `config/config.yaml`。
 
 常见 stage（首批）：

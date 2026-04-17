@@ -92,8 +92,7 @@ sources:
     use_hwdec: true
 
 pipelines:
-  - id: "cam_001_pipeline"
-    source_id: "cam_001"
+  - id: "pipeline_full"
     nodes:
       - id: "cam_001"
         type: "source.rtsp"
@@ -134,8 +133,7 @@ pipelines:
         to: "join_1"
       - from: "join_1"
         to: "sink_1"
-  - id: "cam_002_pipeline"
-    source_id: "cam_002"
+  - id: "pipeline_lite"
     nodes:
       - id: "cam_002"
         type: "source.rtsp"
@@ -162,6 +160,14 @@ pipelines:
         to: "post_2"
       - from: "post_2"
         to: "sink_2"
+
+tasks:
+  - id: "task_cam_001"
+    source_id: "cam_001"
+    pipeline_id: "pipeline_full"
+  - id: "task_cam_002"
+    source_id: "cam_002"
+    pipeline_id: "pipeline_lite"
 
 kafka:
   brokers: "kafka:9092"

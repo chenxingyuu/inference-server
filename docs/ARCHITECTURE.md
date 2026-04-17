@@ -4,7 +4,7 @@
 
 ## Runtime Pipeline
 
-The runtime is a **configurable in-process DAG pipeline**:
+The runtime is a **configurable in-process DAG** driven by **tasks** (each task binds one `source_id` to one reusable `pipeline_id` template):
 
 1. Source ingest (`source.rtsp` using `FFmpegDecoder`; optional HW decode via NVDEC).
 2. Fan-out to parallel branches (e.g. `archive.raw` and inference path).
@@ -28,7 +28,7 @@ The runtime is a **configurable in-process DAG pipeline**:
 - **Metrics** (`GET /metrics`): Prometheus text format scraped by Prometheus every 15 s.
 - **Heartbeat** (`inference-heartbeat` Kafka topic): per-stream and engine-level heartbeat every 5 s. Downstream can distinguish: `STREAMING`+no-frames=no targets; `RECONNECTING/DEGRADED`=camera issue; heartbeat stops=engine down.
 - **Control events** (`inference-control` Kafka topic): stream lifecycle events (`stream_dropped`, `stream_recovered`, `stream_failed_terminal`) emitted by `FFmpegDecoder`.
-- **Management API** (`GET /healthz`, `GET /pipelines`): liveness probe and pipeline-level operations.
+- **Management API** (`GET /healthz`, `GET /tasks`): liveness probe and task-level start/stop (`POST /tasks/{id}/start|stop`).
 
 ## Architecture Boundaries
 

@@ -225,15 +225,15 @@
 
 ---
 
-## Phase 12 — DAG Pipeline（sources/pipelines 可编排）
+## Phase 12 — DAG Pipeline（sources / pipeline 模板 / tasks）
 
 **目标**：将固定式 `streams -> model_id` 的链路升级为可编排 DAG pipeline，支持分支并行与汇合（例如 `decode -> {archive, infer} -> join`）。
 
 **新增**：
-- 新配置格式：`sources`（输入源）+ `pipelines`（nodes/edges）
-- 运行时：`PipelineManager` + `GraphExecutor` + `EdgeQueue`（每条边独立背压策略）
+- 新配置格式：`sources`（输入源）+ `pipelines`（仅 nodes/edges 的图模板）+ `tasks`（`source_id` + `pipeline_id`，运行实例）
+- 运行时：`TaskManager` + `GraphExecutor` + `EdgeQueue`（每条边独立背压策略；每个 task 一份 executor）
 - Stage：`source.rtsp` / `infer.engine` / `archive.raw` / `track.bytetrack` / `join.byFrameId` / `sink.kafka`（其余为占位 passthrough）
-- 管理接口：`GET /pipelines`、`POST /pipelines/{id}/start|stop`
+- 管理接口：`GET /tasks`、`POST /tasks/{id}/start|stop`
 
 **关键决策**：
 - `infer.engine` 对 ONNX Runtime 默认按 **batch=1** 运行（避免 ORT 输入 shape 自省不稳定；多数 YOLO ONNX 为静态 batch=1）

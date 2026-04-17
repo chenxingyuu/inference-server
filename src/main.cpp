@@ -1,6 +1,6 @@
 #include "common/Config.h"
 #include "common/Logger.h"
-#include "pipeline/PipelineManager.h"
+#include "pipeline/TaskManager.h"
 #include "publisher/KafkaPublisher.h"
 #include "publisher/HeartbeatPublisher.h"
 #include "publisher/ControlEventBus.h"
@@ -57,9 +57,9 @@ int main(int argc, char* argv[]) {
     }
 
     auto frame_archiver = std::make_shared<infer::FrameArchiver>(cfg.frame_archive);
-    infer::PipelineManager pipeline_manager(cfg, *publisher, frame_archiver);
-    pipeline_manager.loadAll();
-    pipeline_manager.startAll();
+    infer::TaskManager task_manager(cfg, *publisher, frame_archiver);
+    task_manager.loadAll();
+    task_manager.startAll();
 
     // ── Start heartbeat publisher (Phase 10) ─────────────────────────────────
     std::unique_ptr<infer::HeartbeatPublisher> heartbeat;
@@ -82,11 +82,11 @@ int main(int argc, char* argv[]) {
     }
 
     // ── Start management HTTP server ──────────────────────────────────────────
-    infer::ManagementServer mgmt_server(cfg.server.management_port, pipeline_manager);
+    infer::ManagementServer mgmt_server(cfg.server.management_port, task_manager);
     mgmt_server.start();
 
-    LOG_INFO("All pipelines running. PipelineCount: {} ManagementPort: {}",
-             cfg.pipelines.size(), cfg.server.management_port);
+    LOG_INFO("All tasks running. TaskCount: {} ManagementPort: {}",
+             cfg.tasks.size(), cfg.server.management_port);
 
     // ── Main wait loop ────────────────────────────────────────────────────────
     while (!g_shutdown.load()) {
@@ -102,7 +102,7 @@ int main(int argc, char* argv[]) {
     infer::ControlEventBus::get().clearPublisher();
     control.reset();
 
-    pipeline_manager.stopAll();
+    task_manager.stopAll();
     publisher->flush();
     LOG_INFO("inference-server stopped");
     return 0;

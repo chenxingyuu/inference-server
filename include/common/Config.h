@@ -107,9 +107,14 @@ struct EdgeConfig {
 
 struct PipelineConfig {
     std::string id;
-    std::string source_id;
     std::vector<StageConfig> nodes;
     std::vector<EdgeConfig>  edges;
+};
+
+struct TaskConfig {
+    std::string id;
+    std::string source_id;
+    std::string pipeline_id;
 };
 
 struct KafkaConfig {
@@ -154,6 +159,7 @@ struct AppConfig {
     std::vector<StreamConfig> streams;
     std::vector<PipelineSourceConfig> sources;
     std::vector<PipelineConfig> pipelines;
+    std::vector<TaskConfig>    tasks;
     KafkaConfig             kafka;
     FrameArchiveConfig      frame_archive;
 
@@ -162,6 +168,7 @@ struct AppConfig {
     const StreamConfig* findStream(const std::string& id) const;
     const PipelineSourceConfig* findSource(const std::string& id) const;
     const PipelineConfig* findPipeline(const std::string& id) const;
+    const TaskConfig* findTask(const std::string& id) const;
 };
 
 // Parse config.yaml → AppConfig. Throws std::runtime_error on invalid config.
