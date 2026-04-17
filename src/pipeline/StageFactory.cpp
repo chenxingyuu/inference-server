@@ -1,6 +1,7 @@
 #include "pipeline/StageFactory.h"
 
 #include "pipeline/stages/ArchiveRawStage.h"
+#include "pipeline/stages/DrawAndStreamStage.h"
 #include "pipeline/stages/InferEngineStage.h"
 #include "pipeline/stages/JoinByFrameStage.h"
 #include "pipeline/stages/PassthroughStage.h"
@@ -37,6 +38,23 @@ float getFloatWithDefault(const std::map<std::string, std::string>& kv, const st
     }
 }
 
+std::string getStringRequired(const std::map<std::string, std::string>& kv, const std::string& key) {
+    auto it = kv.find(key);
+    if (it == kv.end() || it->second.empty()) {
+        throw std::runtime_error("missing required field '" + key + "'");
+    }
+    return it->second;
+}
+
+std::string getStringWithDefault(
+    const std::map<std::string, std::string>& kv,
+    const std::string& key,
+    const std::string& default_value) {
+    auto it = kv.find(key);
+    if (it == kv.end() || it->second.empty()) return default_value;
+    return it->second;
+}
+
 } // namespace
 
 std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Context& ctx) {
@@ -71,6 +89,39 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
     }
     if (cfg.type == "sink.kafka") {
         return std::make_unique<SinkKafkaStage>(cfg.id, ctx.publisher);
+    }
+    if (cfg.type == "sink.stream") {
+        DrawAndStreamConfig stream_cfg;
+        stream_cfg.output_url = getStringRequired(cfg.with, "output_url");
+        stream_cfg.protocol = getStringWithDefault(cfg.with, "protocol", "rtsp");
+        if (stream_cfg.protocol != "rtsp" && stream_cfg.protocol != "rtmp") {
+            throw std::runtime_error("sink.stream protocol must be one of: rtsp, rtmp");
+        }
+        stream_cfg.fps = getFloatWithDefault(cfg.with, "fps", static_cast<float>(stream_cfg.fps));
+        stream_cfg.bitrate_kbps = getIntWithDefault(cfg.with, "bitrate_kbps", stream_cfg.bitrate_kbps);
+        stream_cfg.queue_capacity = getIntWithDefault(cfg.with, "queue_capacity", stream_cfg.queue_capacity);
+        stream_cfg.reconnect_initial_ms = getIntWithDefault(cfg.with, "reconnect_initial_ms", stream_cfg.reconnect_initial_ms);
+        stream_cfg.reconnect_max_ms = getIntWithDefault(cfg.with, "reconnect_max_ms", stream_cfg.reconnect_max_ms);
+        stream_cfg.draw_conf_thresh = getFloatWithDefault(cfg.with, "draw_conf_thresh", stream_cfg.draw_conf_thresh);
+        stream_cfg.line_thickness = getIntWithDefault(cfg.with, "line_thickness", stream_cfg.line_thickness);
+        const auto drop_policy = getStringWithDefault(cfg.with, "drop_policy", "drop_oldest");
+        if (drop_policy == "drop_oldest") {
+            stream_cfg.drop_policy = StreamDropPolicy::DropOldest;
+        } else if (drop_policy == "drop_newest") {
+            stream_cfg.drop_policy = StreamDropPolicy::DropNewest;
+        } else {
+            throw std::runtime_error("sink.stream drop_policy must be one of: drop_oldest, drop_newest");
+        }
+        if (stream_cfg.queue_capacity < 1) {
+            throw std::runtime_error("sink.stream queue_capacity must be >= 1");
+        }
+        if (stream_cfg.fps <= 0) {
+            throw std::runtime_error("sink.stream fps must be > 0");
+        }
+        if (stream_cfg.reconnect_initial_ms < 1 || stream_cfg.reconnect_max_ms < stream_cfg.reconnect_initial_ms) {
+            throw std::runtime_error("sink.stream reconnect settings invalid");
+        }
+        return std::make_unique<DrawAndStreamStage>(cfg.id, stream_cfg);
     }
     throw std::runtime_error("unsupported stage type: " + cfg.type);
 }

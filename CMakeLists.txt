@@ -42,7 +42,7 @@ find_package(spdlog REQUIRED)
 find_package(Boost 1.71 REQUIRED)
 
 # OpenCV
-find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc imgcodecs)
+find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc imgcodecs videoio)
 
 # librdkafka
 pkg_check_modules(RDKAFKA REQUIRED rdkafka)
@@ -146,6 +146,7 @@ set(PIPELINE_SOURCES
     src/pipeline/GraphExecutor.cpp
     src/pipeline/StageFactory.cpp
     src/pipeline/stages/ArchiveRawStage.cpp
+    src/pipeline/stages/DrawAndStreamStage.cpp
     src/pipeline/stages/InferEngineStage.cpp
     src/pipeline/stages/JoinByFrameStage.cpp
     src/pipeline/stages/SinkKafkaStage.cpp

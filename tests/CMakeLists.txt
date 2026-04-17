@@ -69,6 +69,22 @@ add_infer_test(test_tracker)
 add_infer_test(test_stream_health)
 add_infer_test(test_reconnect_backoff)
 add_infer_test(test_reconnect_policy)
+add_executable(test_stage_factory test_stage_factory.cpp)
+target_link_libraries(test_stage_factory PRIVATE
+    infer_core
+    GTest::gtest_main
+)
+add_test(NAME test_stage_factory COMMAND test_stage_factory
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+add_executable(test_draw_and_stream_stage test_draw_and_stream_stage.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/DrawAndStreamStage.cpp
+)
+target_link_libraries(test_draw_and_stream_stage PRIVATE
+    infer_testable
+    GTest::gtest_main
+)
+add_test(NAME test_draw_and_stream_stage COMMAND test_draw_and_stream_stage
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
 # Phase 10: heartbeat JSON serialization (needs rdkafka for linking HeartbeatPublisher.cpp)
 add_executable(test_heartbeat_publisher test_heartbeat_publisher.cpp

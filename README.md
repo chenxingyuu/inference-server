@@ -19,6 +19,7 @@ RTSP(source) -> decode.ffmpeg -> (fan-out)
             -> track.bytetrack (可选)
             -> join.byFrameId (可选)
             -> sink.kafka
+            -> sink.stream (可选，画框+RTSP/RTMP 推流)
             -> ManagementServer (/healthz /metrics /tasks)
 ```
 
@@ -34,7 +35,7 @@ RTSP(source) -> decode.ffmpeg -> (fan-out)
 | CMake | >= 3.20 | 必需 |
 | C++ 编译器 | C++17 | 必需 |
 | FFmpeg | 4.x / 5.x / 6.x | 必需 |
-| OpenCV | >= 4.0（core,imgproc） | 必需 |
+| OpenCV | >= 4.0（core,imgproc,imgcodecs,videoio） | 必需 |
 | yaml-cpp | 任意 | 必需 |
 | nlohmann/json | >= 3.9 | 必需 |
 | spdlog | 任意 | 必需 |
@@ -127,6 +128,7 @@ curl -X POST http://localhost:8080/tasks/task_cam_001/stop
 - `track.bytetrack`：ByteTrack 追踪
 - `join.byFrameId`：归档信息回填到推理结果（按 frame id join）
 - `sink.kafka`：Kafka 输出
+- `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`）
 
 ### ONNX Runtime（CPU/MPS）注意事项
 

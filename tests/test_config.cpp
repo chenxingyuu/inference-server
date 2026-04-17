@@ -478,3 +478,37 @@ TEST(LoadConfig, InvalidPipelineGraphThrows) {
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());
 }
+
+TEST(LoadConfig, SinkStreamInvalidProtocolThrows) {
+    const std::string path = "data/test_invalid_sink_stream_protocol.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_stream_1\n";
+        out << "        type: sink.stream\n";
+        out << "        with:\n";
+        out << "          output_url: rtmp://localhost/live/test\n";
+        out << "          protocol: srt\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_stream_1\n";
+        out << "tasks:\n";
+        out << "  - id: task1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}

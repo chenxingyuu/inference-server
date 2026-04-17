@@ -16,6 +16,7 @@ extern "C" {
 #include <opencv2/imgproc.hpp>
 #include <chrono>
 #include <thread>
+#include <mutex>
 
 namespace infer {
 
@@ -30,6 +31,14 @@ uint64_t nowSteadyNs() {
     return static_cast<uint64_t>(
         duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count());
 }
+
+void configureFfmpegLogLevelOnce() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        // Reduce noisy decoder warnings (e.g. SEI truncation) and keep errors.
+        av_log_set_level(AV_LOG_ERROR);
+    });
+}
 } // namespace
 
 AVPixelFormat FFmpegDecoder::getHWFormat(AVCodecContext* /*ctx*/, const AVPixelFormat* pix_fmts) {
@@ -39,7 +48,9 @@ AVPixelFormat FFmpegDecoder::getHWFormat(AVCodecContext* /*ctx*/, const AVPixelF
     return AV_PIX_FMT_NONE;
 }
 
-FFmpegDecoder::FFmpegDecoder() = default;
+FFmpegDecoder::FFmpegDecoder() {
+    configureFfmpegLogLevelOnce();
+}
 
 FFmpegDecoder::~FFmpegDecoder() {
     stop();

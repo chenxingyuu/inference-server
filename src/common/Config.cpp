@@ -42,6 +42,17 @@ void validatePipelineGraphs(const AppConfig& cfg) {
             if (!node_ids.insert(n.id).second) {
                 throw std::runtime_error("duplicate pipeline node id: " + n.id);
             }
+            if (n.type == "sink.stream") {
+                auto output_url_it = n.with.find("output_url");
+                if (output_url_it == n.with.end() || output_url_it->second.empty()) {
+                    throw std::runtime_error("sink.stream requires with.output_url");
+                }
+                auto protocol_it = n.with.find("protocol");
+                const std::string protocol = (protocol_it == n.with.end()) ? "rtsp" : protocol_it->second;
+                if (protocol != "rtsp" && protocol != "rtmp") {
+                    throw std::runtime_error("sink.stream protocol must be one of: rtsp, rtmp");
+                }
+            }
             indegree[n.id] = 0;
         }
         for (const auto& e : p.edges) {
