@@ -89,6 +89,19 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
         Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
         Metrics::get().recordInferBatchSize(model_cfg_.id, batch.size());
         Metrics::get().incInferBatches(model_cfg_.id);
+        // queue_latency_ms is per-frame (same for all frames in this batch since
+        // we use the first frame's capture time as reference)
+        {
+            const uint64_t batch_start_mono_ns = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    infer_start.time_since_epoch()).count());
+            for (int i = 0; i < flush_count; ++i) {
+                if (pending_events_[i].frame->meta.capture_mono_ns != 0) {
+                    const double qms = nsToMs(batch_start_mono_ns - pending_events_[i].frame->meta.capture_mono_ns);
+                    if (qms >= 0) Metrics::get().recordInferQueueLatency(model_cfg_.id, qms);
+                }
+            }
+        }
 
         const auto decode_start = std::chrono::steady_clock::now();
         auto decoded = decoder_->decode(output.data(), batch.size(), model_cfg_.input_shape,
@@ -154,6 +167,13 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
                     Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
                     Metrics::get().recordInferBatchSize(model_cfg_.id, 1);
                     Metrics::get().incInferBatches(model_cfg_.id);
+                    if (pending_events_[i].frame->meta.capture_mono_ns != 0) {
+                        const uint64_t bs_mono_ns = static_cast<uint64_t>(
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                infer_start.time_since_epoch()).count());
+                        const double qms = nsToMs(bs_mono_ns - pending_events_[i].frame->meta.capture_mono_ns);
+                        if (qms >= 0) Metrics::get().recordInferQueueLatency(model_cfg_.id, qms);
+                    }
 
                     const auto decode_start = std::chrono::steady_clock::now();
                     auto decoded = decoder_->decode(output.data(), 1, model_cfg_.input_shape,

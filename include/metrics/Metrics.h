@@ -25,6 +25,10 @@ public:
     // ── Batch size histogram ───────────────────────────────────────────────────
     void recordInferBatchSize(const std::string& model_id, int size);
 
+    // ── Infer queue wait latency histogram ────────────────────────────────────
+    // Time from frame capture to batch inference start (queue wait + preprocess).
+    void recordInferQueueLatency(const std::string& model_id, double ms);
+
     // ── Counters ──────────────────────────────────────────────────────────────
     void incFramesDecoded(const std::string& stream_id);
     void incFramesDropped(const std::string& stream_id);
@@ -124,6 +128,7 @@ private:
     LabeledHistogram      infer_latency_;
     LabeledHistogram      e2e_latency_;
     LabeledHistogram      infer_batch_size_;
+    LabeledHistogram      infer_queue_latency_;
     LabeledCounter        frames_decoded_;
     LabeledCounter        frames_dropped_;
     std::atomic<uint64_t> kafka_published_{0};
