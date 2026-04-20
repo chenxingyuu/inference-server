@@ -44,7 +44,7 @@ models:
     ]
     instance_count: 1
     preferred_batch_sizes: [1, 2, 4]
-    max_queue_delay_us: 15000
+    max_queue_delay_us: 150000
 
 sources:
   - id: "cam_001"

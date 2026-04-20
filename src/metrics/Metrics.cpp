@@ -99,6 +99,10 @@ void Metrics::recordInferBatchSize(const std::string& model_id, int size) {
     infer_batch_size_.observe(model_id, static_cast<double>(size));
 }
 
+void Metrics::recordInferQueueLatency(const std::string& model_id, double ms) {
+    infer_queue_latency_.observe(model_id, ms);
+}
+
 void Metrics::incFramesDecoded(const std::string& stream_id) {
     frames_decoded_.inc(stream_id);
 }
@@ -334,6 +338,12 @@ std::string Metrics::serialize() const {
         e2e_latency_.snapshot(snap);
         out << serializeHistogram("e2e_latency_ms",
             "End-to-end latency (capture to publish) in milliseconds", "stream_id", snap);
+    }
+    {
+        std::unordered_map<std::string, HistogramData> snap;
+        infer_queue_latency_.snapshot(snap);
+        out << serializeHistogram("infer_queue_latency_ms",
+            "Time from frame capture to inference start (queue wait + preprocess)", "model_id", snap);
     }
     {
         std::unordered_map<std::string, HistogramData> snap;

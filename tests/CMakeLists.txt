@@ -71,6 +71,7 @@ add_infer_test(test_reconnect_backoff)
 add_infer_test(test_reconnect_policy)
 add_infer_test(test_sink_ffplay_metrics)
 add_infer_test(test_infer_batch_size_metrics)
+add_infer_test(test_queue_latency_metrics)
 add_executable(test_stage_factory test_stage_factory.cpp)
 target_link_libraries(test_stage_factory PRIVATE
     infer_core
