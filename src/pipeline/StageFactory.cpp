@@ -19,6 +19,17 @@ namespace infer {
 
 namespace {
 
+// Reject URLs containing control characters (newlines, null bytes, etc.) that
+// could be injected into a popen() shell command string.
+void validateShellSafeUrl(const std::string& url, const std::string& stage_type) {
+    for (unsigned char c : url) {
+        if (c < 0x20 || c == 0x7f) {
+            throw std::runtime_error(stage_type + " output_url contains illegal control character (0x"
+                                     + std::to_string(static_cast<int>(c)) + ")");
+        }
+    }
+}
+
 int getIntWithDefault(const std::map<std::string, std::string>& kv, const std::string& key, int default_value) {
     auto it = kv.find(key);
     if (it == kv.end()) return default_value;
@@ -87,6 +98,8 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         SinkFfplayConfig ff_cfg;
         ff_cfg.fps = getFloatWithDefault(cfg.with, "fps", static_cast<float>(ff_cfg.fps));
         ff_cfg.queue_capacity = getIntWithDefault(cfg.with, "queue_capacity", ff_cfg.queue_capacity);
+        ff_cfg.reconnect_initial_ms = getIntWithDefault(cfg.with, "reconnect_initial_ms", ff_cfg.reconnect_initial_ms);
+        ff_cfg.reconnect_max_ms = getIntWithDefault(cfg.with, "reconnect_max_ms", ff_cfg.reconnect_max_ms);
         ff_cfg.draw_conf_thresh = getFloatWithDefault(cfg.with, "draw_conf_thresh", ff_cfg.draw_conf_thresh);
         ff_cfg.line_thickness = getIntWithDefault(cfg.with, "line_thickness", ff_cfg.line_thickness);
         const auto drop_policy = getStringWithDefault(cfg.with, "drop_policy", "drop_oldest");
@@ -103,6 +116,9 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         if (ff_cfg.fps <= 0) {
             throw std::runtime_error("sink.ffplay fps must be > 0");
         }
+        if (ff_cfg.reconnect_initial_ms < 1 || ff_cfg.reconnect_max_ms < ff_cfg.reconnect_initial_ms) {
+            throw std::runtime_error("sink.ffplay reconnect settings invalid");
+        }
         return std::make_unique<SinkFfplayStage>(cfg.id, ff_cfg);
     }
     if (cfg.type == "sink.stream") {
@@ -115,6 +131,7 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         if (stream_cfg.output_url.empty()) {
             throw std::runtime_error("sink.stream requires with.output_url");
         }
+        validateShellSafeUrl(stream_cfg.output_url, "sink.stream");
         stream_cfg.fps = getFloatWithDefault(cfg.with, "fps", static_cast<float>(stream_cfg.fps));
         stream_cfg.bitrate_kbps = getIntWithDefault(cfg.with, "bitrate_kbps", stream_cfg.bitrate_kbps);
         stream_cfg.queue_capacity = getIntWithDefault(cfg.with, "queue_capacity", stream_cfg.queue_capacity);

@@ -4,7 +4,6 @@
 #include "pipeline/stages/DetectionOverlay.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <utility>
 
@@ -57,9 +56,8 @@ void DrawAndStreamStage::stop() {
     if (!running_.compare_exchange_strong(expected, false)) return;
     cv_.notify_all();
     if (worker_.joinable()) {
-        worker_.join();
+        worker_.join(); // runWorker() closes writer_ on exit — safe to clear queue after join
     }
-    writer_->close();
     std::lock_guard<std::mutex> lock(mu_);
     queue_.clear();
 }
@@ -67,7 +65,7 @@ void DrawAndStreamStage::stop() {
 void DrawAndStreamStage::process(const EventEnvelope& input, const EmitFn& emit) {
     if (input.frame) {
         StreamItem item;
-        item.frame = std::make_shared<Frame>(*input.frame);
+        item.frame = input.frame; // shared ownership; worker clones before drawing
         item.infer_result = input.infer_result;
         item.stream_id = input.stream_id;
         enqueue(std::move(item));
@@ -77,6 +75,7 @@ void DrawAndStreamStage::process(const EventEnvelope& input, const EmitFn& emit)
 
 void DrawAndStreamStage::enqueue(StreamItem item) {
     std::lock_guard<std::mutex> lock(mu_);
+    if (!running_.load(std::memory_order_relaxed)) return; // stage is stopped, discard
     if (queue_.size() >= static_cast<std::size_t>(std::max(1, cfg_.queue_capacity))) {
         if (cfg_.drop_policy == StreamDropPolicy::DropOldest) {
             queue_.pop_front();
@@ -122,6 +121,9 @@ void DrawAndStreamStage::runWorker() {
         frames_written_.fetch_add(1, std::memory_order_relaxed);
         consecutive_failures_.store(0, std::memory_order_relaxed);
     }
+    // writer_ is exclusively owned by this thread: close it here so stop() never
+    // races with an in-progress write.
+    writer_->close();
 }
 
 bool DrawAndStreamStage::ensureWriterOpened(const cv::Mat& frame) {
@@ -156,11 +158,15 @@ bool DrawAndStreamStage::OpenCvStreamWriter::open(
     const std::string& url,
     const std::string& protocol,
     double fps,
-    int,
+    int bitrate_kbps,
     int width,
     int height) {
     close();
     if (url.empty()) return false;
+    // Defense-in-depth: reject control characters that would break the shell command.
+    for (unsigned char c : url) {
+        if (c < 0x20 || c == 0x7f) return false;
+    }
     const std::string output_url = buildOutputUrl(url, protocol);
     std::string format = "rtsp";
     if (protocol == "rtmp") format = "flv";
@@ -170,6 +176,7 @@ bool DrawAndStreamStage::OpenCvStreamWriter::open(
         "-s " + std::to_string(width) + "x" + std::to_string(height) + " "
         "-r " + std::to_string(fps) + " -i - "
         "-an -c:v libx264 -pix_fmt yuv420p -preset veryfast -tune zerolatency "
+        "-b:v " + std::to_string(bitrate_kbps) + "k "
         "-f " + format + " " + shellQuote(output_url);
 
     pipe_ = popen(cmd.c_str(), "w");
@@ -194,8 +201,13 @@ bool DrawAndStreamStage::OpenCvStreamWriter::write(const cv::Mat& frame) {
 
 void DrawAndStreamStage::OpenCvStreamWriter::close() {
     if (pipe_ != nullptr) {
-        pclose(pipe_);
+        const int rc = pclose(pipe_);
         pipe_ = nullptr;
+        if (rc != 0) {
+            // Log via stderr since we have no id_ in this inner class.
+            // Callers (DrawAndStreamStage) will log context around failures.
+            std::fprintf(stderr, "[DrawAndStreamStage] ffmpeg exited with status %d\n", rc);
+        }
     }
 }
 

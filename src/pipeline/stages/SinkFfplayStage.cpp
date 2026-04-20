@@ -11,7 +11,8 @@ namespace infer {
 
 SinkFfplayStage::SinkFfplayStage(std::string id, SinkFfplayConfig cfg)
     : id_(std::move(id))
-    , cfg_(std::move(cfg)) {}
+    , cfg_(std::move(cfg))
+    , reconnect_delay_ms_(cfg_.reconnect_initial_ms) {}
 
 SinkFfplayStage::~SinkFfplayStage() { stop(); }
 
@@ -28,9 +29,8 @@ void SinkFfplayStage::stop() {
     if (!running_.compare_exchange_strong(expected, false)) return;
     cv_.notify_all();
     if (worker_.joinable()) {
-        worker_.join();
+        worker_.join(); // runWorker() closes ffplay_pipe_ on exit — safe to clear queue after join
     }
-    closeFfplay();
     std::lock_guard<std::mutex> lock(mu_);
     queue_.clear();
 }
@@ -38,7 +38,7 @@ void SinkFfplayStage::stop() {
 void SinkFfplayStage::process(const EventEnvelope& input, const EmitFn& emit) {
     if (input.frame) {
         QueueItem item;
-        item.frame = std::make_shared<Frame>(*input.frame);
+        item.frame = input.frame; // shared ownership; worker clones before drawing
         item.infer_result = input.infer_result;
         item.stream_id = input.stream_id;
         enqueue(std::move(item));
@@ -48,6 +48,7 @@ void SinkFfplayStage::process(const EventEnvelope& input, const EmitFn& emit) {
 
 void SinkFfplayStage::enqueue(QueueItem item) {
     std::lock_guard<std::mutex> lock(mu_);
+    if (!running_.load(std::memory_order_relaxed)) return; // stage is stopped, discard
     if (queue_.size() >= static_cast<std::size_t>(std::max(1, cfg_.queue_capacity))) {
         if (cfg_.drop_policy == StreamDropPolicy::DropOldest) {
             queue_.pop_front();
@@ -82,16 +83,27 @@ void SinkFfplayStage::runWorker() {
         cv::Mat output = item.frame->image.clone();
         overlay::drawDetections(output, item.infer_result, cfg_.draw_conf_thresh, cfg_.line_thickness);
 
-        if (!ensureFfplayOpened(output) || !writeFfplayFrame(output)) {
+        if (!ensureFfplayOpened(output)) {
+            continue;
+        }
+        if (!writeFfplayFrame(output)) {
             closeFfplay();
+            onFfplayFailure();
             continue;
         }
         frames_written_.fetch_add(1, std::memory_order_relaxed);
     }
+    // ffplay_pipe_ is exclusively owned by this thread: close here so stop() never
+    // races with an in-progress fwrite.
+    closeFfplay();
 }
 
 bool SinkFfplayStage::ensureFfplayOpened(const cv::Mat& frame) {
     if (ffplay_pipe_ != nullptr) return true;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < next_reconnect_at_) return false;
+
+    reconnect_attempts_.fetch_add(1, std::memory_order_relaxed);
     const std::string cmd =
         "ffplay -loglevel error -fflags nobuffer -flags low_delay "
         "-f rawvideo -pixel_format bgr24 "
@@ -99,11 +111,20 @@ bool SinkFfplayStage::ensureFfplayOpened(const cv::Mat& frame) {
         "-framerate " + std::to_string(cfg_.fps) + " -";
     ffplay_pipe_ = popen(cmd.c_str(), "w");
     if (ffplay_pipe_ == nullptr) {
-        LOG_WARN("SinkFfplayStage[{}]: failed to launch ffplay", id_);
+        LOG_WARN("SinkFfplayStage[{}]: failed to launch ffplay (attempt={})",
+                 id_, reconnect_attempts_.load(std::memory_order_relaxed));
+        onFfplayFailure();
         return false;
     }
     LOG_INFO("SinkFfplayStage[{}]: ffplay preview started", id_);
+    reconnect_delay_ms_ = cfg_.reconnect_initial_ms;
     return true;
+}
+
+void SinkFfplayStage::onFfplayFailure() {
+    next_reconnect_at_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(reconnect_delay_ms_);
+    reconnect_delay_ms_ = std::min(reconnect_delay_ms_ * 2, cfg_.reconnect_max_ms);
+    LOG_WARN("SinkFfplayStage[{}]: next ffplay reconnect in {}ms", id_, reconnect_delay_ms_);
 }
 
 bool SinkFfplayStage::writeFfplayFrame(const cv::Mat& frame) {
@@ -123,8 +144,11 @@ bool SinkFfplayStage::writeFfplayFrame(const cv::Mat& frame) {
 
 void SinkFfplayStage::closeFfplay() {
     if (ffplay_pipe_ != nullptr) {
-        pclose(ffplay_pipe_);
+        const int rc = pclose(ffplay_pipe_);
         ffplay_pipe_ = nullptr;
+        if (rc != 0) {
+            LOG_WARN("SinkFfplayStage[{}]: ffplay exited with status {}", id_, rc);
+        }
     }
 }
 

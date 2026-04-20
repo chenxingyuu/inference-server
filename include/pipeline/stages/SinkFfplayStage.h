@@ -22,6 +22,8 @@ namespace infer {
 struct SinkFfplayConfig {
     double fps{15.0};
     int queue_capacity{32};
+    int reconnect_initial_ms{1000};
+    int reconnect_max_ms{15000};
     float draw_conf_thresh{0.0f};
     int line_thickness{2};
     StreamDropPolicy drop_policy{StreamDropPolicy::DropOldest};
@@ -49,6 +51,7 @@ private:
     bool ensureFfplayOpened(const cv::Mat& frame);
     bool writeFfplayFrame(const cv::Mat& frame);
     void closeFfplay();
+    void onFfplayFailure();
 
     std::string id_;
     SinkFfplayConfig cfg_;
@@ -61,6 +64,9 @@ private:
 
     std::atomic<uint64_t> frames_written_{0};
     std::atomic<uint64_t> frames_dropped_{0};
+    std::atomic<uint64_t> reconnect_attempts_{0};
+    int reconnect_delay_ms_{1000};
+    std::chrono::steady_clock::time_point next_reconnect_at_{};
 };
 
 } // namespace infer
