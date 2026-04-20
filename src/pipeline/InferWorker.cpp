@@ -100,6 +100,7 @@ void InferWorker::workerLoop() {
             const double infer_ms = std::chrono::duration<double, std::milli>(
                 infer_end - infer_start).count();
             Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
+            Metrics::get().recordInferBatchSize(model_cfg_.id, batch.size());
             Metrics::get().incInferBatches(model_cfg_.id);
 
             auto decode_start = std::chrono::steady_clock::now();
@@ -118,8 +119,10 @@ void InferWorker::workerLoop() {
                 r.frame_seq       = batch.metas[i].frame_seq;
                 r.infer_ts        = infer_ts;
                 if (r.frame_mono_ns != 0) {
-                    r.queue_latency_ms = (static_cast<double>(dequeue_mono_ns - r.frame_mono_ns)) / 1e6;
-                    r.latency_ms       = (static_cast<double>(infer_end_mono_ns - r.frame_mono_ns)) / 1e6;
+                    r.queue_latency_ms = dequeue_mono_ns >= r.frame_mono_ns
+                        ? (static_cast<double>(dequeue_mono_ns - r.frame_mono_ns)) / 1e6 : 0.0;
+                    r.latency_ms = infer_end_mono_ns >= r.frame_mono_ns
+                        ? (static_cast<double>(infer_end_mono_ns - r.frame_mono_ns)) / 1e6 : 0.0;
                 } else {
                     // Fallback: compute using epoch seconds (can be affected by system clock jumps).
                     r.queue_latency_ms = (dequeue_ts - r.frame_ts) * 1000.0;

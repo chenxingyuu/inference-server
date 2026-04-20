@@ -2,6 +2,7 @@
 
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
+#include "pipeline/stages/DetectionOverlay.h"
 #include <algorithm>
 #include <chrono>
 
@@ -89,17 +90,14 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
         Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
         Metrics::get().recordInferBatchSize(model_cfg_.id, batch.size());
         Metrics::get().incInferBatches(model_cfg_.id);
-        // queue_latency_ms is per-frame (same for all frames in this batch since
-        // we use the first frame's capture time as reference)
-        {
-            const uint64_t batch_start_mono_ns = static_cast<uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    infer_start.time_since_epoch()).count());
-            for (int i = 0; i < flush_count; ++i) {
-                if (pending_events_[i].frame->meta.capture_mono_ns != 0) {
-                    const double qms = nsToMs(batch_start_mono_ns - pending_events_[i].frame->meta.capture_mono_ns);
-                    if (qms >= 0) Metrics::get().recordInferQueueLatency(model_cfg_.id, qms);
-                }
+        // queue_latency_ms: time from capture to batch-start (per frame).
+        const uint64_t batch_start_mono_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                infer_start.time_since_epoch()).count());
+        for (int i = 0; i < flush_count; ++i) {
+            const uint64_t cap_ns = pending_events_[i].frame->meta.capture_mono_ns;
+            if (cap_ns != 0 && batch_start_mono_ns >= cap_ns) {
+                Metrics::get().recordInferQueueLatency(model_cfg_.id, nsToMs(batch_start_mono_ns - cap_ns));
             }
         }
 
@@ -124,11 +122,10 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
             result.infer_ms = infer_ms;
             result.decode_ms = decode_ms;
             if (result.frame_mono_ns != 0) {
-                const uint64_t batch_start_mono_ns = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        infer_start.time_since_epoch()).count());
-                result.queue_latency_ms = nsToMs(batch_start_mono_ns - result.frame_mono_ns);
-                result.latency_ms = nsToMs(infer_finish_mono_ns - result.frame_mono_ns);
+                result.queue_latency_ms = batch_start_mono_ns >= result.frame_mono_ns
+                    ? nsToMs(batch_start_mono_ns - result.frame_mono_ns) : 0.0;
+                result.latency_ms = infer_finish_mono_ns >= result.frame_mono_ns
+                    ? nsToMs(infer_finish_mono_ns - result.frame_mono_ns) : 0.0;
             } else {
                 // Fallback: epoch-based duration (may be affected by system clock jumps).
                 result.latency_ms = (infer_ts - result.frame_ts) * 1000.0;
@@ -137,6 +134,13 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
             result.model_id = model_cfg_.id;
             if (i < static_cast<int>(decoded.size())) {
                 result.detections = std::move(decoded[i]);
+                const int fw = batch.is_gpu
+                    ? (i < static_cast<int>(batch.gpu_frames.size()) ? batch.gpu_frames[i].width : 0)
+                    : (i < static_cast<int>(batch.frames.size()) ? batch.frames[i].cols : 0);
+                const int fh = batch.is_gpu
+                    ? (i < static_cast<int>(batch.gpu_frames.size()) ? batch.gpu_frames[i].height : 0)
+                    : (i < static_cast<int>(batch.frames.size()) ? batch.frames[i].rows : 0);
+                mapDetectionsFromModelToFrame(result.detections, fw, fh, model_cfg_.input_shape);
             }
             if (result.latency_ms > 0) {
                 Metrics::get().recordE2eLatency(result.stream_id, result.latency_ms);
@@ -167,12 +171,14 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
                     Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
                     Metrics::get().recordInferBatchSize(model_cfg_.id, 1);
                     Metrics::get().incInferBatches(model_cfg_.id);
-                    if (pending_events_[i].frame->meta.capture_mono_ns != 0) {
+                    {
                         const uint64_t bs_mono_ns = static_cast<uint64_t>(
                             std::chrono::duration_cast<std::chrono::nanoseconds>(
                                 infer_start.time_since_epoch()).count());
-                        const double qms = nsToMs(bs_mono_ns - pending_events_[i].frame->meta.capture_mono_ns);
-                        if (qms >= 0) Metrics::get().recordInferQueueLatency(model_cfg_.id, qms);
+                        const uint64_t cap_ns = pending_events_[i].frame->meta.capture_mono_ns;
+                        if (cap_ns != 0 && bs_mono_ns >= cap_ns) {
+                            Metrics::get().recordInferQueueLatency(model_cfg_.id, nsToMs(bs_mono_ns - cap_ns));
+                        }
                     }
 
                     const auto decode_start = std::chrono::steady_clock::now();
@@ -191,18 +197,29 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
                     result.infer_ms = infer_ms;
                     result.decode_ms = decode_ms;
                     if (result.frame_mono_ns != 0) {
-                        const uint64_t batch_start_mono_ns = static_cast<uint64_t>(
+                        const uint64_t bs_mono_ns = static_cast<uint64_t>(
                             std::chrono::duration_cast<std::chrono::nanoseconds>(
                                 infer_start.time_since_epoch()).count());
-                        const uint64_t infer_finish_mono_ns = nowSteadyNs();
-                        result.queue_latency_ms = nsToMs(batch_start_mono_ns - result.frame_mono_ns);
-                        result.latency_ms = nsToMs(infer_finish_mono_ns - result.frame_mono_ns);
+                        const uint64_t finish_mono_ns = nowSteadyNs();
+                        result.queue_latency_ms = bs_mono_ns >= result.frame_mono_ns
+                            ? nsToMs(bs_mono_ns - result.frame_mono_ns) : 0.0;
+                        result.latency_ms = finish_mono_ns >= result.frame_mono_ns
+                            ? nsToMs(finish_mono_ns - result.frame_mono_ns) : 0.0;
                     } else {
                         result.latency_ms = (result.infer_ts - result.frame_ts) * 1000.0;
                         result.queue_latency_ms = 0.0;
                     }
                     result.model_id = model_cfg_.id;
-                    if (!decoded.empty()) result.detections = std::move(decoded[0]);
+                    if (!decoded.empty()) {
+                        result.detections = std::move(decoded[0]);
+                        const int fw = one.is_gpu
+                            ? (!one.gpu_frames.empty() ? one.gpu_frames[0].width : 0)
+                            : (!one.frames.empty() ? one.frames[0].cols : 0);
+                        const int fh = one.is_gpu
+                            ? (!one.gpu_frames.empty() ? one.gpu_frames[0].height : 0)
+                            : (!one.frames.empty() ? one.frames[0].rows : 0);
+                        mapDetectionsFromModelToFrame(result.detections, fw, fh, model_cfg_.input_shape);
+                    }
                     if (result.latency_ms > 0) {
                         Metrics::get().recordE2eLatency(result.stream_id, result.latency_ms);
                     }
