@@ -86,7 +86,7 @@ pipelines:
       - id: "sink_ffplay_1"
         type: "sink.ffplay"
         with:
-          fps: "15"
+          fps: "5"
           queue_capacity: "16"
           draw_conf_thresh: "0.25"
           drop_policy: "drop_oldest"

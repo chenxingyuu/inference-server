@@ -48,6 +48,12 @@ void GraphExecutor::stop() {
     if (!running_.exchange(false)) return;
     // Unblock all queue pop() calls so worker threads can observe running_=false.
     for (auto& [_, q] : edges_) q->stop();
+    // Before joining node workers, tell stages the graph is draining. Otherwise sinks
+    // that manage their own worker (ffplay/ffmpeg) can still reconnect while graph
+    // threads are winding down, which delays process exit after SIGINT.
+    for (auto& [_, stage] : stages_) {
+        stage->onGraphExecutorDraining();
+    }
     // Join first: ensures no worker is inside stage->process() before we release resources.
     for (auto& t : worker_threads_) {
         if (t.joinable()) t.join();

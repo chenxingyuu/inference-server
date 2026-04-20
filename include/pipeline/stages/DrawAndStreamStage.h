@@ -49,6 +49,7 @@ public:
     std::string id() const override;
     void start() override;
     void stop() override;
+    void onGraphExecutorDraining() noexcept override;
     void process(const EventEnvelope& input, const EmitFn& emit) override;
 
 private:
@@ -77,6 +78,7 @@ private:
     std::string id_;
     DrawAndStreamConfig cfg_;
     std::unique_ptr<IStreamWriter> writer_;
+    std::atomic<bool> suppress_output_reopen_{false};
     std::atomic<bool> running_{false};
     std::thread worker_;
     mutable std::mutex mu_;

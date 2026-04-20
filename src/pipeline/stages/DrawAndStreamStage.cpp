@@ -46,9 +46,15 @@ std::string DrawAndStreamStage::id() const { return id_; }
 void DrawAndStreamStage::start() {
     bool expected = false;
     if (!running_.compare_exchange_strong(expected, true)) return;
+    suppress_output_reopen_.store(false, std::memory_order_relaxed);
     reconnect_delay_ms_ = cfg_.reconnect_initial_ms;
     next_reconnect_at_ = std::chrono::steady_clock::now();
     worker_ = std::thread(&DrawAndStreamStage::runWorker, this);
+}
+
+void DrawAndStreamStage::onGraphExecutorDraining() noexcept {
+    suppress_output_reopen_.store(true, std::memory_order_relaxed);
+    cv_.notify_all();
 }
 
 void DrawAndStreamStage::stop() {
@@ -128,6 +134,7 @@ void DrawAndStreamStage::runWorker() {
 
 bool DrawAndStreamStage::ensureWriterOpened(const cv::Mat& frame) {
     if (writer_->isOpened()) return true;
+    if (suppress_output_reopen_.load(std::memory_order_relaxed)) return false;
     const auto now = std::chrono::steady_clock::now();
     if (now < next_reconnect_at_) return false;
 
@@ -147,6 +154,7 @@ bool DrawAndStreamStage::ensureWriterOpened(const cv::Mat& frame) {
 
 void DrawAndStreamStage::onWriteFailure() {
     writer_->close();
+    if (suppress_output_reopen_.load(std::memory_order_relaxed)) return;
     const auto failures = consecutive_failures_.fetch_add(1, std::memory_order_relaxed) + 1;
     next_reconnect_at_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(reconnect_delay_ms_);
     reconnect_delay_ms_ = std::min(reconnect_delay_ms_ * 2, std::max(cfg_.reconnect_max_ms, cfg_.reconnect_initial_ms));

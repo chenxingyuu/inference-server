@@ -96,13 +96,17 @@ int main(int argc, char* argv[]) {
     // ── Graceful shutdown ─────────────────────────────────────────────────────
     LOG_INFO("Shutting down…");
 
+    // Stop inference graphs first. If we stop HTTP/heartbeat before tasks, RTSP
+    // and ffplay sinks keep running briefly: ffplay may already be dead (SIGINT
+    // to the terminal group) while the sink still schedules reconnect — bad UX.
+    task_manager.stopAll();
+
     mgmt_server.stop();
 
     if (heartbeat) heartbeat->stop();
     infer::ControlEventBus::get().clearPublisher();
     control.reset();
 
-    task_manager.stopAll();
     publisher->flush();
     LOG_INFO("inference-server stopped");
     return 0;

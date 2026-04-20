@@ -22,7 +22,13 @@ std::string SinkFfplayStage::id() const { return id_; }
 void SinkFfplayStage::start() {
     bool expected = false;
     if (!running_.compare_exchange_strong(expected, true)) return;
+    suppress_output_reopen_.store(false, std::memory_order_relaxed);
     worker_ = std::thread(&SinkFfplayStage::runWorker, this);
+}
+
+void SinkFfplayStage::onGraphExecutorDraining() noexcept {
+    suppress_output_reopen_.store(true, std::memory_order_relaxed);
+    cv_.notify_all();
 }
 
 void SinkFfplayStage::stop() {
@@ -109,6 +115,7 @@ void SinkFfplayStage::runWorker() {
 
 bool SinkFfplayStage::ensureFfplayOpened(const cv::Mat& frame) {
     if (ffplay_pipe_ != nullptr) return true;
+    if (suppress_output_reopen_.load(std::memory_order_relaxed)) return false;
     const auto now = std::chrono::steady_clock::now();
     if (now < next_reconnect_at_) return false;
 
@@ -131,6 +138,7 @@ bool SinkFfplayStage::ensureFfplayOpened(const cv::Mat& frame) {
 }
 
 void SinkFfplayStage::onFfplayFailure() {
+    if (suppress_output_reopen_.load(std::memory_order_relaxed)) return;
     next_reconnect_at_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(reconnect_delay_ms_);
     reconnect_delay_ms_ = std::min(reconnect_delay_ms_ * 2, cfg_.reconnect_max_ms);
     LOG_WARN("SinkFfplayStage[{}]: next ffplay reconnect in {}ms", id_, reconnect_delay_ms_);
