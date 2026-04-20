@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pipeline/IStage.h"
+#include "pipeline/stages/StreamDropPolicy.h"
 
 #include <atomic>
 #include <chrono>
@@ -14,11 +15,8 @@
 #include <cstdio>
 
 #include <opencv2/core/mat.hpp>
-#include <opencv2/videoio.hpp>
 
 namespace infer {
-
-enum class StreamDropPolicy { DropOldest, DropNewest };
 
 struct DrawAndStreamConfig {
     std::string output_url;
@@ -73,7 +71,6 @@ private:
 
     void runWorker();
     void enqueue(StreamItem item);
-    void drawDetections(cv::Mat& frame, const std::optional<InferResult>& result) const;
     bool ensureWriterOpened(const cv::Mat& frame);
     void onWriteFailure();
 

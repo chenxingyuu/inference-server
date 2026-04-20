@@ -1,6 +1,7 @@
 #include "common/Config.h"
 #include <yaml-cpp/yaml.h>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <queue>
@@ -51,6 +52,38 @@ void validatePipelineGraphs(const AppConfig& cfg) {
                 const std::string protocol = (protocol_it == n.with.end()) ? "rtsp" : protocol_it->second;
                 if (protocol != "rtsp" && protocol != "rtmp") {
                     throw std::runtime_error("sink.stream protocol must be one of: rtsp, rtmp");
+                }
+            }
+            if (n.type == "sink.ffplay") {
+                auto fps_it = n.with.find("fps");
+                if (fps_it != n.with.end()) {
+                    float fps = 0.0f;
+                    try {
+                        fps = std::stof(fps_it->second);
+                    } catch (const std::exception&) {
+                        throw std::runtime_error("sink.ffplay invalid fps");
+                    }
+                    if (fps <= 0.0f) {
+                        throw std::runtime_error("sink.ffplay fps must be > 0");
+                    }
+                }
+                auto qc_it = n.with.find("queue_capacity");
+                if (qc_it != n.with.end()) {
+                    int q = 0;
+                    try {
+                        q = std::stoi(qc_it->second);
+                    } catch (const std::exception&) {
+                        throw std::runtime_error("sink.ffplay invalid queue_capacity");
+                    }
+                    if (q < 1) {
+                        throw std::runtime_error("sink.ffplay queue_capacity must be >= 1");
+                    }
+                }
+                auto dp_it = n.with.find("drop_policy");
+                if (dp_it != n.with.end()) {
+                    if (dp_it->second != "drop_oldest" && dp_it->second != "drop_newest") {
+                        throw std::runtime_error("sink.ffplay drop_policy must be one of: drop_oldest, drop_newest");
+                    }
                 }
             }
             indegree[n.id] = 0;

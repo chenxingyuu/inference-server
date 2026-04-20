@@ -146,7 +146,9 @@ set(PIPELINE_SOURCES
     src/pipeline/GraphExecutor.cpp
     src/pipeline/StageFactory.cpp
     src/pipeline/stages/ArchiveRawStage.cpp
+    src/pipeline/stages/DetectionOverlay.cpp
     src/pipeline/stages/DrawAndStreamStage.cpp
+    src/pipeline/stages/SinkFfplayStage.cpp
     src/pipeline/stages/InferEngineStage.cpp
     src/pipeline/stages/JoinByFrameStage.cpp
     src/pipeline/stages/SinkKafkaStage.cpp

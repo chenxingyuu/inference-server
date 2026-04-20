@@ -1,36 +1,16 @@
 #include "pipeline/stages/DrawAndStreamStage.h"
 
 #include "common/Logger.h"
+#include "pipeline/stages/DetectionOverlay.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <utility>
 
-#include <opencv2/imgproc.hpp>
-
 namespace infer {
 
 namespace {
-
-cv::Rect clampRect(const BBox& box, int width, int height) {
-    const int x1 = std::max(0, std::min(static_cast<int>(std::floor(box.x1)), width - 1));
-    const int y1 = std::max(0, std::min(static_cast<int>(std::floor(box.y1)), height - 1));
-    const int x2 = std::max(0, std::min(static_cast<int>(std::ceil(box.x2)), width));
-    const int y2 = std::max(0, std::min(static_cast<int>(std::ceil(box.y2)), height));
-    const int w = std::max(0, x2 - x1);
-    const int h = std::max(0, y2 - y1);
-    return cv::Rect(x1, y1, w, h);
-}
-
-std::string detectionLabel(const Detection& det) {
-    std::string label = det.class_name.empty() ? ("cls_" + std::to_string(det.class_id)) : det.class_name;
-    label += " " + std::to_string(static_cast<int>(det.confidence * 100.0f)) + "%";
-    if (det.track_id.has_value()) {
-        label += " #" + std::to_string(*det.track_id);
-    }
-    return label;
-}
 
 std::string buildOutputUrl(const std::string& url, const std::string& protocol) {
     if (protocol != "rtsp") return url;
@@ -55,7 +35,10 @@ DrawAndStreamStage::DrawAndStreamStage(std::string id, DrawAndStreamConfig cfg)
     : DrawAndStreamStage(std::move(id), std::move(cfg), std::make_unique<OpenCvStreamWriter>()) {}
 
 DrawAndStreamStage::DrawAndStreamStage(std::string id, DrawAndStreamConfig cfg, std::unique_ptr<IStreamWriter> writer)
-    : id_(std::move(id)), cfg_(std::move(cfg)), writer_(std::move(writer)), reconnect_delay_ms_(cfg_.reconnect_initial_ms) {}
+    : id_(std::move(id))
+    , cfg_(std::move(cfg))
+    , writer_(std::move(writer))
+    , reconnect_delay_ms_(cfg_.reconnect_initial_ms) {}
 
 DrawAndStreamStage::~DrawAndStreamStage() { stop(); }
 
@@ -126,7 +109,7 @@ void DrawAndStreamStage::runWorker() {
         }
 
         cv::Mat output = item.frame->image.clone();
-        drawDetections(output, item.infer_result);
+        overlay::drawDetections(output, item.infer_result, cfg_.draw_conf_thresh, cfg_.line_thickness);
 
         if (!ensureWriterOpened(output)) {
             continue;
@@ -138,24 +121,6 @@ void DrawAndStreamStage::runWorker() {
         }
         frames_written_.fetch_add(1, std::memory_order_relaxed);
         consecutive_failures_.store(0, std::memory_order_relaxed);
-    }
-}
-
-void DrawAndStreamStage::drawDetections(cv::Mat& frame, const std::optional<InferResult>& result) const {
-    if (!result.has_value()) return;
-    for (const auto& det : result->detections) {
-        if (det.confidence < cfg_.draw_conf_thresh) continue;
-        cv::Rect rect = clampRect(det.bbox, frame.cols, frame.rows);
-        if (rect.width <= 0 || rect.height <= 0) continue;
-
-        cv::rectangle(frame, rect, cv::Scalar(0, 255, 0), std::max(1, cfg_.line_thickness));
-        const std::string label = detectionLabel(det);
-        int baseline = 0;
-        cv::Size text_size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
-        const int text_y = std::max(0, rect.y - text_size.height - baseline - 4);
-        const cv::Rect bg(rect.x, text_y, std::min(frame.cols - rect.x, text_size.width + 6), text_size.height + baseline + 4);
-        cv::rectangle(frame, bg, cv::Scalar(0, 255, 0), cv::FILLED);
-        cv::putText(frame, label, cv::Point(rect.x + 3, text_y + text_size.height + 1), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 1);
     }
 }
 

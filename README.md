@@ -20,6 +20,7 @@ RTSP(source) -> decode.ffmpeg -> (fan-out)
             -> join.byFrameId (可选)
             -> sink.kafka
             -> sink.stream (可选，画框+RTSP/RTMP 推流)
+            -> sink.ffplay (可选，画框+本机 ffplay 预览)
             -> ManagementServer (/healthz /metrics /tasks)
 ```
 
@@ -128,7 +129,8 @@ curl -X POST http://localhost:8080/tasks/task_cam_001/stop
 - `track.bytetrack`：ByteTrack 追踪
 - `join.byFrameId`：归档信息回填到推理结果（按 frame id join）
 - `sink.kafka`：Kafka 输出
-- `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`）
+- `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`，需 `output_url`）
+- `sink.ffplay`：叠加检测框后通过管道喂给本机 `ffplay`（BGR rawvideo，需已安装 ffmpeg/ffplay）
 
 ### ONNX Runtime（CPU/MPS）注意事项
 

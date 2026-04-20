@@ -59,4 +59,17 @@ TEST(StageFactory, RequiresSinkStreamOutputUrl) {
     EXPECT_THROW((void)StageFactory::create(cfg, makeContext()), std::runtime_error);
 }
 
+TEST(StageFactory, CreatesSinkFfplayStage) {
+    StageConfig cfg;
+    cfg.id = "ffplay_sink_1";
+    cfg.type = "sink.ffplay";
+    cfg.with["fps"] = "12";
+
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, makeContext());
+        ASSERT_NE(stage, nullptr);
+        EXPECT_EQ(stage->id(), "ffplay_sink_1");
+    });
+}
+
 } // namespace infer

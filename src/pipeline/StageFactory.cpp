@@ -3,6 +3,7 @@
 #include "pipeline/stages/ArchiveRawStage.h"
 #include "pipeline/stages/DrawAndStreamStage.h"
 #include "pipeline/stages/InferEngineStage.h"
+#include "pipeline/stages/SinkFfplayStage.h"
 #include "pipeline/stages/JoinByFrameStage.h"
 #include "pipeline/stages/PassthroughStage.h"
 #include "pipeline/stages/SinkKafkaStage.h"
@@ -36,14 +37,6 @@ float getFloatWithDefault(const std::map<std::string, std::string>& kv, const st
     } catch (const std::exception&) {
         throw std::runtime_error("invalid float value for '" + key + "': " + it->second);
     }
-}
-
-std::string getStringRequired(const std::map<std::string, std::string>& kv, const std::string& key) {
-    auto it = kv.find(key);
-    if (it == kv.end() || it->second.empty()) {
-        throw std::runtime_error("missing required field '" + key + "'");
-    }
-    return it->second;
 }
 
 std::string getStringWithDefault(
@@ -90,12 +83,37 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
     if (cfg.type == "sink.kafka") {
         return std::make_unique<SinkKafkaStage>(cfg.id, ctx.publisher);
     }
+    if (cfg.type == "sink.ffplay") {
+        SinkFfplayConfig ff_cfg;
+        ff_cfg.fps = getFloatWithDefault(cfg.with, "fps", static_cast<float>(ff_cfg.fps));
+        ff_cfg.queue_capacity = getIntWithDefault(cfg.with, "queue_capacity", ff_cfg.queue_capacity);
+        ff_cfg.draw_conf_thresh = getFloatWithDefault(cfg.with, "draw_conf_thresh", ff_cfg.draw_conf_thresh);
+        ff_cfg.line_thickness = getIntWithDefault(cfg.with, "line_thickness", ff_cfg.line_thickness);
+        const auto drop_policy = getStringWithDefault(cfg.with, "drop_policy", "drop_oldest");
+        if (drop_policy == "drop_oldest") {
+            ff_cfg.drop_policy = StreamDropPolicy::DropOldest;
+        } else if (drop_policy == "drop_newest") {
+            ff_cfg.drop_policy = StreamDropPolicy::DropNewest;
+        } else {
+            throw std::runtime_error("sink.ffplay drop_policy must be one of: drop_oldest, drop_newest");
+        }
+        if (ff_cfg.queue_capacity < 1) {
+            throw std::runtime_error("sink.ffplay queue_capacity must be >= 1");
+        }
+        if (ff_cfg.fps <= 0) {
+            throw std::runtime_error("sink.ffplay fps must be > 0");
+        }
+        return std::make_unique<SinkFfplayStage>(cfg.id, ff_cfg);
+    }
     if (cfg.type == "sink.stream") {
         DrawAndStreamConfig stream_cfg;
-        stream_cfg.output_url = getStringRequired(cfg.with, "output_url");
+        stream_cfg.output_url = getStringWithDefault(cfg.with, "output_url", "");
         stream_cfg.protocol = getStringWithDefault(cfg.with, "protocol", "rtsp");
         if (stream_cfg.protocol != "rtsp" && stream_cfg.protocol != "rtmp") {
             throw std::runtime_error("sink.stream protocol must be one of: rtsp, rtmp");
+        }
+        if (stream_cfg.output_url.empty()) {
+            throw std::runtime_error("sink.stream requires with.output_url");
         }
         stream_cfg.fps = getFloatWithDefault(cfg.with, "fps", static_cast<float>(stream_cfg.fps));
         stream_cfg.bitrate_kbps = getIntWithDefault(cfg.with, "bitrate_kbps", stream_cfg.bitrate_kbps);

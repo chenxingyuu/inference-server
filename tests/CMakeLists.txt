@@ -78,6 +78,7 @@ add_test(NAME test_stage_factory COMMAND test_stage_factory
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 add_executable(test_draw_and_stream_stage test_draw_and_stream_stage.cpp
     ${CMAKE_SOURCE_DIR}/src/pipeline/stages/DrawAndStreamStage.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/DetectionOverlay.cpp
 )
 target_link_libraries(test_draw_and_stream_stage PRIVATE
     infer_testable

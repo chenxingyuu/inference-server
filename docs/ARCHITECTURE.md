@@ -12,9 +12,9 @@ The runtime is a **configurable in-process DAG** driven by **tasks** (each task 
 4. Inference (`infer.engine` using `TRTBackend` / `AscendBackend` / `OnnxBackend`) with per-edge backpressure.
 5. YOLO decode (`IYOLODecoder` / `ClassifierDecoder`) and optional tracking (`track.bytetrack`).
 6. Optional join/merge (`join.byFrameId`) to enrich inference results with archive metadata.
-7. Optional draw and restream (`sink.stream`: OpenCV overlay + RTSP/RTMP output).
+7. Optional draw + output: restream via ffmpeg pipe (`sink.stream` → RTSP/RTMP), or local preview via `ffplay` stdin (`sink.ffplay`, raw BGR).
 8. Publish (`sink.kafka` via `KafkaPublisher`).
-8. Background heartbeat emission (`HeartbeatPublisher`) and management endpoints (`ManagementServer`).
+9. Background heartbeat emission (`HeartbeatPublisher`) and management endpoints (`ManagementServer`).
 
 ## Key Singletons
 
