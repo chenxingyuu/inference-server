@@ -125,6 +125,9 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
             if (i < static_cast<int>(decoded.size())) {
                 result.detections = std::move(decoded[i]);
             }
+            if (result.latency_ms > 0) {
+                Metrics::get().recordE2eLatency(result.stream_id, result.latency_ms);
+            }
             out.infer_result = std::move(result);
             emit(out);
         }
@@ -180,6 +183,9 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
                     }
                     result.model_id = model_cfg_.id;
                     if (!decoded.empty()) result.detections = std::move(decoded[0]);
+                    if (result.latency_ms > 0) {
+                        Metrics::get().recordE2eLatency(result.stream_id, result.latency_ms);
+                    }
                     out.infer_result = std::move(result);
                     emit(out);
                 } catch (const std::exception& one_e) {
