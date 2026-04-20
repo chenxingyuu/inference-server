@@ -1,7 +1,7 @@
 #include "pipeline/stages/InferEngineStage.h"
 
 #include "common/Logger.h"
-#include "pipeline/stages/DetectionOverlay.h"
+#include "metrics/Metrics.h"
 #include <algorithm>
 #include <chrono>
 
@@ -20,15 +20,6 @@ uint64_t nowSteadyNs() {
 }
 
 double nsToMs(uint64_t ns) { return static_cast<double>(ns) / 1e6; }
-
-std::pair<int, int> framePixelSize(const std::shared_ptr<Frame>& fr) {
-    if (!fr) return {0, 0};
-    if (!fr->image.empty()) return {fr->image.cols, fr->image.rows};
-    if (fr->is_gpu && fr->gpu_buf.width > 0 && fr->gpu_buf.height > 0) {
-        return {fr->gpu_buf.width, fr->gpu_buf.height};
-    }
-    return {0, 0};
-}
 
 } // namespace
 
@@ -95,6 +86,10 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
         const auto infer_end_tp = std::chrono::steady_clock::now();
         const double infer_ms = std::chrono::duration<double, std::milli>(infer_end_tp - infer_start).count();
 
+        Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
+        Metrics::get().recordInferBatchSize(model_cfg_.id, batch.size());
+        Metrics::get().incInferBatches(model_cfg_.id);
+
         const auto decode_start = std::chrono::steady_clock::now();
         auto decoded = decoder_->decode(output.data(), batch.size(), model_cfg_.input_shape,
                                         model_cfg_.conf_thresh, model_cfg_.nms_thresh);
@@ -130,8 +125,6 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
             if (i < static_cast<int>(decoded.size())) {
                 result.detections = std::move(decoded[i]);
             }
-            const auto [fw, fh] = framePixelSize(out.frame);
-            mapDetectionsFromModelToFrame(result.detections, fw, fh, model_cfg_.input_shape);
             out.infer_result = std::move(result);
             emit(out);
         }
@@ -154,6 +147,10 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
                     backend_->infer(one, output);
                     const auto infer_end_tp = std::chrono::steady_clock::now();
                     const double infer_ms = std::chrono::duration<double, std::milli>(infer_end_tp - infer_start).count();
+
+                    Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
+                    Metrics::get().recordInferBatchSize(model_cfg_.id, 1);
+                    Metrics::get().incInferBatches(model_cfg_.id);
 
                     const auto decode_start = std::chrono::steady_clock::now();
                     auto decoded = decoder_->decode(output.data(), 1, model_cfg_.input_shape,
@@ -183,8 +180,6 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
                     }
                     result.model_id = model_cfg_.id;
                     if (!decoded.empty()) result.detections = std::move(decoded[0]);
-                    const auto [fw, fh] = framePixelSize(out.frame);
-                    mapDetectionsFromModelToFrame(result.detections, fw, fh, model_cfg_.input_shape);
                     out.infer_result = std::move(result);
                     emit(out);
                 } catch (const std::exception& one_e) {
