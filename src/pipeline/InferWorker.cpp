@@ -1,6 +1,7 @@
 #include "pipeline/InferWorker.h"
 #include "pipeline/CascadeRouter.h"
 #include "pipeline/ResultMerger.h"
+#include "pipeline/stages/DetectionOverlay.h"
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
 #include <chrono>
@@ -129,6 +130,13 @@ void InferWorker::workerLoop() {
                 r.decode_ms       = decode_ms;
                 r.model_id        = model_cfg_.id;
                 r.detections = std::move(per_image[i]);
+                const int fw = batch.is_gpu
+                    ? (i < static_cast<int>(batch.gpu_frames.size()) ? batch.gpu_frames[i].width : 0)
+                    : (i < static_cast<int>(batch.frames.size()) ? batch.frames[i].cols : 0);
+                const int fh = batch.is_gpu
+                    ? (i < static_cast<int>(batch.gpu_frames.size()) ? batch.gpu_frames[i].height : 0)
+                    : (i < static_cast<int>(batch.frames.size()) ? batch.frames[i].rows : 0);
+                mapDetectionsFromModelToFrame(r.detections, fw, fh, shape);
                 if (frame_archiver_ && !batch.is_gpu && i < static_cast<int>(batch.frames.size())) {
                     const auto ar = frame_archiver_->submit(batch.metas[i], &batch.frames[i]);
                     r.frame_local_path  = ar.local_path;

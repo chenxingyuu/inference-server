@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "pipeline/stages/DetectionOverlay.h"
 #include "pipeline/stages/DrawAndStreamStage.h"
 
 #include <atomic>
@@ -31,6 +32,22 @@ public:
     cv::Mat last_frame;
     bool opened{false};
 };
+
+TEST(MapDetectionsFromModelToFrame, ScalesToSourceResolution) {
+    std::vector<Detection> dets;
+    Detection d;
+    d.confidence = 1.f;
+    d.bbox = {160.f, 80.f, 320.f, 160.f};
+    dets.push_back(d);
+    InferShape shape{};
+    shape.width  = 640;
+    shape.height = 640;
+    mapDetectionsFromModelToFrame(dets, 1920, 1080, shape);
+    EXPECT_FLOAT_EQ(dets[0].bbox.x1, 480.f);
+    EXPECT_FLOAT_EQ(dets[0].bbox.y1, 135.f);
+    EXPECT_FLOAT_EQ(dets[0].bbox.x2, 960.f);
+    EXPECT_FLOAT_EQ(dets[0].bbox.y2, 270.f);
+}
 
 TEST(DrawAndStreamStage, DrawsAndWritesFrame) {
     DrawAndStreamConfig cfg;

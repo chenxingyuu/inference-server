@@ -3,10 +3,31 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <vector>
 
 #include <opencv2/imgproc.hpp>
 
 namespace infer {
+
+void mapDetectionsFromModelToFrame(
+    std::vector<Detection>& detections,
+    int frame_w,
+    int frame_h,
+    const InferShape& model_shape) {
+    if (detections.empty()) return;
+    if (frame_w <= 0 || frame_h <= 0) return;
+    if (model_shape.width <= 0 || model_shape.height <= 0) return;
+    const float sx = static_cast<float>(frame_w) / static_cast<float>(model_shape.width);
+    const float sy = static_cast<float>(frame_h) / static_cast<float>(model_shape.height);
+    if (sx == 1.f && sy == 1.f) return;
+    for (auto& d : detections) {
+        d.bbox.x1 *= sx;
+        d.bbox.x2 *= sx;
+        d.bbox.y1 *= sy;
+        d.bbox.y2 *= sy;
+    }
+}
+
 namespace overlay {
 namespace {
 
