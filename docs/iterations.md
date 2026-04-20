@@ -277,3 +277,35 @@
 **关键决策**：
 - 达到 `max_reconnect_attempts` 后进入终态并停止重连，避免长期无效重试与噪音
 - 控制事件独立 topic，不污染主推理结果流
+
+---
+
+## Phase 15 — sink.ffplay 本地实时预览
+
+**目标**：开发调试阶段可在本机直接看到带检测框的实时视频。
+
+**新增**：
+- `SinkFfplayStage`：`popen` 启动 ffplay 子进程，以 pipe 写入原始 BGR24 帧；ffplay 退出后自动重连
+- `DetectionOverlay`：`mapDetectionsFromModelToFrame`（模型坐标系 → 帧像素坐标）+ `overlay::drawDetections`（绘制 bbox / label / score）
+- `DrawAndStreamStage`：叠图后送 ffplay，配置项 `draw_conf_thresh` / `line_thickness`
+- DAG 新增 stage 类型：`sink.ffplay`
+
+**关键决策**：
+- ffplay 以 `-f rawvideo -pixel_format bgr24` 接收裸流，避免软件编码开销
+- `mapDetectionsFromModelToFrame` 提取为独立工具函数，`InferWorker` 与 `InferEngineStage` 共享同一实现
+
+---
+
+## Phase 16 — InferEngineStage 路径补全 + 延迟指标闭环
+
+**目标**：Phase 12 引入 DAG 后，`InferEngineStage` 的坐标映射与指标覆盖未与 `InferWorker` 对齐，本次补全并修复指标正确性问题。
+
+**新增**：
+- `infer_queue_latency_ms` histogram：帧从采集到进入推理批次的等待时间，主路径与 fallback（bs=1）均覆盖
+- `e2e_latency_ms`：从 `capture_mono_ns` 到推理+解码完成的端到端延迟，写入 `InferResult` 并上报 Metrics
+- `mapDetectionsFromModelToFrame`：补回 `InferEngineStage` 两条路径（合并冲突时意外删除）
+- `recordInferBatchSize`：补回 `InferWorker`（误删后 `InferWorkerGroup` / cascade 路径 batch size 指标静默丢失）
+
+**关键决策**：
+- `batch_start_mono_ns` 提到循环外，消除每帧重复计算
+- 所有 uint64_t 延迟减法前加 `>=` 判断：跨 NUMA 节点时 `capture_mono_ns` 可能略大于参考时间戳，无符号下溢会产生 ~1.8×10¹³ ms 的异常值
