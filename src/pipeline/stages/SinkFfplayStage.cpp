@@ -1,6 +1,7 @@
 #include "pipeline/stages/SinkFfplayStage.h"
 
 #include "common/Logger.h"
+#include "metrics/Metrics.h"
 #include "pipeline/stages/DetectionOverlay.h"
 
 #include <algorithm>
@@ -52,9 +53,9 @@ void SinkFfplayStage::enqueue(QueueItem item) {
     if (queue_.size() >= static_cast<std::size_t>(std::max(1, cfg_.queue_capacity))) {
         if (cfg_.drop_policy == StreamDropPolicy::DropOldest) {
             queue_.pop_front();
-            frames_dropped_.fetch_add(1, std::memory_order_relaxed);
+            Metrics::get().incSinkFfplayFramesDropped(id_);
         } else {
-            frames_dropped_.fetch_add(1, std::memory_order_relaxed);
+            Metrics::get().incSinkFfplayFramesDropped(id_);
             return;
         }
     }
@@ -75,6 +76,7 @@ void SinkFfplayStage::runWorker() {
             }
             item = std::move(queue_.front());
             queue_.pop_front();
+            Metrics::get().setSinkFfplayQueueDepth(id_, queue_.size());
         }
         if (!item.frame || item.frame->image.empty()) {
             continue;
@@ -91,11 +93,18 @@ void SinkFfplayStage::runWorker() {
             onFfplayFailure();
             continue;
         }
-        frames_written_.fetch_add(1, std::memory_order_relaxed);
+        const auto now = std::chrono::steady_clock::now();
+        if (last_write_at_.has_value()) {
+            const double ms = std::chrono::duration<double, std::milli>(now - *last_write_at_).count();
+            Metrics::get().recordSinkFfplayJitter(id_, ms);
+        }
+        last_write_at_ = now;
+        Metrics::get().incSinkFfplayFramesWritten(id_);
     }
     // ffplay_pipe_ is exclusively owned by this thread: close here so stop() never
     // races with an in-progress fwrite.
     closeFfplay();
+    last_write_at_.reset();
 }
 
 bool SinkFfplayStage::ensureFfplayOpened(const cv::Mat& frame) {

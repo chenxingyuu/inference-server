@@ -95,6 +95,10 @@ void Metrics::recordE2eLatency(const std::string& stream_id, double ms) {
     e2e_latency_.observe(stream_id, ms);
 }
 
+void Metrics::recordInferBatchSize(const std::string& model_id, int size) {
+    infer_batch_size_.observe(model_id, static_cast<double>(size));
+}
+
 void Metrics::incFramesDecoded(const std::string& stream_id) {
     frames_decoded_.inc(stream_id);
 }
@@ -173,6 +177,24 @@ void Metrics::setStreamConsecutiveFailures(const std::string& stream_id, uint32_
 
 void Metrics::setStreamLastFrameAgeSeconds(const std::string& stream_id, double age) {
     stream_last_frame_age_.set(stream_id, age);
+}
+
+// ── SinkFfplayStage metrics ───────────────────────────────────────────────────
+
+void Metrics::recordSinkFfplayJitter(const std::string& stage_id, double ms) {
+    sink_jitter_.observe(stage_id, ms);
+}
+
+void Metrics::setSinkFfplayQueueDepth(const std::string& stage_id, uint64_t depth) {
+    sink_queue_depth_.set(stage_id, depth);
+}
+
+void Metrics::incSinkFfplayFramesWritten(const std::string& stage_id) {
+    sink_written_.inc(stage_id);
+}
+
+void Metrics::incSinkFfplayFramesDropped(const std::string& stage_id) {
+    sink_dropped_.inc(stage_id);
 }
 
 // ── Serialization ─────────────────────────────────────────────────────────────
@@ -266,6 +288,33 @@ std::string Metrics::serializeHistogram(
         oss << name << "_bucket{" << lbl << ",le=\"+Inf\"} " << h.count << "\n";
         oss << name << "_sum{"   << lbl << "} "
             << std::fixed << std::setprecision(3) << h.sum << "\n";
+        oss << std::defaultfloat;  // reset so next label's le= values are unaffected
+        oss << name << "_count{" << lbl << "} " << h.count << "\n";
+    }
+    return oss.str();
+}
+
+std::string Metrics::serializeBatchHistogram(
+    const std::string& name,
+    const std::string& help,
+    const std::string& label_name,
+    const std::unordered_map<std::string, HistogramData>& data)
+{
+    std::ostringstream oss;
+    oss << "# HELP " << name << " " << help << "\n";
+    oss << "# TYPE " << name << " histogram\n";
+    for (const auto& [label, h] : data) {
+        const std::string lbl = label_name + "=\"" + label + "\"";
+        uint64_t cum = 0;
+        for (int i = 0; i < kNumBatchBuckets; ++i) {
+            cum += h.buckets[i];
+            oss << name << "_bucket{" << lbl
+                << ",le=\"" << kBatchBounds[i] << "\"} " << cum << "\n";
+        }
+        oss << name << "_bucket{" << lbl << ",le=\"+Inf\"} " << h.count << "\n";
+        oss << name << "_sum{"   << lbl << "} "
+            << std::fixed << std::setprecision(3) << h.sum << "\n";
+        oss << std::defaultfloat;
         oss << name << "_count{" << lbl << "} " << h.count << "\n";
     }
     return oss.str();
@@ -285,6 +334,12 @@ std::string Metrics::serialize() const {
         e2e_latency_.snapshot(snap);
         out << serializeHistogram("e2e_latency_ms",
             "End-to-end latency (capture to publish) in milliseconds", "stream_id", snap);
+    }
+    {
+        std::unordered_map<std::string, HistogramData> snap;
+        infer_batch_size_.snapshot(snap);
+        out << serializeBatchHistogram("infer_batch_size",
+            "Distribution of inference batch sizes", "model_id", snap);
     }
     {
         std::unordered_map<std::string, uint64_t> snap;
@@ -351,6 +406,32 @@ std::string Metrics::serialize() const {
         stream_last_frame_age_.snapshot(snap);
         out << serializeLabeledGaugeDouble("stream_last_frame_age_seconds",
             "Seconds since last decoded frame arrived", "stream_id", snap);
+    }
+
+    // SinkFfplayStage metrics
+    {
+        std::unordered_map<std::string, HistogramData> snap;
+        sink_jitter_.snapshot(snap);
+        out << serializeHistogram("sink_ffplay_frame_interval_ms",
+            "Inter-frame write interval in milliseconds (jitter indicator)", "stage_id", snap);
+    }
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        sink_queue_depth_.snapshot(snap);
+        out << serializeLabeledGaugeUint("sink_ffplay_queue_depth",
+            "Current SinkFfplayStage queue depth", "stage_id", snap);
+    }
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        sink_written_.snapshot(snap);
+        out << serializeCounter("sink_ffplay_frames_written_total",
+            "Total frames successfully written to ffplay", "stage_id", snap);
+    }
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        sink_dropped_.snapshot(snap);
+        out << serializeCounter("sink_ffplay_frames_dropped_total",
+            "Total frames dropped by SinkFfplayStage queue", "stage_id", snap);
     }
 
     return out.str();

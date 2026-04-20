@@ -62,9 +62,9 @@ private:
     std::deque<QueueItem> queue_;
     FILE* ffplay_pipe_{nullptr};
 
-    std::atomic<uint64_t> frames_written_{0};
-    std::atomic<uint64_t> frames_dropped_{0};
     std::atomic<uint64_t> reconnect_attempts_{0};
+    // Worker-thread-only — no mutex needed
+    std::optional<std::chrono::steady_clock::time_point> last_write_at_;
     int reconnect_delay_ms_{1000};
     std::chrono::steady_clock::time_point next_reconnect_at_{};
 };

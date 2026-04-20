@@ -22,6 +22,9 @@ public:
     void recordInferLatency(const std::string& model_id, double ms);
     void recordE2eLatency(const std::string& stream_id, double ms);
 
+    // ── Batch size histogram ───────────────────────────────────────────────────
+    void recordInferBatchSize(const std::string& model_id, int size);
+
     // ── Counters ──────────────────────────────────────────────────────────────
     void incFramesDecoded(const std::string& stream_id);
     void incFramesDropped(const std::string& stream_id);
@@ -33,6 +36,12 @@ public:
     void incFramesUploaded();
     void incFramesUploadFailed();
     void setFrameArchiveQueueDepth(uint64_t depth);
+
+    // ── SinkFfplayStage metrics ───────────────────────────────────────────────
+    void recordSinkFfplayJitter(const std::string& stage_id, double ms);
+    void setSinkFfplayQueueDepth(const std::string& stage_id, uint64_t depth);
+    void incSinkFfplayFramesWritten(const std::string& stage_id);
+    void incSinkFfplayFramesDropped(const std::string& stage_id);
 
     // ── Phase 10: stream-level health gauges ──────────────────────────────────
     // Updated by HeartbeatPublisher on each heartbeat interval (not on hot path).
@@ -49,6 +58,10 @@ public:
         1, 2, 5, 10, 20, 50, 100, 200, 500, 1000
     };
     static constexpr int kNumHistBuckets = 10;
+
+    // Batch-size histogram uses power-of-two bounds (1..32)
+    static constexpr double kBatchBounds[] = { 1, 2, 4, 8, 16, 32 };
+    static constexpr int kNumBatchBuckets = 6;
 
 private:
     Metrics() = default;
@@ -110,6 +123,7 @@ private:
 
     LabeledHistogram      infer_latency_;
     LabeledHistogram      e2e_latency_;
+    LabeledHistogram      infer_batch_size_;
     LabeledCounter        frames_decoded_;
     LabeledCounter        frames_dropped_;
     std::atomic<uint64_t> kafka_published_{0};
@@ -126,6 +140,12 @@ private:
     LabeledGaugeUint   stream_reconnect_count_;
     LabeledGaugeUint   stream_consecutive_failures_;
     LabeledGaugeDouble stream_last_frame_age_;
+
+    // SinkFfplayStage
+    LabeledHistogram sink_jitter_;
+    LabeledGaugeUint sink_queue_depth_;
+    LabeledCounter   sink_written_;
+    LabeledCounter   sink_dropped_;
 
     // Serialization helpers
     static std::string serializeCounter(
@@ -156,6 +176,13 @@ private:
         const std::unordered_map<std::string, double>& data);
 
     static std::string serializeHistogram(
+        const std::string& name,
+        const std::string& help,
+        const std::string& label_name,
+        const std::unordered_map<std::string, HistogramData>& data);
+
+    // Variant that uses kBatchBounds/kNumBatchBuckets instead of kHistBounds
+    static std::string serializeBatchHistogram(
         const std::string& name,
         const std::string& help,
         const std::string& label_name,
