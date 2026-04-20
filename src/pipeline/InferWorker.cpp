@@ -99,7 +99,6 @@ void InferWorker::workerLoop() {
             const double infer_ms = std::chrono::duration<double, std::milli>(
                 infer_end - infer_start).count();
             Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
-            Metrics::get().recordInferBatchSize(model_cfg_.id, static_cast<int>(batch.size()));
             Metrics::get().incInferBatches(model_cfg_.id);
 
             auto decode_start = std::chrono::steady_clock::now();

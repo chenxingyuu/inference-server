@@ -1,6 +1,7 @@
 #include "pipeline/stages/InferEngineStage.h"
 
 #include "common/Logger.h"
+#include "metrics/Metrics.h"
 #include <algorithm>
 #include <chrono>
 
@@ -85,6 +86,10 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
         const auto infer_end_tp = std::chrono::steady_clock::now();
         const double infer_ms = std::chrono::duration<double, std::milli>(infer_end_tp - infer_start).count();
 
+        Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
+        Metrics::get().recordInferBatchSize(model_cfg_.id, batch.size());
+        Metrics::get().incInferBatches(model_cfg_.id);
+
         const auto decode_start = std::chrono::steady_clock::now();
         auto decoded = decoder_->decode(output.data(), batch.size(), model_cfg_.input_shape,
                                         model_cfg_.conf_thresh, model_cfg_.nms_thresh);
@@ -142,6 +147,10 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
                     backend_->infer(one, output);
                     const auto infer_end_tp = std::chrono::steady_clock::now();
                     const double infer_ms = std::chrono::duration<double, std::milli>(infer_end_tp - infer_start).count();
+
+                    Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
+                    Metrics::get().recordInferBatchSize(model_cfg_.id, 1);
+                    Metrics::get().incInferBatches(model_cfg_.id);
 
                     const auto decode_start = std::chrono::steady_clock::now();
                     auto decoded = decoder_->decode(output.data(), 1, model_cfg_.input_shape,
