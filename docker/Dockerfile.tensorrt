@@ -1,12 +1,13 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
+# Builder uses the official TensorRT image which bundles TRT headers + libs.
 # Base images can be overridden at build time:
 #   docker build \
-#     --build-arg CUDA_DEVEL_IMAGE=... \
-#     --build-arg CUDA_RUNTIME_IMAGE=... \
+#     --build-arg TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
+#     --build-arg CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
 #     -f docker/Dockerfile.tensorrt .
-ARG CUDA_DEVEL_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04
+ARG TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3
 ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04
-FROM ${CUDA_DEVEL_IMAGE} AS builder
+FROM ${TRT_DEVEL_IMAGE} AS builder
 ARG APT_MIRROR=
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -28,11 +29,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     librdkafka-dev \
     libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
-
-# TensorRT is expected to be mounted/installed via NVIDIA container runtime.
-# If using a fixed TRT version, install it here:
-# COPY --from=nvcr.io/nvidia/tensorrt:24.02-py3 /usr/lib/x86_64-linux-gnu/libnvinfer* /usr/lib/x86_64-linux-gnu/
-# COPY --from=nvcr.io/nvidia/tensorrt:24.02-py3 /usr/include/x86_64-linux-gnu/NvInfer.h /usr/include/
 
 WORKDIR /src
 COPY . .
