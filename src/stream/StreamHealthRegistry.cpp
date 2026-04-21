@@ -1,6 +1,7 @@
 #include "stream/StreamHealthRegistry.h"
 #include <algorithm>
 #include <chrono>
+#include <mutex>
 
 namespace infer {
 
