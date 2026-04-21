@@ -16,11 +16,18 @@ struct PooledBuffer {
     std::atomic<bool> in_use{false};
     int idx{-1};
 
-    // Non-copyable
+    // Non-copyable, but movable (needed for vector::resize)
     PooledBuffer() = default;
     PooledBuffer(const PooledBuffer&) = delete;
     PooledBuffer& operator=(const PooledBuffer&) = delete;
-    PooledBuffer(PooledBuffer&&) = delete;
+    PooledBuffer(PooledBuffer&& o) noexcept
+        : input_device(o.input_device), output_device(o.output_device)
+        , in_use(o.in_use.load(std::memory_order_relaxed)), idx(o.idx) {
+        o.input_device = nullptr;
+        o.output_device = nullptr;
+        o.in_use.store(false, std::memory_order_relaxed);
+    }
+    PooledBuffer& operator=(PooledBuffer&&) = delete;
 };
 
 // Pre-allocated pool of GPU buffer pairs (input + output).
