@@ -63,6 +63,9 @@ private:
     int  num_classes_{80};
     bool loaded_{false};
     int  device_id_{0};
+    bool input_shape_dynamic_{false};
+    std::string input_tensor_name_{"images"};
+    std::string output_tensor_name_;
 
     std::unique_ptr<nvinfer1::IRuntime>          runtime_;
     std::unique_ptr<nvinfer1::ICudaEngine>        engine_;
