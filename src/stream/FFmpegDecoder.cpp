@@ -33,8 +33,11 @@ uint64_t nowSteadyNs() {
         duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count());
 }
 
-// Route FFmpeg log messages through spdlog so they respect the project's log
-// level settings and never appear raw on stderr.
+// Route FFmpeg log messages through spdlog so they never appear raw on stderr.
+// Level mapping rationale:
+//   AV_LOG_ERROR covers many non-fatal codec quirks (e.g. SEI truncation).
+//   Real failures are surfaced via return codes, not log messages, so we only
+//   need AV_LOG_FATAL+ to appear as errors in our own logger.
 void ffmpegLogCallback(void* /*avcl*/, int level, const char* fmt, va_list vl) {
     if (level > av_log_get_level()) return;
 
@@ -48,7 +51,7 @@ void ffmpegLogCallback(void* /*avcl*/, int level, const char* fmt, va_list vl) {
 
     if (len == 0) return;
 
-    if      (level <= AV_LOG_ERROR)   { LOG_ERROR("[ffmpeg] {}", buf); }
+    if      (level <= AV_LOG_FATAL)   { LOG_ERROR("[ffmpeg] {}", buf); }
     else if (level <= AV_LOG_WARNING) { LOG_WARN ("[ffmpeg] {}", buf); }
     else if (level <= AV_LOG_INFO)    { LOG_INFO ("[ffmpeg] {}", buf); }
     else                              { LOG_DEBUG("[ffmpeg] {}", buf); }
@@ -57,9 +60,9 @@ void ffmpegLogCallback(void* /*avcl*/, int level, const char* fmt, va_list vl) {
 void configureFfmpegLogLevelOnce() {
     static std::once_flag once;
     std::call_once(once, [] {
-        // Suppress noisy decoder warnings (e.g. SEI truncation).
-        // All FFmpeg output is routed through spdlog via the custom callback.
-        av_log_set_level(AV_LOG_ERROR);
+        // AV_LOG_FATAL: suppress ERROR-level codec quirks (e.g. SEI truncation).
+        // Fatal/panic messages still reach our logger via the custom callback.
+        av_log_set_level(AV_LOG_FATAL);
         av_log_set_callback(ffmpegLogCallback);
     });
 }
