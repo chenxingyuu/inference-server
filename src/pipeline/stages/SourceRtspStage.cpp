@@ -28,6 +28,8 @@ void SourceRtspStage::start() {
     cfg.max_reconnect_delay_ms = source_.max_reconnect_delay_ms;
     cfg.degraded_threshold = source_.degraded_threshold;
     cfg.max_reconnect_attempts = source_.max_reconnect_attempts;
+    cfg.open_timeout_ms = source_.open_timeout_ms;
+    cfg.read_timeout_ms = source_.read_timeout_ms;
     cfg.use_hwdec = use_hwdec_;
     decoder_.start(cfg, [this](Frame frame) {
         std::lock_guard<std::mutex> lock(mu_);

@@ -15,6 +15,7 @@ extern "C" {
 
 #include <opencv2/imgproc.hpp>
 #include <chrono>
+#include <string>
 #include <thread>
 #include <mutex>
 
@@ -77,19 +78,31 @@ void FFmpegDecoder::stop() {
 bool FFmpegDecoder::openStream(const StreamConfig& cfg) {
     AVDictionary* opts = nullptr;
     av_dict_set(&opts, "rtsp_transport", "tcp", 0);
-    av_dict_set(&opts, "stimeout", "5000000", 0);
+    // stimeout covers the RTSP control-channel socket; aligned with open_timeout_us_
+    av_dict_set(&opts, "stimeout", std::to_string(open_timeout_us_).c_str(), 0);
     av_dict_set(&opts, "analyzeduration", "1000000", 0);
     av_dict_set(&opts, "probesize", "1000000", 0);
 
-    fmt_ctx_ = nullptr;
-    if (avformat_open_input(&fmt_ctx_, cfg.url.c_str(), nullptr, &opts) != 0) {
-        av_dict_free(&opts);
+    // Pre-allocate so we can attach the interrupt callback before the blocking open.
+    fmt_ctx_ = avformat_alloc_context();
+    fmt_ctx_->interrupt_callback = {InterruptCtx::check, &interrupt_ctx_};
+
+    interrupt_ctx_.arm(open_timeout_us_);
+    int open_ret = avformat_open_input(&fmt_ctx_, cfg.url.c_str(), nullptr, &opts);
+    interrupt_ctx_.disarm();
+    av_dict_free(&opts);
+
+    if (open_ret != 0) {
+        // avformat_open_input frees fmt_ctx_ on failure and sets it to nullptr.
         LOG_ERROR("[{}] avformat_open_input failed: {}", stream_id_, cfg.url);
         return false;
     }
-    av_dict_free(&opts);
 
-    if (avformat_find_stream_info(fmt_ctx_, nullptr) < 0) {
+    interrupt_ctx_.arm(open_timeout_us_);
+    int info_ret = avformat_find_stream_info(fmt_ctx_, nullptr);
+    interrupt_ctx_.disarm();
+
+    if (info_ret < 0) {
         LOG_ERROR("[{}] avformat_find_stream_info failed", stream_id_);
         closeStream();
         return false;
@@ -187,7 +200,15 @@ bool FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
     bool ok = false;
 
     while (!stop_flag_.load()) {
+        interrupt_ctx_.arm(read_timeout_us_);
         int ret = av_read_frame(fmt_ctx_, pkt);
+        interrupt_ctx_.disarm();
+
+        if (ret == AVERROR_EXIT) {
+            LOG_WARN("[{}] av_read_frame timed out ({}ms), triggering reconnect",
+                     stream_id_, read_timeout_us_ / 1000);
+            break;
+        }
         if (ret == AVERROR(EAGAIN)) { av_usleep(1000); continue; }
         if (ret < 0) { break; }
 
@@ -272,6 +293,9 @@ static int64_t backoffDelayMs(int base_ms, int ceiling_ms, uint32_t failures) {
 void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
     running_.store(true);
     LOG_INFO("[{}] decode thread started: {} hwdec={}", cfg.id, cfg.url, cfg.use_hwdec);
+
+    read_timeout_us_ = static_cast<int64_t>(cfg.read_timeout_ms) * 1000LL;
+    open_timeout_us_ = static_cast<int64_t>(cfg.open_timeout_ms) * 1000LL;
 
     auto& reg = StreamHealthRegistry::get();
     reg.onStreamAdded(cfg.id, cfg.degraded_threshold, cfg.max_reconnect_attempts);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "stream/IStreamDecoder.h"
+#include "stream/InterruptCtx.h"
 #include <thread>
 #include <atomic>
 #include <string>
@@ -54,6 +55,12 @@ private:
     int              video_stream_idx_{-1};
     uint64_t         frame_seq_{0};
     bool             use_hwdec_{false};
+
+    // Interrupt callback used to time-bound av_read_frame / avformat_open_input.
+    // Owned by decodeLoop thread; written before blocking calls, cleared after.
+    InterruptCtx     interrupt_ctx_;
+    int64_t          read_timeout_us_{5'000'000LL};   // default 5 s
+    int64_t          open_timeout_us_{10'000'000LL};  // default 10 s
 };
 
 } // namespace infer

@@ -65,6 +65,8 @@ add_infer_test(test_yolov5_decoder)
 add_infer_test(test_result_merger)
 add_infer_test(test_tracker)
 
+add_infer_test(test_read_timeout)
+
 # Phase 10: stream health state machine (no hardware deps)
 add_infer_test(test_stream_health)
 add_infer_test(test_reconnect_backoff)

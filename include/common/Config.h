@@ -74,6 +74,8 @@ struct StreamConfig {
     int         max_reconnect_delay_ms{60000};  // Phase 10: exponential backoff ceiling
     int         degraded_threshold{5};           // consecutive failures before DEGRADED
     int         max_reconnect_attempts{5};       // consecutive failures before FAILED (terminal)
+    int         open_timeout_ms{10000};          // avformat_open_input timeout
+    int         read_timeout_ms{5000};           // av_read_frame timeout
     bool        use_hwdec{false};  // true → NVDEC hardware decode
     TrackerType tracker{TrackerType::None};
     ByteTrackConfig byte_track{};
@@ -88,6 +90,8 @@ struct PipelineSourceConfig {
     int         max_reconnect_delay_ms{60000};
     int         degraded_threshold{5};
     int         max_reconnect_attempts{5};
+    int         open_timeout_ms{10000};   // avformat_open_input timeout
+    int         read_timeout_ms{5000};    // av_read_frame timeout
 };
 
 struct StageConfig {

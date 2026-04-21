@@ -309,6 +309,8 @@ AppConfig loadConfig(const std::string& yaml_path) {
         s.max_reconnect_delay_ms = sn["max_reconnect_delay_ms"].as<int>(60000);
         s.degraded_threshold     = sn["degraded_threshold"].as<int>(5);
         s.max_reconnect_attempts = sn["max_reconnect_attempts"].as<int>(5);
+        s.open_timeout_ms        = sn["open_timeout_ms"].as<int>(10000);
+        s.read_timeout_ms        = sn["read_timeout_ms"].as<int>(5000);
         cfg.sources.push_back(std::move(s));
     }
     for (const auto& pn : root["pipelines"]) {
