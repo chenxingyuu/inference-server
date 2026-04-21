@@ -20,6 +20,11 @@ extern "C" {
 
 namespace infer {
 
+// Set FFmpeg's global log threshold at runtime.
+// Valid values: "quiet", "panic", "fatal", "error", "warning", "info", "verbose", "debug", "trace".
+// Typically called once after loading AppConfig. Env var FFMPEG_LOG_LEVEL takes precedence.
+void setFfmpegLogLevel(const std::string& level);
+
 // Reason that readAndDecode() returned.
 enum class ReadExitReason {
     FramesOk,   // stopped by stop_flag_

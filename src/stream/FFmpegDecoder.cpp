@@ -60,13 +60,30 @@ void ffmpegLogCallback(void* /*avcl*/, int level, const char* fmt, va_list vl) {
 void configureFfmpegLogLevelOnce() {
     static std::once_flag once;
     std::call_once(once, [] {
-        // AV_LOG_FATAL: suppress ERROR-level codec quirks (e.g. SEI truncation).
-        // Fatal/panic messages still reach our logger via the custom callback.
-        av_log_set_level(AV_LOG_FATAL);
+        av_log_set_level(AV_LOG_WARNING);   // safe default; overridden by setFfmpegLogLevel()
         av_log_set_callback(ffmpegLogCallback);
     });
 }
+
+static int parseFfmpegLogLevel(const std::string& s) {
+    if (s == "quiet")   return AV_LOG_QUIET;
+    if (s == "panic")   return AV_LOG_PANIC;
+    if (s == "fatal")   return AV_LOG_FATAL;
+    if (s == "error")   return AV_LOG_ERROR;
+    if (s == "warning") return AV_LOG_WARNING;
+    if (s == "info")    return AV_LOG_INFO;
+    if (s == "verbose") return AV_LOG_VERBOSE;
+    if (s == "debug")   return AV_LOG_DEBUG;
+    if (s == "trace")   return AV_LOG_TRACE;
+    LOG_WARN("[ffmpeg] unknown log level '{}', defaulting to 'warning'", s);
+    return AV_LOG_WARNING;
+}
 } // namespace
+
+void setFfmpegLogLevel(const std::string& level) {
+    configureFfmpegLogLevelOnce();   // ensure callback is registered
+    av_log_set_level(parseFfmpegLogLevel(level));
+}
 
 AVPixelFormat FFmpegDecoder::getHWFormat(AVCodecContext* /*ctx*/, const AVPixelFormat* pix_fmts) {
     for (const AVPixelFormat* p = pix_fmts; *p != AV_PIX_FMT_NONE; ++p) {

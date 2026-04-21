@@ -67,6 +67,7 @@ add_infer_test(test_tracker)
 
 add_infer_test(test_read_timeout)
 add_infer_test(test_file_source_config)
+add_infer_test(test_ffmpeg_log_level)
 
 # Phase 10: stream health state machine (no hardware deps)
 add_infer_test(test_stream_health)

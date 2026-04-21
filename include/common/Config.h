@@ -12,7 +12,8 @@ namespace infer {
 struct ServerConfig {
     int stream_pool_threads{32};
     int max_streams{100};
-    int management_port{8080};  // HTTP management server port
+    int management_port{8080};          // HTTP management server port
+    std::string ffmpeg_log_level{"warning"};  // FFmpeg log threshold (quiet/fatal/error/warning/info/debug/trace)
 };
 
 // Model type: detector outputs bounding boxes; classifier outputs class probabilities.

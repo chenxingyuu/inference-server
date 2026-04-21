@@ -1,5 +1,6 @@
 #include "common/Config.h"
 #include "common/Logger.h"
+#include "stream/FFmpegDecoder.h"
 #include "pipeline/TaskManager.h"
 #include "publisher/KafkaPublisher.h"
 #include "publisher/HeartbeatPublisher.h"
@@ -10,6 +11,7 @@
 
 #include <csignal>
 #include <atomic>
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 
@@ -41,6 +43,12 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception& e) {
         LOG_CRITICAL("Failed to load config: {}", e.what());
         return 1;
+    }
+
+    // ── FFmpeg log level: env var > YAML > default ────────────────────────────
+    {
+        const char* env = std::getenv("FFMPEG_LOG_LEVEL");
+        infer::setFfmpegLogLevel(env ? std::string(env) : cfg.server.ffmpeg_log_level);
     }
 
     // ── Signal handling ───────────────────────────────────────────────────────

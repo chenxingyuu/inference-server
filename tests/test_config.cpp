@@ -111,6 +111,7 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cfg.server.stream_pool_threads, 4);
     EXPECT_EQ(cfg.server.max_streams,         10);
     EXPECT_EQ(cfg.server.management_port,     9090);
+    EXPECT_EQ(cfg.server.ffmpeg_log_level,    "fatal");
 
     // models
     ASSERT_EQ(cfg.models.size(), 2u);

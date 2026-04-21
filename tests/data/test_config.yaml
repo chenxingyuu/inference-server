@@ -2,6 +2,7 @@ server:
   stream_pool_threads: 4
   max_streams: 10
   management_port: 9090
+  ffmpeg_log_level: fatal
 
 models:
   - id: yolo_det
