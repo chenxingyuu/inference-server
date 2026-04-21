@@ -3,10 +3,10 @@
 # Base images can be overridden at build time:
 #   docker build \
 #     --build-arg TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
-#     --build-arg CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
+#     --build-arg TRT_RUNTIME_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
 #     -f docker/Dockerfile.tensorrt .
 ARG TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3
-ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04
+ARG TRT_RUNTIME_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3
 FROM ${TRT_DEVEL_IMAGE} AS builder
 ARG APT_MIRROR=
 
@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
     && cmake --build build --parallel $(nproc)
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM ${CUDA_RUNTIME_IMAGE}
+FROM ${TRT_RUNTIME_IMAGE}
 ARG APT_MIRROR=
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
