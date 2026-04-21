@@ -72,4 +72,34 @@ TEST(StageFactory, CreatesSinkFfplayStage) {
     });
 }
 
+// ─── source.file ─────────────────────────────────────────────────────────────
+
+TEST(StageFactory, CreatesSourceFileStage) {
+    StageConfig cfg;
+    cfg.id   = "vid_001";
+    cfg.type = "source.file";
+
+    auto ctx = makeContext();
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, ctx);
+        ASSERT_NE(stage, nullptr);
+        EXPECT_EQ(stage->id(), "vid_001");
+        EXPECT_TRUE(stage->isSource());
+    });
+}
+
+TEST(StageFactory, CreatesSourceFileStageWithLoop) {
+    StageConfig cfg;
+    cfg.id   = "vid_loop";
+    cfg.type = "source.file";
+    cfg.with["loop"] = "true";
+
+    auto ctx = makeContext();
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, ctx);
+        ASSERT_NE(stage, nullptr);
+        EXPECT_TRUE(stage->isSource());
+    });
+}
+
 } // namespace infer

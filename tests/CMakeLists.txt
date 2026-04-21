@@ -66,6 +66,7 @@ add_infer_test(test_result_merger)
 add_infer_test(test_tracker)
 
 add_infer_test(test_read_timeout)
+add_infer_test(test_file_source_config)
 
 # Phase 10: stream health state machine (no hardware deps)
 add_infer_test(test_stream_health)
@@ -80,6 +81,14 @@ target_link_libraries(test_stage_factory PRIVATE
     GTest::gtest_main
 )
 add_test(NAME test_stage_factory COMMAND test_stage_factory
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+add_executable(test_ffmpeg_file_decoder test_ffmpeg_file_decoder.cpp)
+target_link_libraries(test_ffmpeg_file_decoder PRIVATE
+    infer_core
+    GTest::gtest_main
+)
+add_test(NAME test_ffmpeg_file_decoder COMMAND test_ffmpeg_file_decoder
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 add_executable(test_draw_and_stream_stage test_draw_and_stream_stage.cpp
     ${CMAKE_SOURCE_DIR}/src/pipeline/stages/DrawAndStreamStage.cpp

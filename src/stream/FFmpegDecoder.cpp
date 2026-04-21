@@ -100,9 +100,11 @@ void FFmpegDecoder::stop() {
 
 bool FFmpegDecoder::openStream(const StreamConfig& cfg) {
     AVDictionary* opts = nullptr;
-    av_dict_set(&opts, "rtsp_transport", "tcp", 0);
-    // stimeout covers the RTSP control-channel socket; aligned with open_timeout_us_
-    av_dict_set(&opts, "stimeout", std::to_string(open_timeout_us_).c_str(), 0);
+    if (cfg.source_type == SourceType::RTSP) {
+        av_dict_set(&opts, "rtsp_transport", "tcp", 0);
+        // stimeout covers the RTSP control-channel socket; aligned with open_timeout_us_
+        av_dict_set(&opts, "stimeout", std::to_string(open_timeout_us_).c_str(), 0);
+    }
     av_dict_set(&opts, "analyzeduration", "1000000", 0);
     av_dict_set(&opts, "probesize", "1000000", 0);
 
@@ -217,10 +219,10 @@ void FFmpegDecoder::closeStream() {
     video_stream_idx_ = -1;
 }
 
-bool FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
+ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
     AVPacket* pkt   = av_packet_alloc();
     AVFrame*  frame = av_frame_alloc();
-    bool ok = false;
+    ReadExitReason exit_reason = ReadExitReason::FramesOk;
 
     while (!stop_flag_.load()) {
         interrupt_ctx_.arm(read_timeout_us_);
@@ -230,10 +232,18 @@ bool FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
         if (ret == AVERROR_EXIT) {
             LOG_WARN("[{}] av_read_frame timed out ({}ms), triggering reconnect",
                      stream_id_, read_timeout_us_ / 1000);
+            exit_reason = ReadExitReason::Error;
             break;
         }
         if (ret == AVERROR(EAGAIN)) { av_usleep(1000); continue; }
-        if (ret < 0) { break; }
+        if (ret == AVERROR_EOF) {
+            exit_reason = ReadExitReason::EndOfFile;
+            break;
+        }
+        if (ret < 0) {
+            exit_reason = ReadExitReason::Error;
+            break;
+        }
 
         if (pkt->stream_index == video_stream_idx_) {
             if (avcodec_send_packet(codec_ctx_, pkt) == 0) {
@@ -287,7 +297,6 @@ bool FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
                         Metrics::get().incFramesDecoded(stream_id_);
                         StreamHealthRegistry::get().onFrameDecoded(stream_id_, f.meta.capture_ts);
                         cb(std::move(f));
-                        ok = true;
                     }
                     av_frame_unref(frame);
                 }
@@ -298,7 +307,7 @@ bool FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
 
     av_frame_free(&frame);
     av_packet_free(&pkt);
-    return ok;
+    return exit_reason;
 }
 
 // Compute exponential backoff delay in milliseconds.
@@ -327,6 +336,11 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
 
     while (!stop_flag_.load()) {
         if (!openStream(cfg)) {
+            // File sources: a failed open is terminal — don't retry.
+            if (cfg.source_type == SourceType::File) {
+                LOG_ERROR("[{}] failed to open file: {}", cfg.id, cfg.url);
+                break;
+            }
             reg.onReconnectFailed(cfg.id);
             const auto h = reg.getHealth(cfg.id);
             if (h.state == StreamState::FAILED) {
@@ -370,9 +384,20 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
             }
         }
 
-        readAndDecode(cb, sample_interval);
+        auto reason = readAndDecode(cb, sample_interval);
         closeStream();
 
+        // File sources: EOF is a clean terminal; optionally loop by re-opening.
+        if (cfg.source_type == SourceType::File) {
+            if (reason == ReadExitReason::EndOfFile && cfg.loop_file && !stop_flag_.load()) {
+                LOG_INFO("[{}] EOF, looping file", cfg.id);
+                continue;  // outer while re-opens the file from the start
+            }
+            LOG_INFO("[{}] file playback complete", cfg.id);
+            break;  // clean exit — no StreamDropped event
+        }
+
+        // RTSP: treat any exit (including timeout/error) as a drop → reconnect.
         if (!stop_flag_.load()) {
             reg.onStreamDropped(cfg.id);
             const auto h = reg.getHealth(cfg.id);

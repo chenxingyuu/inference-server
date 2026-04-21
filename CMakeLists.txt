@@ -152,6 +152,7 @@ set(PIPELINE_SOURCES
     src/pipeline/stages/InferEngineStage.cpp
     src/pipeline/stages/JoinByFrameStage.cpp
     src/pipeline/stages/SinkKafkaStage.cpp
+    src/pipeline/stages/SourceFileStage.cpp
     src/pipeline/stages/SourceRtspStage.cpp
     src/pipeline/stages/TrackByteTrackStage.cpp
     src/pipeline/TaskManager.cpp

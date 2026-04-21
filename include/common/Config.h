@@ -65,6 +65,8 @@ struct ModelConfig {
     int max_queue_delay_us{10000};         // max wait before flushing partial batch (µs)
 };
 
+enum class SourceType { RTSP, File };
+
 struct StreamConfig {
     std::string id;
     std::string url;
@@ -79,6 +81,8 @@ struct StreamConfig {
     bool        use_hwdec{false};  // true → NVDEC hardware decode
     TrackerType tracker{TrackerType::None};
     ByteTrackConfig byte_track{};
+    SourceType  source_type{SourceType::RTSP};  // RTSP stream or local file
+    bool        loop_file{false};               // re-open file on EOF (file sources only)
 };
 
 enum class EdgeDropPolicy { Block, DropOldest, DropNewest };

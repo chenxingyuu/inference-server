@@ -20,7 +20,14 @@ extern "C" {
 
 namespace infer {
 
-// RTSP decoder backed by FFmpeg.
+// Reason that readAndDecode() returned.
+enum class ReadExitReason {
+    FramesOk,   // stopped by stop_flag_
+    EndOfFile,  // clean end-of-file (AVERROR_EOF)
+    Error       // read error or timeout
+};
+
+// Decoder backed by FFmpeg supporting both RTSP streams and local files.
 // Software path: libavcodec → cv::Mat BGR
 // Hardware path (use_hwdec=true): NVDEC → NV12 GPU buffer (GpuBuffer)
 class FFmpegDecoder : public IStreamDecoder {
@@ -37,7 +44,7 @@ private:
     void decodeLoop(StreamConfig cfg, FrameCallback cb);
     bool openStream(const StreamConfig& cfg);
     void closeStream();
-    bool readAndDecode(FrameCallback& cb, int sample_interval);
+    ReadExitReason readAndDecode(FrameCallback& cb, int sample_interval);
 
     // Called by FFmpeg to select the hw pixel format
     static AVPixelFormat getHWFormat(AVCodecContext* ctx, const AVPixelFormat* pix_fmts);
