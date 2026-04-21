@@ -26,6 +26,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libspdlog-dev \
     libboost-dev \
     librdkafka-dev \
+    libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # TensorRT is expected to be mounted/installed via NVIDIA container runtime.
@@ -60,6 +61,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libyaml-cpp0.7 \
     librdkafka1 \
     libspdlog1 \
+    libcurl4 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server
