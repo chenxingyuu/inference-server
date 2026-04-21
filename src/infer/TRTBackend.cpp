@@ -9,7 +9,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <opencv2/imgproc.hpp>
-#include <algorithm>
+#include "infer/TrtUtils.h"
 
 namespace infer {
 
@@ -67,26 +67,29 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
 
     // Cache tensor names and whether input dims are dynamic.
     const int io_tensors = engine_->getNbIOTensors();
+    input_tensor_name_.clear();
     output_tensor_name_.clear();
     for (int i = 0; i < io_tensors; ++i) {
         const char* name = engine_->getIOTensorName(i);
         if (!name) continue;
-        if (engine_->getTensorIOMode(name) == nvinfer1::TensorIOMode::kOUTPUT &&
-            output_tensor_name_.empty()) {
+        const auto mode = engine_->getTensorIOMode(name);
+        if (mode == nvinfer1::TensorIOMode::kINPUT && input_tensor_name_.empty())
+            input_tensor_name_ = name;
+        else if (mode == nvinfer1::TensorIOMode::kOUTPUT && output_tensor_name_.empty())
             output_tensor_name_ = name;
-        }
+    }
+    if (input_tensor_name_.empty()) {
+        throw std::runtime_error("TRTBackend: unable to resolve input tensor name");
     }
     if (output_tensor_name_.empty()) {
         throw std::runtime_error("TRTBackend: unable to resolve output tensor name");
     }
     const nvinfer1::Dims in_dims = engine_->getTensorShape(input_tensor_name_.c_str());
-    input_shape_dynamic_ = false;
-    for (int i = 0; i < in_dims.nbDims; ++i) {
-        if (in_dims.d[i] == -1) {
-            input_shape_dynamic_ = true;
-            break;
-        }
+    if (in_dims.nbDims <= 0) {
+        throw std::runtime_error(
+            "TRTBackend: input tensor not found in engine: " + input_tensor_name_);
     }
+    input_shape_dynamic_ = hasDynamicDims(in_dims.nbDims, in_dims.d);
 
     // Pre-compute buffer sizes
     input_bytes_  = max_batch_size_ * 3 * input_h_ * input_w_ * sizeof(float);
@@ -186,19 +189,16 @@ void TRTBackend::inferGPU(const Batch& input, std::vector<float>& output) {
         // setup work while infer_stream_ is scheduling TRT work.
         CUDA_CHECK(cudaStreamWaitEvent(infer_stream_, preprocess_done_, 0));
 
-        if (input_shape_dynamic_) {
-            context_->setInputShape(input_tensor_name_.c_str(),
-                                    nvinfer1::Dims4{bs, 3, input_h_, input_w_});
-        }
+        // Always set input shape: no-op on static engines, required for dynamic.
+        context_->setInputShape(input_tensor_name_.c_str(),
+                                nvinfer1::Dims4{bs, 3, input_h_, input_w_});
 
         // Use enqueueV3 (TRT 8.5+) for full async dispatch on infer_stream_.
         // Falls back to executeV2 if enqueueV3 is not available at link time.
 #if NV_TENSORRT_MAJOR >= 8 && NV_TENSORRT_MINOR >= 5
         context_->setTensorAddress(input_tensor_name_.c_str(), slot->input_device);
         context_->setTensorAddress(output_tensor_name_.c_str(), slot->output_device);
-        void* bindings[2] = {slot->input_device, slot->output_device};
         bool ok = context_->enqueueV3(infer_stream_);
-        (void)bindings; // enqueueV3 uses named I/O bindings set above
         if (!ok) throw std::runtime_error("TRTBackend: enqueueV3 failed");
 #else
         void* bindings[2] = {slot->input_device, slot->output_device};
@@ -251,12 +251,12 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
         CUDA_CHECK(cudaMemcpy(slot->input_device, input_staging_.data(),
                               in_bytes, cudaMemcpyHostToDevice));
 
+        // Always set input shape: no-op on static engines, required for dynamic.
+        context_->setInputShape(input_tensor_name_.c_str(),
+                                nvinfer1::Dims4{bs, 3, input_h_, input_w_});
+        context_->setTensorAddress(input_tensor_name_.c_str(),  slot->input_device);
+        context_->setTensorAddress(output_tensor_name_.c_str(), slot->output_device);
         void* bindings[2] = {slot->input_device, slot->output_device};
-        if (input_shape_dynamic_) {
-            context_->setInputShape(input_tensor_name_.c_str(),
-                                    nvinfer1::Dims4{bs, 3, input_h_, input_w_});
-        }
-
         bool ok = context_->executeV2(bindings);
         if (!ok) throw std::runtime_error("TRTBackend: executeV2 failed");
 

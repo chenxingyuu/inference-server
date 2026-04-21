@@ -1,5 +1,19 @@
 # 迭代记录
 
+## Hotfix — TRTBackend tensor name discovery & inference safety
+
+**目标**：修复 `feat: enhance TRTBackend to support dynamic input shapes and tensor name caching` 引入的若干回归问题。
+
+**修复内容**：
+- **CRITICAL**：恢复 `inferGPU()` 和 `infer()` CPU 路径中无条件调用 `setInputShape`。原条件守卫 `if (input_shape_dynamic_)` 会导致静态引擎在 `bs < max_batch_size_` 时读取未初始化 GPU 内存；对静态引擎而言 `setInputShape` 是 no-op，无条件调用是安全的。
+- **HIGH**：`input_tensor_name_` 不再硬编码为 `"images"`，改为在 `loadModel()` 遍历 IO tensor 时自动发现，与 output 名称的发现逻辑对齐。非标准输入名的引擎不再静默失败。
+- **HIGH**：移除 `enqueueV3` 分支中无用的 `bindings[2]` 数组及 `(void)bindings` 抑制，`enqueueV3` 使用 `setTensorAddress` 而非 bindings 数组。
+- **MEDIUM**：`getTensorShape` 返回 `nbDims <= 0` 时抛出明确错误，而非静默跳过动态维度检测。
+- **MEDIUM**：CPU 路径 `executeV2` 前补充 `setTensorAddress`，与 GPU 路径对齐，为 TRT 10 弃用 bindings 数组 API 做准备。
+- 提取 `hasDynamicDims()` 至 `include/infer/TrtUtils.h`（无 TRT 依赖），新增 `tests/test_trt_utils.cpp` 8 个无 GPU 单元测试。
+
+---
+
 ## Phase 1 — MVP
 
 **目标**：单路 RTSP 软解 → TensorRT 推理 → Kafka 发布，跑通全链路。
