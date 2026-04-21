@@ -7,8 +7,8 @@
 # 将 TensorRT engine 放到 models/ 下，并按实际路径修改 engine_path。
 
 server:
-  stream_pool_threads: 32
-  max_streams: 100
+  stream_pool_threads: 16
+  max_streams: 50
   management_port: 8080
 
 models:
@@ -22,9 +22,27 @@ models:
     nms_thresh: 0.45
     device_id: 0
     num_classes: 80
+    class_names: [
+      "person", "bicycle", "car", "motorcycle", "airplane",
+      "bus", "train", "truck", "boat", "traffic light",
+      "fire hydrant", "stop sign", "parking meter", "bench", "bird",
+      "cat", "dog", "horse", "sheep", "cow",
+      "elephant", "bear", "zebra", "giraffe", "backpack",
+      "umbrella", "handbag", "tie", "suitcase", "frisbee",
+      "skis", "snowboard", "sports ball", "kite", "baseball bat",
+      "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
+      "wine glass", "cup", "fork", "knife", "spoon",
+      "bowl", "banana", "apple", "sandwich", "orange",
+      "broccoli", "carrot", "hot dog", "pizza", "donut",
+      "cake", "chair", "couch", "potted plant", "bed",
+      "dining table", "toilet", "tv", "laptop", "mouse",
+      "remote", "keyboard", "cell phone", "microwave", "oven",
+      "toaster", "sink", "refrigerator", "book", "clock",
+      "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
+    ]
     instance_count: 1
     preferred_batch_sizes: [4, 8, 16]
-    max_queue_delay_us: 10000
+    max_queue_delay_us: 150000
 
 sources:
   - id: "cam_001"
@@ -53,29 +71,29 @@ pipelines:
         type: "postprocess.yolo"
       - id: "track_1"
         type: "track.bytetrack"
+        with:
+          high_det_thresh: "0.5"
+          low_det_thresh: "0.1"
+          match_iou_thresh: "0.3"
+          min_hits_to_confirm: "2"
+          max_lost_frames: "30"
       - id: "join_1"
         type: "join.byFrameId"
       - id: "sink_1"
         type: "sink.kafka"
-      - id: "sink_stream_1"
-        type: "sink.stream"
-        with:
-          output_url: "rtsp://127.0.0.1:8554/live/cam_001"
-          protocol: "rtsp"
-          fps: "15"
-          bitrate_kbps: "2500"
-          queue_capacity: "32"
-          reconnect_initial_ms: "1000"
-          reconnect_max_ms: "15000"
-          draw_conf_thresh: "0.25"
-          drop_policy: "drop_oldest"
     edges:
       - from: "cam_001"
         to: "decode_1"
       - from: "decode_1"
         to: "archive_1"
+        queue:
+          capacity: 2048
+          drop_policy: "drop_oldest"
       - from: "decode_1"
         to: "pre_1"
+        queue:
+          capacity: 512
+          drop_policy: "block"
       - from: "pre_1"
         to: "infer_1"
       - from: "infer_1"
@@ -84,8 +102,6 @@ pipelines:
         to: "track_1"
       - from: "track_1"
         to: "join_1"
-      - from: "track_1"
-        to: "sink_stream_1"
       - from: "archive_1"
         to: "join_1"
       - from: "join_1"
@@ -110,7 +126,7 @@ kafka:
   control_topic: "inference-control"
 
 frame_archive:
-  enabled: true
+  enabled: false
   local_dir: "./data/frames"
   save_interval: 1
   jpeg_quality: 90

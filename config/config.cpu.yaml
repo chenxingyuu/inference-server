@@ -12,11 +12,12 @@ server:
   stream_pool_threads: 16
   max_streams: 50
   management_port: 8080
+  ffmpeg_log_level: "fatal"
 
 models:
   - id: "yolov8n_cpu"
     version: yolov8
-    backend: cpu
+    backend: mps
     onnx_path: "models/yolov8n.onnx"
     input_size: [640, 640]
     batch_size: 4
@@ -122,7 +123,7 @@ tasks:
   - id: "task_cam_001"
     source_id: "cam_001"
     pipeline_id: "pipeline_default"
-    sample_fps: 5
+    sample_fps: 7
     use_hwdec: false
 
 kafka:
