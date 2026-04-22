@@ -14,6 +14,7 @@ struct ServerConfig {
     int max_streams{100};
     int management_port{8080};          // HTTP management server port
     std::string ffmpeg_log_level{"warning"};  // FFmpeg log threshold (quiet/fatal/error/warning/info/debug/trace)
+    std::string log_level{"info"};            // spdlog level (trace/debug/info/warn/error/critical/off)
 };
 
 // Model type: detector outputs bounding boxes; classifier outputs class probabilities.

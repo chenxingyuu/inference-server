@@ -45,6 +45,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Re-apply log level from config now that it is parsed.
+    infer::initLogger(cfg.server.log_level);
+
     // ── FFmpeg log level: env var > YAML > default ────────────────────────────
     {
         const char* env = std::getenv("FFMPEG_LOG_LEVEL");
