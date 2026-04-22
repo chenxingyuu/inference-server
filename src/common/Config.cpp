@@ -242,6 +242,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
         cfg.server.max_streams         = sn["max_streams"].as<int>(100);
         cfg.server.management_port     = sn["management_port"].as<int>(8080);
         cfg.server.ffmpeg_log_level    = sn["ffmpeg_log_level"].as<std::string>("warning");
+        cfg.server.log_level           = sn["log_level"].as<std::string>("info");
     }
     for (const auto& mn : root["models"]) {
         ModelConfig m;
