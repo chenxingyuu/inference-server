@@ -105,6 +105,8 @@ void BatchScheduler::scheduleLoop() {
         }
 
         if (should_flush) {
+            LOG_DEBUG("BatchScheduler[{}]: flush batch_size={} trigger={}",
+                      model_cfg_.id, batch.size(), timeout ? "timeout" : "full");
             callback_(std::move(batch));
             batch.frames.clear();
             batch.gpu_frames.clear();
