@@ -60,11 +60,13 @@ void InferWorker::stop() {
 void InferWorker::enqueue(Batch batch) {
     if (state_.load() == WorkerState::STOPPED) {
         dropped_batches_.fetch_add(1, std::memory_order_relaxed);
+        LOG_WARN("InferWorker[{}]: dropped batch (worker STOPPED)", model_cfg_.id);
         return;
     }
     std::unique_lock lock(mutex_);
     if (queue_.size() >= kMaxQueueSize) {
         dropped_batches_.fetch_add(1, std::memory_order_relaxed);
+        LOG_WARN("InferWorker[{}]: dropped batch (queue full, depth={})", model_cfg_.id, queue_.size());
         return;
     }
     queue_.push_back(std::move(batch));
@@ -103,6 +105,9 @@ void InferWorker::workerLoop() {
 
         if (batch.empty()) continue;
 
+        LOG_DEBUG("InferWorker[{}]: dequeued batch_size={} queue_remaining={}",
+                  model_cfg_.id, batch.size(), queue_.size());
+
         const double dequeue_ts = nowEpoch();
         const uint64_t dequeue_mono_ns = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -123,6 +128,8 @@ void InferWorker::workerLoop() {
             Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
             Metrics::get().recordInferBatchSize(model_cfg_.id, batch.size());
             Metrics::get().incInferBatches(model_cfg_.id);
+            LOG_DEBUG("InferWorker[{}]: infer done bs={} infer_ms={:.1f}",
+                      model_cfg_.id, batch.size(), infer_ms);
 
             auto decode_start = std::chrono::steady_clock::now();
             auto per_image = decoder_->decode(
@@ -130,6 +137,8 @@ void InferWorker::workerLoop() {
                 model_cfg_.conf_thresh, model_cfg_.nms_thresh);
             const double decode_ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - decode_start).count();
+            LOG_DEBUG("InferWorker[{}]: decode done bs={} decode_ms={:.1f}",
+                      model_cfg_.id, batch.size(), decode_ms);
 
             double infer_ts = nowEpoch();
             for (int i = 0; i < batch.size(); ++i) {
@@ -165,6 +174,9 @@ void InferWorker::workerLoop() {
                     r.frame_local_path  = ar.local_path;
                     r.frame_url         = ar.frame_url;
                     r.frame_upload_state = ar.upload_state;
+                    LOG_DEBUG("InferWorker[{}]: archive stream={} state={} path={}",
+                              model_cfg_.id, r.stream_id, ar.upload_state,
+                              ar.local_path.empty() ? "(skipped)" : ar.local_path);
                 } else {
                     r.frame_upload_state = "disabled";
                 }
@@ -184,6 +196,8 @@ void InferWorker::workerLoop() {
                         ? bytetrack_config_resolver_(r.stream_id)
                         : ByteTrackConfig{};
                     tracker_manager_->apply(r.stream_id, tracker_type, bt_cfg, r.frame_seq, r.detections);
+                    LOG_DEBUG("InferWorker[{}]: tracker applied stream={} dets={}",
+                              model_cfg_.id, r.stream_id, r.detections.size());
                 }
 
                 if (cascade_router_) {
@@ -193,16 +207,26 @@ void InferWorker::workerLoop() {
                                                   ? &batch.gpu_frames[i] : nullptr;
                     const cv::Mat*    cpu_frame = !batch.is_gpu && i < static_cast<int>(batch.frames.size())
                                                   ? &batch.frames[i] : nullptr;
+                    LOG_DEBUG("InferWorker[{}]: cascade route stream={} dets={}",
+                              model_cfg_.id, r.stream_id, r.detections.size());
                     cascade_router_->route(r, i, gpu_frame, cpu_frame);
                     // Flush expired entries after each frame
                     if (result_merger_) result_merger_->flushExpired();
                 } else {
+                    LOG_DEBUG("InferWorker[{}]: publish stream={} dets={} latency_ms={:.1f}",
+                              model_cfg_.id, r.stream_id, r.detections.size(), r.latency_ms);
                     publisher_.publish(std::move(r));
                 }
             }
-            processed_batches_.fetch_add(1, std::memory_order_relaxed);
+            const uint64_t total = processed_batches_.fetch_add(1, std::memory_order_relaxed) + 1;
             batch_policy_.onSuccess();
             Metrics::get().setInferBatchSizeCurrent(model_cfg_.id, batch_policy_.current_max);
+            if (total % 200 == 0) {
+                LOG_INFO("InferWorker[{}]: stats processed={} dropped={} policy_max={}",
+                         model_cfg_.id, total,
+                         dropped_batches_.load(std::memory_order_relaxed),
+                         batch_policy_.current_max);
+            }
         } catch (const GpuMemoryPressureException& e) {
             LOG_WARN("InferWorker[{}]: GPU memory pressure: {}", model_cfg_.id, e.what());
             batch_policy_.onOOM();

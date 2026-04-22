@@ -38,9 +38,13 @@ KafkaPublisher::~KafkaPublisher() {
     stop_flag_.store(true);
     cv_.notify_all();
     if (thread_.joinable()) thread_.join();
+    LOG_INFO("KafkaPublisher: flushing (published={} dropped={})",
+             published_.load(std::memory_order_relaxed),
+             dropped_.load(std::memory_order_relaxed));
     flush();
     if (topic_)    rd_kafka_topic_destroy(topic_);
     if (producer_) rd_kafka_destroy(producer_);
+    LOG_INFO("KafkaPublisher: shutdown complete");
 }
 
 void KafkaPublisher::publish(InferResult result) {
@@ -87,11 +91,16 @@ void KafkaPublisher::publishLoop() {
             nullptr);
 
         if (ret == -1) {
-            LOG_ERROR("KafkaPublisher: produce failed: {}",
-                      rd_kafka_err2str(rd_kafka_last_error()));
+            LOG_ERROR("KafkaPublisher: produce failed stream={} err={}",
+                      r.stream_id, rd_kafka_err2str(rd_kafka_last_error()));
         } else {
-            published_.fetch_add(1, std::memory_order_relaxed);
+            const uint64_t n = published_.fetch_add(1, std::memory_order_relaxed) + 1;
             Metrics::get().incKafkaPublished();
+            if (n % 1000 == 0) {
+                LOG_INFO("KafkaPublisher: published={} dropped={} queue={}",
+                         n, dropped_.load(std::memory_order_relaxed),
+                         [&]{ std::unique_lock l(mutex_); return queue_.size(); }());
+            }
         }
         rd_kafka_poll(producer_, 0);
     }

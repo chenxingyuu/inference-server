@@ -14,7 +14,12 @@ namespace fs = std::filesystem;
 
 FrameArchiver::FrameArchiver(FrameArchiveConfig cfg)
     : cfg_(std::move(cfg)) {
-    if (!cfg_.enabled) return;
+    if (!cfg_.enabled) {
+        LOG_INFO("FrameArchiver: disabled");
+        return;
+    }
+    LOG_INFO("FrameArchiver: starting local_dir={} interval={} minio={}",
+             cfg_.local_dir, cfg_.save_interval, cfg_.minio.enabled ? "on" : "off");
     worker_ = std::thread(&FrameArchiver::workerLoop, this);
 }
 
@@ -22,6 +27,7 @@ FrameArchiver::~FrameArchiver() {
     stop_.store(true);
     cv_.notify_all();
     if (worker_.joinable()) worker_.join();
+    LOG_INFO("FrameArchiver: stopped");
 }
 
 std::string FrameArchiver::buildObjectKey(const StreamMeta& meta) const {
@@ -41,6 +47,7 @@ bool FrameArchiver::enqueue(ArchiveTask task) {
     std::unique_lock<std::mutex> lock(mu_);
     if (queue_.size() >= static_cast<std::size_t>(cfg_.queue_capacity)) {
         Metrics::get().incFramesArchiveDropped();
+        LOG_WARN("FrameArchiver: queue full (capacity={}) dropping frame", cfg_.queue_capacity);
         return false;
     }
     queue_.push(std::move(task));
@@ -103,9 +110,11 @@ void FrameArchiver::workerLoop() {
                 continue;
             }
             Metrics::get().incFramesArchived();
+            LOG_DEBUG("FrameArchiver: wrote {}", task.local_path);
             if (cfg_.minio.enabled) {
                 if (uploadToMinio(task.local_path, task.object_key)) {
                     Metrics::get().incFramesUploaded();
+                    LOG_DEBUG("FrameArchiver: uploaded {}", task.object_key);
                 } else {
                     Metrics::get().incFramesUploadFailed();
                 }
@@ -155,8 +164,10 @@ bool FrameArchiver::uploadToMinio(const std::string& local_path, const std::stri
         if (rc == CURLE_OK && code >= 200 && code < 300) {
             return true;
         }
+        LOG_WARN("FrameArchiver: upload attempt {}/{} failed curl={} http={} url={}",
+                 attempt + 1, cfg_.minio.max_retries + 1, static_cast<int>(rc), code, url);
     }
-    LOG_WARN("FrameArchiver: upload failed url={}", url);
+    LOG_WARN("FrameArchiver: upload exhausted retries url={}", url);
     return false;
 }
 
