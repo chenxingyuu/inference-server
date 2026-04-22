@@ -152,3 +152,6 @@ target_link_libraries(test_control_publisher PRIVATE
 )
 add_test(NAME test_control_publisher COMMAND test_control_publisher
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+# TrtUtils pure-logic unit tests — no GPU required, no TRT dependency
+add_infer_test(test_trt_utils)
