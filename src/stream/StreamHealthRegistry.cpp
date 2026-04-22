@@ -1,4 +1,5 @@
 #include "stream/StreamHealthRegistry.h"
+#include "common/Logger.h"
 #include <algorithm>
 #include <chrono>
 #include <mutex>
@@ -36,6 +37,7 @@ void StreamHealthRegistry::onStreamOpened(const std::string& id) {
     if (h.state == StreamState::CONNECTING) {
         h.state            = StreamState::STREAMING;
         h.state_changed_at = now();
+        LOG_INFO("[{}] stream state: CONNECTING -> STREAMING", id);
     }
 }
 
@@ -46,6 +48,8 @@ void StreamHealthRegistry::onStreamDropped(const std::string& id) {
     auto& h = it->second.health;
     if (h.state == StreamState::FAILED) return;
     if (h.state == StreamState::STREAMING || h.state == StreamState::CONNECTING) {
+        LOG_WARN("[{}] stream state: {} -> RECONNECTING",
+                 id, streamStateStr(h.state));
         h.state            = StreamState::RECONNECTING;
         h.state_changed_at = now();
     }
@@ -61,12 +65,16 @@ void StreamHealthRegistry::onReconnectFailed(const std::string& id) {
     ++h.consecutive_failures;
     const uint32_t max_attempts = static_cast<uint32_t>(std::max(0, entry.second.max_reconnect_attempts));
     if (max_attempts > 0 && h.consecutive_failures >= max_attempts) {
+        LOG_ERROR("[{}] stream state: {} -> FAILED (max_reconnect_attempts={} reached)",
+                  entry.first, streamStateStr(h.state), max_attempts);
         h.state            = StreamState::FAILED;
         h.state_changed_at = now();
         return;
     }
     if (h.consecutive_failures >= static_cast<uint32_t>(entry.second.degraded_threshold)
         && h.state != StreamState::DEGRADED) {
+        LOG_WARN("[{}] stream state: RECONNECTING -> DEGRADED (consecutive_failures={})",
+                 entry.first, h.consecutive_failures);
         h.state            = StreamState::DEGRADED;
         h.state_changed_at = now();
     }
@@ -78,6 +86,8 @@ void StreamHealthRegistry::onReconnectSucceeded(const std::string& id) {
     if (it == map_.end()) return;
     auto& h = it->second.health;
     if (h.state == StreamState::FAILED) return;
+    LOG_INFO("[{}] stream state: {} -> STREAMING (reconnect_count={})",
+             id, streamStateStr(h.state), h.reconnect_count + 1);
     h.state               = StreamState::STREAMING;
     h.state_changed_at    = now();
     h.consecutive_failures = 0;
