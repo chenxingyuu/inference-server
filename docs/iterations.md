@@ -1,5 +1,34 @@
 # 迭代记录
 
+## Phase 11 — GPU OOM & 引擎崩溃自愈
+
+**目标**：不重启进程，在进程内完成 GPU 故障自愈；最坏情况下单 Worker 停止，其余流继续运行。
+
+**新增**：
+- **CRITICAL**: `include/infer/GpuFault.h` — `GpuFaultType` 分类枚举 + `GpuFaultException` / `GpuMemoryPressureException`；`classifyGpuError(int)` 将 CUDA 错误码映射到故障类型（无 CUDA header 依赖，可单元测试）
+- **CRITICAL**: `include/pipeline/BatchPolicy.h` — 三级 batch 降级状态机（16→8→4→1），header-only 纯逻辑，`kRestoreThreshold=120` 次连续成功后升档
+- **HIGH**: `GpuBufferPool` — 新增 `MemoryChecker` 可注入接口 + `isSafe()` 方法（默认 85% 水位检查）；`acquire()` 超水位时抛 `GpuMemoryPressureException` 实现预防性背压
+- **HIGH**: `InferWorker` — 新增 `WorkerState` (RUNNING/RECOVERING/STOPPED)、`BatchPolicy`、`recoverFromFault()` 三路恢复：OOM→背压重入队、ENGINE_FAULT→engine reload、CONTEXT_LOST→cudaDeviceReset+reload；重试间隔 1s/2s/4s，3 次失败后标记 STOPPED
+- **HIGH**: `InferWorkerGroup::enqueue()` — 跳过 RECOVERING/STOPPED worker，回退至 RECOVERING worker 而非直接丢弃
+- **MEDIUM**: `TRTBackend` — `CUDA_CHECK` 宏升级为抛 `GpuFaultException`，新增 `checkInferTimeout()`（默认 5s）
+- **MEDIUM**: 5 个新 Prometheus 指标：`gpu_oom_total`、`gpu_engine_fault_total`、`infer_worker_state`、`infer_batch_size_current`、`gpu_memory_usage_ratio`
+
+**测试** (`tests/test_gpu_fault_recovery.cpp`，16 个测试全绿）：
+- BatchPolicy 状态机（6 个）：onOOM 降级、onSuccess 升档、isExhausted 边界
+- classifyGpuError 映射（3 个）：OOM / CONTEXT_LOST / ENGINE_FAULT
+- 新 Metrics 断言（4 个）：Prometheus 序列化输出验证
+- InferWorker 状态机集成（3 个）：OOM 保持 RUNNING + 指标 +1、ENGINE_FAULT 触发 reload 恢复 RUNNING、连续 reload 失败→STOPPED
+
+**关键决策**：
+- OOM 时 batch 放回队列头（`enqueueHead`）而非丢弃，减少漏检
+- `BatchPolicy` 与 GPU 完全解耦（header-only 纯逻辑），无 CUDA 依赖可单元测试
+- `MemoryChecker` 可注入，测试无需真实 GPU
+- 仅 `CONTEXT_LOST` 才触发 `cudaDeviceReset`，普通崩溃只 reload engine
+
+**状态**: ✅ 完成
+
+---
+
 ## Hotfix — TRTBackend tensor name discovery & inference safety
 
 **目标**：修复 `feat: enhance TRTBackend to support dynamic input shapes and tensor name caching` 引入的若干回归问题。

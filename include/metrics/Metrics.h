@@ -54,6 +54,14 @@ public:
     void setStreamConsecutiveFailures(const std::string& stream_id, uint32_t n);
     void setStreamLastFrameAgeSeconds(const std::string& stream_id, double age);
 
+    // ── Phase 11: GPU fault self-healing ──────────────────────────────────────
+    void incGpuOom(const std::string& worker_id);
+    void incGpuEngineFault(const std::string& worker_id);
+    void setInferWorkerState(const std::string& worker_id, uint32_t state);
+    void setInferBatchSizeCurrent(const std::string& worker_id, uint32_t size);
+    // device_id: e.g. "0" for GPU 0. ratio in [0, 1].
+    void setGpuMemoryUsageRatio(double ratio, const std::string& device_id = "0");
+
     // ── Exposition ────────────────────────────────────────────────────────────
     // Returns the full Prometheus text format (OpenMetrics compatible).
     std::string serialize() const;
@@ -145,6 +153,13 @@ private:
     LabeledGaugeUint   stream_reconnect_count_;
     LabeledGaugeUint   stream_consecutive_failures_;
     LabeledGaugeDouble stream_last_frame_age_;
+
+    // Phase 11: GPU fault self-healing
+    LabeledCounter     gpu_oom_;
+    LabeledCounter     gpu_engine_fault_;
+    LabeledGaugeUint   infer_worker_state_;
+    LabeledGaugeUint   infer_batch_size_current_;
+    LabeledGaugeDouble gpu_memory_usage_ratio_; // label_name="device", value in [0,1]
 
     // SinkFfplayStage
     LabeledHistogram sink_jitter_;

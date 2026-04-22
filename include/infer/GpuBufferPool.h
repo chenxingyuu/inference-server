@@ -2,7 +2,9 @@
 
 #ifdef BUILD_TRT_BACKEND
 
+#include "infer/GpuFault.h"
 #include <atomic>
+#include <functional>
 #include <vector>
 #include <cstddef>
 
@@ -35,7 +37,12 @@ struct PooledBuffer {
 // Typical pool_size: 4 (double-buffering × 2 spare slots).
 class GpuBufferPool {
 public:
-    GpuBufferPool() = default;
+    // Optional memory safety checker: returns true when it is safe to allocate.
+    // Defaults to a cudaMemGetInfo-based 85% threshold check.
+    // Inject a custom checker in tests to avoid requiring real GPU hardware.
+    using MemoryChecker = std::function<bool()>;
+
+    explicit GpuBufferPool(MemoryChecker checker = {});
     ~GpuBufferPool() { reset(); }
 
     // Allocate pool_size slots on device_id. Must be called once before acquire().
@@ -46,6 +53,7 @@ public:
     void reset();
 
     // Spin-acquire a free slot (yields between attempts, max 5ms).
+    // Throws GpuMemoryPressureException if memory usage exceeds safety threshold.
     // Returns nullptr only on timeout (should not happen in normal operation).
     PooledBuffer* acquire();
 
@@ -54,7 +62,13 @@ public:
 
     int poolSize() const { return static_cast<int>(slots_.size()); }
 
+    // Returns true when GPU memory usage is below the safety threshold.
+    bool isSafe() const;
+
+    static constexpr float kOomGuardRatio = 0.85f;
+
 private:
+    MemoryChecker             memory_checker_;
     std::vector<PooledBuffer> slots_;
     int device_id_{0};
 };

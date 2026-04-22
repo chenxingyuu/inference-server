@@ -1,6 +1,7 @@
 #ifdef BUILD_TRT_BACKEND
 
 #include "infer/GpuBufferPool.h"
+#include "metrics/Metrics.h"
 #include "common/Logger.h"
 
 #include <cuda_runtime_api.h>
@@ -8,7 +9,7 @@
 #include <thread>
 #include <chrono>
 
-#define CUDA_CHECK(call) do { \
+#define CUDA_POOL_CHECK(call) do { \
     cudaError_t _err = (call); \
     if (_err != cudaSuccess) { \
         throw std::runtime_error(std::string("[GpuBufferPool CUDA] ") \
@@ -18,18 +19,38 @@
 
 namespace infer {
 
+GpuBufferPool::GpuBufferPool(MemoryChecker checker)
+    : memory_checker_(std::move(checker)) {
+    if (!memory_checker_) {
+        // Default: query cudaMemGetInfo; safe when < kOomGuardRatio
+        memory_checker_ = [this]() -> bool {
+            size_t free_bytes = 0, total_bytes = 0;
+            if (cudaMemGetInfo(&free_bytes, &total_bytes) != cudaSuccess || total_bytes == 0)
+                return true; // query failed — allow through
+            const float used_ratio = static_cast<float>(total_bytes - free_bytes)
+                                     / static_cast<float>(total_bytes);
+            Metrics::get().setGpuMemoryUsageRatio(static_cast<double>(used_ratio));
+            return used_ratio < kOomGuardRatio;
+        };
+    }
+}
+
+bool GpuBufferPool::isSafe() const {
+    return memory_checker_ ? memory_checker_() : true;
+}
+
 void GpuBufferPool::init(int device_id, int pool_size,
                          size_t input_bytes, size_t output_bytes) {
     device_id_ = device_id;
-    CUDA_CHECK(cudaSetDevice(device_id_));
+    CUDA_POOL_CHECK(cudaSetDevice(device_id_));
 
     slots_.resize(pool_size);
     for (int i = 0; i < pool_size; ++i) {
         auto& s = slots_[i];
         s.idx    = i;
         s.in_use.store(false, std::memory_order_relaxed);
-        CUDA_CHECK(cudaMalloc(&s.input_device,  input_bytes));
-        CUDA_CHECK(cudaMalloc(&s.output_device, output_bytes));
+        CUDA_POOL_CHECK(cudaMalloc(&s.input_device,  input_bytes));
+        CUDA_POOL_CHECK(cudaMalloc(&s.output_device, output_bytes));
     }
 
     LOG_INFO("GpuBufferPool: allocated {} slots ({} + {} bytes each)",
@@ -48,6 +69,10 @@ void GpuBufferPool::reset() {
 }
 
 PooledBuffer* GpuBufferPool::acquire() {
+    if (!isSafe()) {
+        throw GpuMemoryPressureException("GPU memory usage above safety threshold");
+    }
+
     // Spin with back-off: try each slot in round-robin.
     // Inference passes are short (< few ms) so contention is rare.
     const auto deadline = std::chrono::steady_clock::now()

@@ -49,10 +49,27 @@ void InferWorkerGroup::stop() {
 }
 
 void InferWorkerGroup::enqueue(Batch batch) {
-    // Round-robin assignment: atomically pick the next worker index.
-    const std::size_t n   = workers_.size();
-    const std::size_t idx = round_robin_idx_.fetch_add(1, std::memory_order_relaxed) % n;
-    workers_[idx]->enqueue(std::move(batch));
+    const std::size_t n = workers_.size();
+    // Start from the round-robin candidate; skip RECOVERING/STOPPED workers.
+    const std::size_t start = round_robin_idx_.fetch_add(1, std::memory_order_relaxed) % n;
+    for (std::size_t i = 0; i < n; ++i) {
+        auto& w = workers_[(start + i) % n];
+        if (w->state() == WorkerState::RUNNING) {
+            w->enqueue(std::move(batch));
+            return;
+        }
+    }
+    // No RUNNING worker found — fall back to first RECOVERING worker so the batch
+    // is processed once recovery completes, rather than being dropped immediately.
+    for (std::size_t i = 0; i < n; ++i) {
+        auto& w = workers_[(start + i) % n];
+        if (w->state() == WorkerState::RECOVERING) {
+            w->enqueue(std::move(batch));
+            return;
+        }
+    }
+    // All workers STOPPED — drop
+    LOG_ERROR("InferWorkerGroup: all workers stopped, dropping batch");
 }
 
 uint64_t InferWorkerGroup::processedBatches() const {
