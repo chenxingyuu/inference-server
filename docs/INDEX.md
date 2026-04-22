@@ -11,6 +11,7 @@ Primary navigation for engineering and agent workflows.
 ## Existing Guides
 
 - `docs/ascend-guide.md`: Ascend ecosystem and operational reference.
+- `docs/model-conversion.md`: YOLO → ONNX → TensorRT engine conversion guide.
 - `docs/iterations.md`: iteration notes and project history.
 
 ## Agent Workflow
