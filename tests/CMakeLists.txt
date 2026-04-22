@@ -64,6 +64,7 @@ add_infer_test(test_iou_nms)
 add_infer_test(test_yolov5_decoder)
 add_infer_test(test_result_merger)
 add_infer_test(test_tracker)
+add_infer_test(test_logging_defects)
 
 add_infer_test(test_read_timeout)
 add_infer_test(test_file_source_config)
