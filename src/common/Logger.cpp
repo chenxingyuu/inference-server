@@ -18,6 +18,8 @@ void initLogger(const std::string& log_level, const std::string& log_file) {
     spdlog::set_default_logger(logger);
     spdlog::set_level(spdlog::level::from_str(log_level));
     spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%t] %v");
+    // Flush immediately on ERROR or above so crash logs are not lost in buffers.
+    spdlog::flush_on(spdlog::level::err);
 }
 
 } // namespace infer

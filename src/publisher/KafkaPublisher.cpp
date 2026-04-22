@@ -48,8 +48,8 @@ void KafkaPublisher::publish(InferResult result) {
     if (static_cast<int>(queue_.size()) >= cfg_.queue_capacity) {
         dropped_.fetch_add(1, std::memory_order_relaxed);
         Metrics::get().incKafkaDropped();
-        LOG_WARN("KafkaPublisher: queue full, dropping result for stream {}",
-                 result.stream_id);
+        LOG_ERROR("KafkaPublisher: queue full, dropping result for stream {}",
+                  result.stream_id);
         return;
     }
     queue_.push(std::move(result));

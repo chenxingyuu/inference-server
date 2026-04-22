@@ -57,8 +57,8 @@ void ResultMerger::flushExpired() {
     auto now = std::chrono::steady_clock::now();
     for (auto it = pending_.begin(); it != pending_.end(); ) {
         if (now >= it->second.deadline) {
-            LOG_DEBUG("ResultMerger: deadline expired for {}, publishing with {}/{} attributes",
-                      it->first, it->second.received, it->second.expected);
+            LOG_WARN("ResultMerger: deadline expired for {}, publishing with {}/{} attributes",
+                     it->first, it->second.received, it->second.expected);
             publisher_.publish(std::move(it->second.result));
             it = pending_.erase(it);
         } else {
