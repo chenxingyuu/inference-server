@@ -154,5 +154,23 @@ target_link_libraries(test_control_publisher PRIVATE
 add_test(NAME test_control_publisher COMMAND test_control_publisher
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+# Phase 11: GPU fault self-healing (BatchPolicy, GpuFault classification, Metrics, InferWorker recovery)
+# Uses InferWorker directly so it needs its transitive deps that are not in infer_testable.
+add_executable(test_gpu_fault_recovery test_gpu_fault_recovery.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/InferWorker.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/InferWorkerGroup.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/CascadeRouter.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/DetectionOverlay.cpp
+    ${CMAKE_SOURCE_DIR}/src/archive/FrameArchiver.cpp
+)
+target_link_libraries(test_gpu_fault_recovery PRIVATE
+    infer_testable
+    GTest::gtest_main
+    GTest::gmock
+    CURL::libcurl
+)
+add_test(NAME test_gpu_fault_recovery COMMAND test_gpu_fault_recovery
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
 # TrtUtils pure-logic unit tests — no GPU required, no TRT dependency
 add_infer_test(test_trt_utils)

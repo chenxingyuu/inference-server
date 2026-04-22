@@ -1,11 +1,13 @@
 #ifdef BUILD_TRT_BACKEND
 
 #include "infer/TRTBackend.h"
+#include "infer/GpuFault.h"
 #include "cuda/CudaPreprocess.h"
 #include "common/Logger.h"
 
 #include <NvInfer.h>
 #include <cuda_runtime_api.h>
+#include <chrono>
 #include <fstream>
 #include <stdexcept>
 #include <opencv2/imgproc.hpp>
@@ -22,10 +24,12 @@ class TRTLogger : public nvinfer1::ILogger {
     }
 } g_trt_logger;
 
+// Classify and throw a GpuFaultException for any non-success CUDA error.
 #define CUDA_CHECK(call) do { \
     cudaError_t _err = (call); \
     if (_err != cudaSuccess) { \
-        throw std::runtime_error(std::string("[CUDA] ") + cudaGetErrorString(_err)); \
+        throw GpuFaultException(classifyGpuError(static_cast<int>(_err)), \
+                                cudaGetErrorString(_err)); \
     } \
 } while(0)
 
@@ -233,8 +237,11 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
 
     CUDA_CHECK(cudaSetDevice(device_id_));
 
+    const auto infer_start = std::chrono::steady_clock::now();
+
     if (input.is_gpu) {
         inferGPU(input, output);
+        checkInferTimeout(infer_start);
         return;
     }
 
@@ -270,6 +277,18 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
     }
 
     buffer_pool_.release(slot);
+    checkInferTimeout(infer_start);
+}
+
+void TRTBackend::checkInferTimeout(
+    const std::chrono::steady_clock::time_point& start) const {
+    const auto elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    if (elapsed_ms > infer_timeout_ms_) {
+        throw GpuFaultException(GpuFaultType::TIMEOUT,
+            "TRTBackend: inference exceeded " +
+            std::to_string(static_cast<int>(infer_timeout_ms_)) + "ms timeout");
+    }
 }
 
 void TRTBackend::unloadModel() {

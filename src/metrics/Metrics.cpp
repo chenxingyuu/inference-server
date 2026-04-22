@@ -183,6 +183,28 @@ void Metrics::setStreamLastFrameAgeSeconds(const std::string& stream_id, double 
     stream_last_frame_age_.set(stream_id, age);
 }
 
+// ── Phase 11: GPU fault self-healing ─────────────────────────────────────────
+
+void Metrics::incGpuOom(const std::string& worker_id) {
+    gpu_oom_.inc(worker_id);
+}
+
+void Metrics::incGpuEngineFault(const std::string& worker_id) {
+    gpu_engine_fault_.inc(worker_id);
+}
+
+void Metrics::setInferWorkerState(const std::string& worker_id, uint32_t state) {
+    infer_worker_state_.set(worker_id, state);
+}
+
+void Metrics::setInferBatchSizeCurrent(const std::string& worker_id, uint32_t size) {
+    infer_batch_size_current_.set(worker_id, size);
+}
+
+void Metrics::setGpuMemoryUsageRatio(double ratio, const std::string& device_id) {
+    gpu_memory_usage_ratio_.set(device_id, ratio);
+}
+
 // ── SinkFfplayStage metrics ───────────────────────────────────────────────────
 
 void Metrics::recordSinkFfplayJitter(const std::string& stage_id, double ms) {
@@ -416,6 +438,38 @@ std::string Metrics::serialize() const {
         stream_last_frame_age_.snapshot(snap);
         out << serializeLabeledGaugeDouble("stream_last_frame_age_seconds",
             "Seconds since last decoded frame arrived", "stream_id", snap);
+    }
+
+    // Phase 11: GPU fault self-healing
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        gpu_oom_.snapshot(snap);
+        out << serializeCounter("gpu_oom_total",
+            "Cumulative GPU OOM events per worker", "worker_id", snap);
+    }
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        gpu_engine_fault_.snapshot(snap);
+        out << serializeCounter("gpu_engine_fault_total",
+            "Cumulative GPU engine fault events per worker", "worker_id", snap);
+    }
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        infer_worker_state_.snapshot(snap);
+        out << serializeLabeledGaugeUint("infer_worker_state",
+            "InferWorker state (0=RUNNING 1=RECOVERING 2=STOPPED)", "worker_id", snap);
+    }
+    {
+        std::unordered_map<std::string, uint64_t> snap;
+        infer_batch_size_current_.snapshot(snap);
+        out << serializeLabeledGaugeUint("infer_batch_size_current",
+            "Current degraded max batch size per worker", "worker_id", snap);
+    }
+    {
+        std::unordered_map<std::string, double> snap;
+        gpu_memory_usage_ratio_.snapshot(snap);
+        out << serializeLabeledGaugeDouble("gpu_memory_usage_ratio",
+            "GPU memory used / total (0-1)", "device", snap);
     }
 
     // SinkFfplayStage metrics

@@ -5,6 +5,7 @@
 #include "infer/IInferBackend.h"
 #include "infer/GpuBufferPool.h"
 #include <cuda_runtime_api.h>
+#include <chrono>
 #include <memory>
 #include <vector>
 #include <string>
@@ -52,17 +53,18 @@ public:
 private:
     void preprocessCPU(const Batch& input, float* dst, int batch_size,
                        int h, int w);
-    // Async GPU preprocess: launches kernel on preprocess_stream_, records event.
     void preprocessGPU(const Batch& input, PooledBuffer* slot, int batch_size);
-    // Full async inference: waits for preprocess event, runs enqueueV3 on infer_stream_.
     void inferGPU(const Batch& input, std::vector<float>& output);
+    // Throws GpuFaultException(TIMEOUT) if elapsed time since start exceeds threshold.
+    void checkInferTimeout(const std::chrono::steady_clock::time_point& start) const;
 
-    int  max_batch_size_{1};
-    int  input_h_{640};
-    int  input_w_{640};
-    int  num_classes_{80};
-    bool loaded_{false};
-    int  device_id_{0};
+    int    max_batch_size_{1};
+    int    input_h_{640};
+    int    input_w_{640};
+    int    num_classes_{80};
+    bool   loaded_{false};
+    int    device_id_{0};
+    double infer_timeout_ms_{5000.0}; // default 5s; override via ModelConfig in future
     bool input_shape_dynamic_{false};
     std::string input_tensor_name_;
     std::string output_tensor_name_;

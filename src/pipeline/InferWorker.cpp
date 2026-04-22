@@ -5,6 +5,11 @@
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
 #include <chrono>
+#include <thread>
+
+#ifdef BUILD_TRT_BACKEND
+#include <cuda_runtime_api.h>
+#endif
 
 namespace infer {
 
@@ -53,12 +58,28 @@ void InferWorker::stop() {
 }
 
 void InferWorker::enqueue(Batch batch) {
+    if (state_.load() == WorkerState::STOPPED) {
+        dropped_batches_.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
     std::unique_lock lock(mutex_);
     if (queue_.size() >= kMaxQueueSize) {
         dropped_batches_.fetch_add(1, std::memory_order_relaxed);
         return;
     }
-    queue_.push(std::move(batch));
+    queue_.push_back(std::move(batch));
+    lock.unlock();
+    cv_.notify_one();
+}
+
+void InferWorker::enqueueHead(Batch batch) {
+    std::unique_lock lock(mutex_);
+    if (queue_.size() >= kMaxQueueSize) {
+        // Even re-queue dropped under extreme pressure
+        dropped_batches_.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    queue_.push_front(std::move(batch));
     lock.unlock();
     cv_.notify_one();
 }
@@ -77,7 +98,7 @@ void InferWorker::workerLoop() {
                          [this] { return !queue_.empty() || stop_flag_.load(); });
             if (queue_.empty()) continue;
             batch = std::move(queue_.front());
-            queue_.pop();
+            queue_.pop_front();
         }
 
         if (batch.empty()) continue;
@@ -180,6 +201,20 @@ void InferWorker::workerLoop() {
                 }
             }
             processed_batches_.fetch_add(1, std::memory_order_relaxed);
+            batch_policy_.onSuccess();
+            Metrics::get().setInferBatchSizeCurrent(model_cfg_.id, batch_policy_.current_max);
+        } catch (const GpuMemoryPressureException& e) {
+            LOG_WARN("InferWorker[{}]: GPU memory pressure: {}", model_cfg_.id, e.what());
+            batch_policy_.onOOM();
+            Metrics::get().incGpuOom(model_cfg_.id);
+            Metrics::get().setInferBatchSizeCurrent(model_cfg_.id, batch_policy_.current_max);
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            enqueueHead(std::move(batch));
+        } catch (const GpuFaultException& e) {
+            LOG_ERROR("InferWorker[{}]: GPU fault ({}): {}",
+                      model_cfg_.id, static_cast<int>(e.fault_type), e.what());
+            Metrics::get().incGpuEngineFault(model_cfg_.id);
+            recoverFromFault(e.fault_type);
         } catch (const std::exception& e) {
             LOG_ERROR("InferWorker[{}]: infer failed: {}", model_cfg_.id, e.what());
         }
@@ -187,6 +222,40 @@ void InferWorker::workerLoop() {
 
     LOG_INFO("InferWorker[{}]: stopped", model_cfg_.id);
     running_.store(false);
+}
+
+void InferWorker::recoverFromFault(GpuFaultType fault) {
+    state_.store(WorkerState::RECOVERING);
+    Metrics::get().setInferWorkerState(model_cfg_.id, 1);
+    LOG_WARN("InferWorker[{}]: starting recovery (fault={})",
+             model_cfg_.id, static_cast<int>(fault));
+
+    // CONTEXT_LOST requires device reset; other faults only need engine reload.
+    if (fault == GpuFaultType::CONTEXT_LOST) {
+#ifdef BUILD_TRT_BACKEND
+        cudaDeviceReset();
+#endif
+    }
+
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        try {
+            backend_->unloadModel();
+            backend_->loadModel(model_cfg_);
+            state_.store(WorkerState::RUNNING);
+            Metrics::get().setInferWorkerState(model_cfg_.id, 0);
+            LOG_INFO("InferWorker[{}]: recovered (attempt {})", model_cfg_.id, attempt + 1);
+            return;
+        } catch (const std::exception& ex) {
+            LOG_ERROR("InferWorker[{}]: recovery attempt {} failed: {}",
+                      model_cfg_.id, attempt + 1, ex.what());
+            std::this_thread::sleep_for(std::chrono::seconds(1 << attempt)); // 1s, 2s, 4s
+        }
+    }
+
+    state_.store(WorkerState::STOPPED);
+    Metrics::get().setInferWorkerState(model_cfg_.id, 2);
+    LOG_CRITICAL("InferWorker[{}]: unrecoverable after 3 attempts — manual intervention required",
+                 model_cfg_.id);
 }
 
 } // namespace infer
