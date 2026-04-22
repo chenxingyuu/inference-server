@@ -1,4 +1,5 @@
 #include "decoder/YOLOv8Decoder.h"
+#include "common/Logger.h"
 #include <algorithm>
 
 namespace infer {
@@ -69,6 +70,9 @@ std::vector<std::vector<Detection>> YOLOv8Decoder::decode(
         results[b] = decodeSingle(data, num_anchors,
                                   conf_thresh, nms_thresh, img_w, img_h);
     }
+    int total_dets = 0;
+    for (const auto& r : results) total_dets += static_cast<int>(r.size());
+    LOG_DEBUG("YOLOv8: batch_size={} dets={}", batch_size, total_dets);
     return results;
 }
 

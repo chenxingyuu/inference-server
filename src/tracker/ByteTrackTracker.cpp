@@ -1,4 +1,5 @@
 #include "tracker/ByteTrackTracker.h"
+#include "common/Logger.h"
 
 #include <algorithm>
 #include <cmath>
@@ -236,6 +237,12 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
         std::remove_if(tracks_.begin(), tracks_.end(),
                        [](const TrackState& t) { return t.status == TrackStatus::Removed; }),
         tracks_.end());
+
+    int active = 0;
+    for (const auto& t : tracks_) {
+        if (t.confirmed && t.status != TrackStatus::Removed) ++active;
+    }
+    LOG_DEBUG("ByteTrack: input_dets={} active={}", static_cast<int>(detections.size()), active);
 }
 
 } // namespace infer

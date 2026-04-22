@@ -316,6 +316,11 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interv
 
                         Metrics::get().incFramesDecoded(stream_id_);
                         StreamHealthRegistry::get().onFrameDecoded(stream_id_, f.meta.capture_ts);
+                        if (f.meta.frame_seq % 30 == 0) {
+                            LOG_DEBUG("[{}] frame_seq={} ts={:.3f} {}x{}",
+                                      stream_id_, f.meta.frame_seq, f.meta.capture_ts,
+                                      f.meta.orig_width, f.meta.orig_height);
+                        }
                         cb(std::move(f));
                     }
                     av_frame_unref(frame);

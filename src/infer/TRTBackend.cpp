@@ -284,6 +284,7 @@ void TRTBackend::checkInferTimeout(
     const std::chrono::steady_clock::time_point& start) const {
     const auto elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - start).count();
+    LOG_DEBUG("TRTBackend: infer latency_ms={:.1f}", elapsed_ms);
     if (elapsed_ms > infer_timeout_ms_) {
         throw GpuFaultException(GpuFaultType::TIMEOUT,
             "TRTBackend: inference exceeded " +
