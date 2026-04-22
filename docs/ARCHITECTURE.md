@@ -30,6 +30,11 @@ The runtime is a **configurable in-process DAG** driven by **tasks** (each task 
 - **Heartbeat** (`inference-heartbeat` Kafka topic): per-stream and engine-level heartbeat every 5 s. Downstream can distinguish: `STREAMING`+no-frames=no targets; `RECONNECTING/DEGRADED`=camera issue; heartbeat stops=engine down.
 - **Control events** (`inference-control` Kafka topic): stream lifecycle events (`stream_dropped`, `stream_recovered`, `stream_failed_terminal`) emitted by `FFmpegDecoder`.
 - **Management API** (`GET /healthz`, `GET /tasks`): liveness probe and task-level start/stop (`POST /tasks/{id}/start|stop`).
+- **Structured logs** (spdlog, `[stream_id] state: OLD -> NEW` format):
+  - `StreamHealthRegistry` emits `INFO`/`WARN`/`ERROR` on every state transition so stream-level events are always visible at the default `info` log level.
+  - `KafkaPublisher` logs `ERROR` when the outbound queue is full and results are dropped.
+  - `ResultMerger` logs `WARN` when a cascade secondary deadline expires and an incomplete result is published.
+  - `initLogger()` configures `flush_on(error)` so ERROR-level records are flushed to disk immediately, surviving process crashes.
 
 ## Architecture Boundaries
 
