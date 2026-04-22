@@ -106,6 +106,10 @@ pipelines:
         type: "postprocess.yolo"
       - id: "track_1"
         type: "track.bytetrack"
+        with:
+          high_det_thresh: "0.4"
+          low_det_thresh: "0.1"
+          min_hits_to_confirm: "2"
       - id: "join_1"
         type: "join.byFrameId"
       - id: "sink_1"
