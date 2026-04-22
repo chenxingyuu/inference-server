@@ -96,6 +96,8 @@ void KafkaPublisher::publishLoop() {
         } else {
             const uint64_t n = published_.fetch_add(1, std::memory_order_relaxed) + 1;
             Metrics::get().incKafkaPublished();
+            LOG_DEBUG("KafkaPublisher: produced stream={} dets={} bytes={}",
+                      r.stream_id, r.detections.size(), payload.size());
             if (n % 1000 == 0) {
                 LOG_INFO("KafkaPublisher: published={} dropped={} queue={}",
                          n, dropped_.load(std::memory_order_relaxed),
