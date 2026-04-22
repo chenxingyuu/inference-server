@@ -12,6 +12,9 @@ void ArchiveRawStage::process(const EventEnvelope& input, const EmitFn& emit) {
     if (archiver_ && input.frame && !input.frame->is_gpu) {
         auto result = archiver_->submit(input.frame->meta, &input.frame->image);
         out.archive_info = ArchiveInfo{result.local_path, result.frame_url, result.upload_state};
+    } else {
+        // GPU frames or no archiver: set disabled so JoinByFrameStage is not blocked.
+        out.archive_info = ArchiveInfo{"", "", "disabled"};
     }
     emit(out);
 }
