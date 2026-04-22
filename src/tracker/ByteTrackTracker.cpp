@@ -126,6 +126,11 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
             low_det_idxs.push_back(i);
         }
     }
+    LOG_DEBUG("ByteTrack: dets={} high={} low={} tracks_before={}",
+              static_cast<int>(detections.size()),
+              static_cast<int>(high_det_idxs.size()),
+              static_cast<int>(low_det_idxs.size()),
+              static_cast<int>(tracks_.size()));
 
     std::vector<TrackState*> candidate_tracks;
     candidate_tracks.reserve(tracks_.size());
@@ -146,6 +151,7 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
     }
 
     const auto high_matches = linearAssign(candidate_tracks, high_det_idxs, detections, cfg_.match_iou_thresh);
+    LOG_DEBUG("ByteTrack: high_match={}/{}", static_cast<int>(high_matches.size()), static_cast<int>(high_det_idxs.size()));
     std::unordered_set<int> matched_candidate_track_idxs;
     std::unordered_set<int> matched_high_det_list_idxs;
     for (const auto& [ti, di] : high_matches) {
@@ -161,6 +167,7 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
         track.status = TrackStatus::Tracked;
         if (!track.confirmed && track.hits >= cfg_.min_hits_to_confirm) {
             track.confirmed = true;
+            LOG_DEBUG("ByteTrack: track {} confirmed after {} hits", track.id, track.hits);
         }
         if (track.confirmed) {
             det.track_id = track.id;
@@ -177,6 +184,7 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
         }
     }
     const auto low_matches = linearAssign(unmatched_after_high, low_det_idxs, detections, cfg_.match_iou_thresh);
+    LOG_DEBUG("ByteTrack: low_match={}/{}", static_cast<int>(low_matches.size()), static_cast<int>(low_det_idxs.size()));
     std::unordered_set<TrackState*> matched_tracks;
     for (const auto& [ti, _] : high_matches) {
         matched_tracks.insert(candidate_tracks[ti]);
@@ -194,6 +202,7 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
         track.status = TrackStatus::Tracked;
         if (!track.confirmed && track.hits >= cfg_.min_hits_to_confirm) {
             track.confirmed = true;
+            LOG_DEBUG("ByteTrack: track {} confirmed (low-det match) after {} hits", track.id, track.hits);
         }
         if (track.confirmed) {
             det.track_id = track.id;
@@ -201,6 +210,8 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
         matched_tracks.insert(&track);
     }
 
+    int newly_lost = 0;
+    int newly_removed = 0;
     for (auto& track : tracks_) {
         if (track.status == TrackStatus::Removed) {
             continue;
@@ -210,8 +221,12 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
         }
         if (track.lost > cfg_.max_lost_frames) {
             track.status = TrackStatus::Removed;
+            ++newly_removed;
+            LOG_DEBUG("ByteTrack: track {} removed (lost={} > max={})",
+                      track.id, track.lost, cfg_.max_lost_frames);
         } else {
             track.status = TrackStatus::Lost;
+            ++newly_lost;
         }
     }
 
@@ -230,6 +245,7 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
         if (t.confirmed) {
             detections[high_det_idxs[i]].track_id = t.id;
         }
+        LOG_DEBUG("ByteTrack: new track {} conf={}", t.id, t.confirmed);
         tracks_.push_back(t);
     }
 
@@ -242,7 +258,8 @@ void ByteTrackTracker::update(uint64_t /*frame_seq*/, std::vector<Detection>& de
     for (const auto& t : tracks_) {
         if (t.confirmed && t.status != TrackStatus::Removed) ++active;
     }
-    LOG_DEBUG("ByteTrack: input_dets={} active={}", static_cast<int>(detections.size()), active);
+    LOG_DEBUG("ByteTrack: summary active={} lost={} removed={} total_tracks={}",
+              active, newly_lost, newly_removed, static_cast<int>(tracks_.size()));
 }
 
 } // namespace infer

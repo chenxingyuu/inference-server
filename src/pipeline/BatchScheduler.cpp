@@ -44,6 +44,12 @@ void BatchScheduler::scheduleLoop() {
     }
     const int max_bs = preferred.front();   // hard upper bound
     const int delay_us = model_cfg_.max_queue_delay_us;
+    {
+        std::string pref_str;
+        for (int p : preferred) pref_str += std::to_string(p) + " ";
+        LOG_DEBUG("BatchScheduler[{}]: preferred_sizes=[{}] max_bs={} delay_us={}",
+                  model_cfg_.id, pref_str, max_bs, delay_us);
+    }
 
     Batch batch;
     batch.frames.reserve(max_bs);
@@ -105,8 +111,9 @@ void BatchScheduler::scheduleLoop() {
         }
 
         if (should_flush) {
-            LOG_DEBUG("BatchScheduler[{}]: flush batch_size={} trigger={}",
-                      model_cfg_.id, batch.size(), timeout ? "timeout" : "full");
+            LOG_DEBUG("BatchScheduler[{}]: flush batch_size={} trigger={} active_streams={}",
+                      model_cfg_.id, batch.size(), timeout ? "timeout" : "full",
+                      pool_.activeStreams().size());
             callback_(std::move(batch));
             batch.frames.clear();
             batch.gpu_frames.clear();

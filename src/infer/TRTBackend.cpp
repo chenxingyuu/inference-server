@@ -88,12 +88,15 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
     if (output_tensor_name_.empty()) {
         throw std::runtime_error("TRTBackend: unable to resolve output tensor name");
     }
+    LOG_DEBUG("TRTBackend: tensors resolved input={} output={}",
+              input_tensor_name_, output_tensor_name_);
     const nvinfer1::Dims in_dims = engine_->getTensorShape(input_tensor_name_.c_str());
     if (in_dims.nbDims <= 0) {
         throw std::runtime_error(
             "TRTBackend: input tensor not found in engine: " + input_tensor_name_);
     }
     input_shape_dynamic_ = hasDynamicDims(in_dims.nbDims, in_dims.d);
+    LOG_DEBUG("TRTBackend: input shape dynamic={} nbDims={}", input_shape_dynamic_, in_dims.nbDims);
 
     // Pre-compute buffer sizes
     input_bytes_  = max_batch_size_ * 3 * input_h_ * input_w_ * sizeof(float);
@@ -119,8 +122,8 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
                                         cudaEventDisableTiming));
 
     loaded_ = true;
-    LOG_INFO("TRTBackend: loaded engine {} (batch={}, pool={})",
-             cfg.engine_path, max_batch_size_, pool_size);
+    LOG_INFO("TRTBackend: loaded engine={} device={} batch={} input={}x{}x{}x{} pool={}",
+             cfg.engine_path, device_id_, max_batch_size_, max_batch_size_, 3, input_h_, input_w_, pool_size);
 }
 
 void TRTBackend::preprocessCPU(const Batch& input, float* dst,
@@ -240,13 +243,18 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
     const auto infer_start = std::chrono::steady_clock::now();
 
     if (input.is_gpu) {
+        LOG_DEBUG("TRTBackend: GPU infer start bs={}", bs);
         inferGPU(input, output);
         checkInferTimeout(infer_start);
         return;
     }
 
     // CPU path: host preprocessing → H2D → inference → D2H (synchronous)
+    auto pre_start = std::chrono::steady_clock::now();
     preprocessCPU(input, input_staging_.data(), bs, input_h_, input_w_);
+    const double pre_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - pre_start).count();
+    LOG_DEBUG("TRTBackend: CPU preprocess bs={} pre_ms={:.1f}", bs, pre_ms);
 
     PooledBuffer* slot = buffer_pool_.acquire();
     if (!slot) {
@@ -294,6 +302,7 @@ void TRTBackend::checkInferTimeout(
 
 void TRTBackend::unloadModel() {
     if (!loaded_) return;
+    LOG_INFO("TRTBackend: unloading model (device={})", device_id_);
     cudaSetDevice(device_id_);
     if (preprocess_done_)   { cudaEventDestroy(preprocess_done_);   preprocess_done_   = nullptr; }
     if (preprocess_stream_) { cudaStreamDestroy(preprocess_stream_); preprocess_stream_ = nullptr; }
