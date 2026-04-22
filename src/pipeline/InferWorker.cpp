@@ -9,6 +9,7 @@
 
 #ifdef BUILD_TRT_BACKEND
 #include <cuda_runtime_api.h>
+#include <opencv2/imgproc.hpp>
 #endif
 
 namespace infer {
@@ -18,6 +19,23 @@ double nowEpoch() {
     using namespace std::chrono;
     return duration<double>(system_clock::now().time_since_epoch()).count();
 }
+
+#ifdef BUILD_TRT_BACKEND
+// Download NV12 GPU buffer to host and convert to BGR cv::Mat for archiving.
+cv::Mat nv12GpuToBgr(const GpuBuffer& gb) {
+    if (!gb.y_data || gb.width <= 0 || gb.height <= 0) return {};
+    const int w = gb.width;
+    const int h = gb.height;
+    const size_t y_bytes  = static_cast<size_t>(w) * h;
+    const size_t uv_bytes = static_cast<size_t>(w) * (h / 2);
+    cv::Mat nv12(h + h / 2, w, CV_8UC1);
+    cudaMemcpy(nv12.data,             gb.y_data,  y_bytes,  cudaMemcpyDeviceToHost);
+    cudaMemcpy(nv12.data + y_bytes,   gb.uv_data, uv_bytes, cudaMemcpyDeviceToHost);
+    cv::Mat bgr;
+    cv::cvtColor(nv12, bgr, cv::COLOR_YUV2BGR_NV12);
+    return bgr;
+}
+#endif
 } // namespace
 
 InferWorker::InferWorker(const ModelConfig&            model_cfg,
@@ -169,10 +187,19 @@ void InferWorker::workerLoop() {
                     ? (i < static_cast<int>(batch.gpu_frames.size()) ? batch.gpu_frames[i].height : 0)
                     : (i < static_cast<int>(batch.frames.size()) ? batch.frames[i].rows : 0);
                 mapDetectionsFromModelToFrame(r.detections, fw, fh, shape);
-                if (frame_archiver_ && !batch.is_gpu && i < static_cast<int>(batch.frames.size())) {
-                    const auto ar = frame_archiver_->submit(batch.metas[i], &batch.frames[i]);
-                    r.frame_local_path  = ar.local_path;
-                    r.frame_url         = ar.frame_url;
+                if (frame_archiver_) {
+                    FrameArchiveResult ar;
+                    if (!batch.is_gpu && i < static_cast<int>(batch.frames.size())) {
+                        ar = frame_archiver_->submit(batch.metas[i], &batch.frames[i]);
+                    }
+#ifdef BUILD_TRT_BACKEND
+                    else if (batch.is_gpu && i < static_cast<int>(batch.gpu_frames.size())) {
+                        cv::Mat bgr = nv12GpuToBgr(batch.gpu_frames[i]);
+                        ar = frame_archiver_->submit(batch.metas[i], bgr.empty() ? nullptr : &bgr);
+                    }
+#endif
+                    r.frame_local_path   = ar.local_path;
+                    r.frame_url          = ar.frame_url;
                     r.frame_upload_state = ar.upload_state;
                     LOG_DEBUG("InferWorker[{}]: archive stream={} state={} path={}",
                               model_cfg_.id, r.stream_id, ar.upload_state,
