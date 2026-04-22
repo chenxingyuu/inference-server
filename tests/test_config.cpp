@@ -112,6 +112,7 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cfg.server.max_streams,         10);
     EXPECT_EQ(cfg.server.management_port,     9090);
     EXPECT_EQ(cfg.server.ffmpeg_log_level,    "fatal");
+    EXPECT_EQ(cfg.server.log_level,           "debug");
 
     // models
     ASSERT_EQ(cfg.models.size(), 2u);
@@ -193,6 +194,38 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cfg.frame_archive.minio.connect_timeout_ms, 1200);
     EXPECT_EQ(cfg.frame_archive.minio.request_timeout_ms, 2800);
     EXPECT_EQ(cfg.frame_archive.minio.max_retries, 3);
+}
+
+TEST(LoadConfig, LogLevelDefaultsToInfo) {
+    const std::string path = "data/test_log_level_default.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+    }
+    AppConfig cfg = loadConfig(path);
+    EXPECT_EQ(cfg.server.log_level, "info");
+    std::remove(path.c_str());
 }
 
 TEST(LoadConfig, MissingFileThrows) {

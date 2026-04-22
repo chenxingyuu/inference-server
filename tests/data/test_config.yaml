@@ -3,6 +3,7 @@ server:
   max_streams: 10
   management_port: 9090
   ffmpeg_log_level: fatal
+  log_level: debug
 
 models:
   - id: yolo_det
