@@ -9,7 +9,7 @@ The runtime is a **configurable in-process DAG** driven by **tasks** (each task 
 1. Source ingest (`source.rtsp` using `FFmpegDecoder`; optional HW decode via NVDEC).
 2. Fan-out to parallel branches (e.g. `archive.raw` and inference path).
 3. Optional frame archiving (`archive.raw` via `FrameArchiver` → local JPEG + MinIO).
-4. Inference (`infer.engine` using `TRTBackend` / `AscendBackend` / `OnnxBackend`) with per-edge backpressure.
+4. Inference (`infer.engine` → `InferEngineStage` using `TRTBackend` / `AscendBackend` / `OnnxBackend`) with per-edge backpressure. `InferEngineStage` accumulates frames into a batch and flushes when the batch is full **or** a background deadline timer fires (`max_queue_delay_us / 2` poll interval), ensuring low-fps streams are not stalled waiting for the next frame.
 5. YOLO decode (`IYOLODecoder` / `ClassifierDecoder`) and optional tracking (`track.bytetrack`).
 6. Optional join/merge (`join.byFrameId`) to enrich inference results with archive metadata.
 7. Optional draw + output: restream via ffmpeg pipe (`sink.stream` → RTSP/RTMP), or local preview via `ffplay` stdin (`sink.ffplay`, raw BGR).
