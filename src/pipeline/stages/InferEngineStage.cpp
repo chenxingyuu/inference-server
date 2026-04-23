@@ -32,7 +32,8 @@ InferEngineStage::InferEngineStage(std::string id,
     , model_cfg_(std::move(model_cfg))
     , backend_(std::move(backend))
     , decoder_(std::move(decoder)) {
-    batch_deadline_ = std::chrono::steady_clock::now() + std::chrono::microseconds(model_cfg_.max_queue_delay_us);
+    batch_deadline_ = std::chrono::steady_clock::now() +
+                      std::chrono::microseconds(model_cfg_.max_queue_delay_us);
     max_pending_ = std::max(2, model_cfg_.batch_size) * 2;
 }
 
@@ -47,18 +48,29 @@ void InferEngineStage::stop() {
     flush_stop_.store(true);
     flush_cv_.notify_all();
     if (flush_thread_.joinable()) flush_thread_.join();
-
     if (loaded_) {
         backend_->unloadModel();
         loaded_ = false;
     }
 }
 
-// Called with pending_mutex_ held. Runs inference on the first flush_count pending events,
-// emits results, erases them from pending_events_, and resets batch_deadline_.
-void InferEngineStage::doFlush(int flush_count, const EmitFn& emit) {
-    if (flush_count <= 0 || pending_events_.empty()) return;
+// Called with pending_mutex_ held. Pops frames and resets deadline; returns the batch.
+std::vector<EventEnvelope> InferEngineStage::extractBatch(int flush_count) {
     flush_count = std::min(flush_count, static_cast<int>(pending_events_.size()));
+    std::vector<EventEnvelope> out(pending_events_.begin(), pending_events_.begin() + flush_count);
+    pending_events_.erase(pending_events_.begin(), pending_events_.begin() + flush_count);
+    batch_deadline_ = std::chrono::steady_clock::now() +
+                      std::chrono::microseconds(model_cfg_.max_queue_delay_us);
+    return out;
+}
+
+// Runs TRT inference + decode + emit. Called WITHOUT pending_mutex_ held.
+// Serialized by infer_mutex_ so GPU is never called concurrently from two threads.
+void InferEngineStage::inferAndEmit(std::vector<EventEnvelope> events, const EmitFn& emit) {
+    if (events.empty()) return;
+    std::lock_guard infer_lock(infer_mutex_);
+
+    const int flush_count = static_cast<int>(events.size());
 
     try {
         if (!loaded_) {
@@ -67,9 +79,8 @@ void InferEngineStage::doFlush(int flush_count, const EmitFn& emit) {
         }
 
         Batch batch;
-        batch.is_gpu = pending_events_.front().frame->is_gpu;
-        for (int i = 0; i < flush_count; ++i) {
-            const auto& ev = pending_events_[i];
+        batch.is_gpu = events.front().frame->is_gpu;
+        for (const auto& ev : events) {
             batch.metas.push_back(ev.frame->meta);
             if (batch.is_gpu) batch.gpu_frames.push_back(ev.frame->gpu_buf);
             else batch.frames.push_back(ev.frame->image);
@@ -79,20 +90,20 @@ void InferEngineStage::doFlush(int flush_count, const EmitFn& emit) {
         const auto infer_start = std::chrono::steady_clock::now();
         backend_->infer(batch, output);
         const auto infer_end_tp = std::chrono::steady_clock::now();
-        const double infer_ms = std::chrono::duration<double, std::milli>(infer_end_tp - infer_start).count();
+        const double infer_ms = std::chrono::duration<double, std::milli>(
+            infer_end_tp - infer_start).count();
 
         Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
         Metrics::get().recordInferBatchSize(model_cfg_.id, batch.size());
         Metrics::get().incInferBatches(model_cfg_.id);
 
-        const uint64_t batch_start_mono_ns = static_cast<uint64_t>(
+        const uint64_t batch_start_ns = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 infer_start.time_since_epoch()).count());
         for (int i = 0; i < flush_count; ++i) {
-            const uint64_t cap_ns = pending_events_[i].frame->meta.capture_mono_ns;
-            if (cap_ns != 0 && batch_start_mono_ns >= cap_ns) {
-                Metrics::get().recordInferQueueLatency(model_cfg_.id, nsToMs(batch_start_mono_ns - cap_ns));
-            }
+            const uint64_t cap_ns = events[i].frame->meta.capture_mono_ns;
+            if (cap_ns != 0 && batch_start_ns >= cap_ns)
+                Metrics::get().recordInferQueueLatency(model_cfg_.id, nsToMs(batch_start_ns - cap_ns));
         }
 
         const auto decode_start = std::chrono::steady_clock::now();
@@ -101,156 +112,137 @@ void InferEngineStage::doFlush(int flush_count, const EmitFn& emit) {
         const double decode_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - decode_start).count();
 
-        const uint64_t infer_finish_mono_ns = nowSteadyNs();
+        const uint64_t finish_ns = nowSteadyNs();
         const double infer_ts = nowEpoch();
         for (int i = 0; i < batch.size(); ++i) {
-            EventEnvelope out = pending_events_[i];
-            InferResult result;
-            result.stream_id = out.stream_id;
-            result.frame_seq = out.frame_seq;
-            result.frame_ts = out.frame->meta.capture_ts;
-            result.frame_mono_ns = out.frame->meta.capture_mono_ns;
-            result.infer_ts = infer_ts;
-            result.infer_ms = infer_ms;
-            result.decode_ms = decode_ms;
-            if (result.frame_mono_ns != 0) {
-                result.queue_latency_ms = batch_start_mono_ns >= result.frame_mono_ns
-                    ? nsToMs(batch_start_mono_ns - result.frame_mono_ns) : 0.0;
-                result.latency_ms = infer_finish_mono_ns >= result.frame_mono_ns
-                    ? nsToMs(infer_finish_mono_ns - result.frame_mono_ns) : 0.0;
+            EventEnvelope out = events[i];
+            InferResult r;
+            r.stream_id     = out.stream_id;
+            r.frame_seq     = out.frame_seq;
+            r.frame_ts      = out.frame->meta.capture_ts;
+            r.frame_mono_ns = out.frame->meta.capture_mono_ns;
+            r.infer_ts      = infer_ts;
+            r.infer_ms      = infer_ms;
+            r.decode_ms     = decode_ms;
+            r.model_id      = model_cfg_.id;
+            if (r.frame_mono_ns != 0) {
+                r.queue_latency_ms = batch_start_ns >= r.frame_mono_ns
+                    ? nsToMs(batch_start_ns - r.frame_mono_ns) : 0.0;
+                r.latency_ms = finish_ns >= r.frame_mono_ns
+                    ? nsToMs(finish_ns - r.frame_mono_ns) : 0.0;
             } else {
-                result.latency_ms = (infer_ts - result.frame_ts) * 1000.0;
-                result.queue_latency_ms = 0.0;
+                r.latency_ms = (infer_ts - r.frame_ts) * 1000.0;
             }
-            result.model_id = model_cfg_.id;
             if (i < static_cast<int>(decoded.size())) {
-                result.detections = std::move(decoded[i]);
+                r.detections = std::move(decoded[i]);
                 const int fw = batch.is_gpu
                     ? (i < static_cast<int>(batch.gpu_frames.size()) ? batch.gpu_frames[i].width : 0)
                     : (i < static_cast<int>(batch.frames.size()) ? batch.frames[i].cols : 0);
                 const int fh = batch.is_gpu
                     ? (i < static_cast<int>(batch.gpu_frames.size()) ? batch.gpu_frames[i].height : 0)
                     : (i < static_cast<int>(batch.frames.size()) ? batch.frames[i].rows : 0);
-                mapDetectionsFromModelToFrame(result.detections, fw, fh, model_cfg_.input_shape);
-
-                for (auto& d : result.detections) {
-                    if (d.class_id >= 0 && d.class_id < static_cast<int>(model_cfg_.class_names.size())) {
+                mapDetectionsFromModelToFrame(r.detections, fw, fh, model_cfg_.input_shape);
+                for (auto& d : r.detections) {
+                    if (d.class_id >= 0 && d.class_id < static_cast<int>(model_cfg_.class_names.size()))
                         d.class_name = model_cfg_.class_names[d.class_id];
-                    }
                 }
             }
-            if (result.latency_ms > 0) {
-                Metrics::get().recordE2eLatency(result.stream_id, result.latency_ms);
-            }
-            out.infer_result = std::move(result);
-            emit(out);
+            if (r.latency_ms > 0) Metrics::get().recordE2eLatency(r.stream_id, r.latency_ms);
+            out.infer_result = std::move(r);
+            emit(out);  // may block on downstream EdgeQueue — pending_mutex_ NOT held
         }
     } catch (const std::exception& e) {
         const std::string err = e.what();
         if (err.find("invalid dimensions") != std::string::npos && flush_count > 1) {
-            LOG_WARN("InferEngineStage[{}]: batch inference failed with dimension mismatch, fallback to bs=1",
-                     id_);
+            LOG_WARN("InferEngineStage[{}]: dimension mismatch, fallback to bs=1", id_);
             fallback_to_single_infer_ = true;
             for (int i = 0; i < flush_count; ++i) {
                 try {
                     Batch one;
-                    one.is_gpu = pending_events_[i].frame->is_gpu;
-                    one.metas.push_back(pending_events_[i].frame->meta);
-                    if (one.is_gpu) one.gpu_frames.push_back(pending_events_[i].frame->gpu_buf);
-                    else one.frames.push_back(pending_events_[i].frame->image);
+                    one.is_gpu = events[i].frame->is_gpu;
+                    one.metas.push_back(events[i].frame->meta);
+                    if (one.is_gpu) one.gpu_frames.push_back(events[i].frame->gpu_buf);
+                    else one.frames.push_back(events[i].frame->image);
 
-                    std::vector<float> output;
-                    const auto infer_start = std::chrono::steady_clock::now();
-                    backend_->infer(one, output);
-                    const auto infer_end_tp = std::chrono::steady_clock::now();
-                    const double infer_ms = std::chrono::duration<double, std::milli>(infer_end_tp - infer_start).count();
-
-                    Metrics::get().recordInferLatency(model_cfg_.id, infer_ms);
+                    std::vector<float> out_buf;
+                    const auto t0 = std::chrono::steady_clock::now();
+                    backend_->infer(one, out_buf);
+                    const auto t1 = std::chrono::steady_clock::now();
+                    const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+                    Metrics::get().recordInferLatency(model_cfg_.id, ms);
                     Metrics::get().recordInferBatchSize(model_cfg_.id, 1);
                     Metrics::get().incInferBatches(model_cfg_.id);
                     {
-                        const uint64_t bs_mono_ns = static_cast<uint64_t>(
+                        const uint64_t bs_ns = static_cast<uint64_t>(
                             std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                infer_start.time_since_epoch()).count());
-                        const uint64_t cap_ns = pending_events_[i].frame->meta.capture_mono_ns;
-                        if (cap_ns != 0 && bs_mono_ns >= cap_ns) {
-                            Metrics::get().recordInferQueueLatency(model_cfg_.id, nsToMs(bs_mono_ns - cap_ns));
+                                t0.time_since_epoch()).count());
+                        const uint64_t cap_ns = events[i].frame->meta.capture_mono_ns;
+                        if (cap_ns != 0 && bs_ns >= cap_ns)
+                            Metrics::get().recordInferQueueLatency(model_cfg_.id, nsToMs(bs_ns - cap_ns));
+                    }
+                    auto dec = decoder_->decode(out_buf.data(), 1, model_cfg_.input_shape,
+                                                model_cfg_.conf_thresh, model_cfg_.nms_thresh);
+                    const double dec_ms = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - t1).count();
+
+                    EventEnvelope ev_out = events[i];
+                    InferResult r;
+                    r.stream_id = ev_out.stream_id; r.frame_seq = ev_out.frame_seq;
+                    r.frame_ts = ev_out.frame->meta.capture_ts;
+                    r.frame_mono_ns = ev_out.frame->meta.capture_mono_ns;
+                    r.infer_ts = nowEpoch(); r.infer_ms = ms; r.decode_ms = dec_ms;
+                    r.model_id = model_cfg_.id;
+                    {
+                        const uint64_t bs_ns = static_cast<uint64_t>(
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                t0.time_since_epoch()).count());
+                        const uint64_t fin = nowSteadyNs();
+                        if (r.frame_mono_ns != 0) {
+                            r.queue_latency_ms = bs_ns >= r.frame_mono_ns
+                                ? nsToMs(bs_ns - r.frame_mono_ns) : 0.0;
+                            r.latency_ms = fin >= r.frame_mono_ns
+                                ? nsToMs(fin - r.frame_mono_ns) : 0.0;
+                        } else {
+                            r.latency_ms = (r.infer_ts - r.frame_ts) * 1000.0;
                         }
                     }
-
-                    const auto decode_start = std::chrono::steady_clock::now();
-                    auto decoded = decoder_->decode(output.data(), 1, model_cfg_.input_shape,
-                                                    model_cfg_.conf_thresh, model_cfg_.nms_thresh);
-                    const double decode_ms = std::chrono::duration<double, std::milli>(
-                        std::chrono::steady_clock::now() - decode_start).count();
-
-                    EventEnvelope out = pending_events_[i];
-                    InferResult result;
-                    result.stream_id = out.stream_id;
-                    result.frame_seq = out.frame_seq;
-                    result.frame_ts = out.frame->meta.capture_ts;
-                    result.frame_mono_ns = out.frame->meta.capture_mono_ns;
-                    result.infer_ts = nowEpoch();
-                    result.infer_ms = infer_ms;
-                    result.decode_ms = decode_ms;
-                    if (result.frame_mono_ns != 0) {
-                        const uint64_t bs_mono_ns = static_cast<uint64_t>(
-                            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                infer_start.time_since_epoch()).count());
-                        const uint64_t finish_mono_ns = nowSteadyNs();
-                        result.queue_latency_ms = bs_mono_ns >= result.frame_mono_ns
-                            ? nsToMs(bs_mono_ns - result.frame_mono_ns) : 0.0;
-                        result.latency_ms = finish_mono_ns >= result.frame_mono_ns
-                            ? nsToMs(finish_mono_ns - result.frame_mono_ns) : 0.0;
-                    } else {
-                        result.latency_ms = (result.infer_ts - result.frame_ts) * 1000.0;
-                        result.queue_latency_ms = 0.0;
-                    }
-                    result.model_id = model_cfg_.id;
-                    if (!decoded.empty()) {
-                        result.detections = std::move(decoded[0]);
+                    if (!dec.empty()) {
+                        r.detections = std::move(dec[0]);
                         const int fw = one.is_gpu
                             ? (!one.gpu_frames.empty() ? one.gpu_frames[0].width : 0)
                             : (!one.frames.empty() ? one.frames[0].cols : 0);
                         const int fh = one.is_gpu
                             ? (!one.gpu_frames.empty() ? one.gpu_frames[0].height : 0)
                             : (!one.frames.empty() ? one.frames[0].rows : 0);
-                        mapDetectionsFromModelToFrame(result.detections, fw, fh, model_cfg_.input_shape);
-
-                        for (auto& d : result.detections) {
-                            if (d.class_id >= 0 && d.class_id < static_cast<int>(model_cfg_.class_names.size())) {
+                        mapDetectionsFromModelToFrame(r.detections, fw, fh, model_cfg_.input_shape);
+                        for (auto& d : r.detections) {
+                            if (d.class_id >= 0 && d.class_id < static_cast<int>(model_cfg_.class_names.size()))
                                 d.class_name = model_cfg_.class_names[d.class_id];
-                            }
                         }
                     }
-                    if (result.latency_ms > 0) {
-                        Metrics::get().recordE2eLatency(result.stream_id, result.latency_ms);
-                    }
-                    out.infer_result = std::move(result);
-                    emit(out);
+                    if (r.latency_ms > 0) Metrics::get().recordE2eLatency(r.stream_id, r.latency_ms);
+                    ev_out.infer_result = std::move(r);
+                    emit(ev_out);
                 } catch (const std::exception& one_e) {
                     LOG_ERROR("InferEngineStage[{}]: fallback bs=1 failed: {}", id_, one_e.what());
                 }
             }
         } else {
             LOG_ERROR("InferEngineStage[{}]: inference failed: {}", id_, err);
-            for (int i = 0; i < flush_count; ++i) {
-                emit(pending_events_[i]);
-            }
+            for (int i = 0; i < flush_count; ++i) emit(events[i]);
         }
     }
-
-    pending_events_.erase(pending_events_.begin(), pending_events_.begin() + flush_count);
-    batch_deadline_ = std::chrono::steady_clock::now() + std::chrono::microseconds(model_cfg_.max_queue_delay_us);
 }
 
-// Background thread: fires every max_queue_delay_us/2 and flushes if deadline has passed.
-// This ensures low-fps streams are not stuck waiting for the next frame to trigger the check.
+// Background timer: wakes every max_queue_delay_us/2, extracts frames under lock,
+// then calls inferAndEmit WITHOUT the lock so downstream backpressure can't stall the queue.
 void InferEngineStage::flushLoop() {
     const auto half_delay = std::chrono::microseconds(
         std::max(1000, model_cfg_.max_queue_delay_us / 2));
 
     while (!flush_stop_.load()) {
+        std::vector<EventEnvelope> to_flush;
+        EmitFn emit_copy;
         {
             std::unique_lock lock(pending_mutex_);
             flush_cv_.wait_for(lock, half_delay, [this] { return flush_stop_.load(); });
@@ -262,39 +254,49 @@ void InferEngineStage::flushLoop() {
                 const int effective_bs = fallback_to_single_infer_
                     ? 1
                     : std::max(1, std::min(model_cfg_.batch_size, backend_->maxBatchSize()));
-                const int flush_count = std::min(static_cast<int>(pending_events_.size()), effective_bs);
-                LOG_DEBUG("InferEngineStage[{}]: deadline flush pending={} bs={}",
-                          id_, pending_events_.size(), flush_count);
-                doFlush(flush_count, last_emit_);
+                const int fc = std::min(static_cast<int>(pending_events_.size()), effective_bs);
+                to_flush = extractBatch(fc);  // pops frames, resets deadline
+                emit_copy = last_emit_;
             }
+        }  // pending_mutex_ released before heavy work
+
+        if (!to_flush.empty() && emit_copy) {
+            LOG_DEBUG("InferEngineStage[{}]: deadline flush bs={}", id_, to_flush.size());
+            inferAndEmit(std::move(to_flush), emit_copy);
         }
     }
 }
 
 void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
-    std::unique_lock lock(pending_mutex_);
+    std::vector<EventEnvelope> to_flush;
+    {
+        std::unique_lock lock(pending_mutex_);
 
-    if (input.frame) {
-        if (static_cast<int>(pending_events_.size()) >= max_pending_) {
-            LOG_WARN("InferEngineStage[{}]: pending queue full ({} frames), dropping oldest", id_, max_pending_);
-            pending_events_.erase(pending_events_.begin());
+        if (input.frame) {
+            if (static_cast<int>(pending_events_.size()) >= max_pending_) {
+                LOG_WARN("InferEngineStage[{}]: pending full, dropping oldest", id_);
+                pending_events_.erase(pending_events_.begin());
+            }
+            pending_events_.push_back(input);
         }
-        pending_events_.push_back(input);
+        last_emit_ = emit;
+
+        if (!pending_events_.empty()) {
+            const int effective_bs = fallback_to_single_infer_
+                ? 1
+                : std::max(1, std::min(model_cfg_.batch_size, backend_->maxBatchSize()));
+            const bool hit_batch    = static_cast<int>(pending_events_.size()) >= effective_bs;
+            const bool hit_deadline = std::chrono::steady_clock::now() >= batch_deadline_;
+            if (hit_batch || hit_deadline) {
+                const int fc = std::min(static_cast<int>(pending_events_.size()), effective_bs);
+                to_flush = extractBatch(fc);  // pops frames, resets deadline
+            }
+        }
+    }  // pending_mutex_ released before heavy work
+
+    if (!to_flush.empty()) {
+        inferAndEmit(std::move(to_flush), emit);
     }
-
-    last_emit_ = emit;
-
-    if (pending_events_.empty()) return;
-
-    const int effective_batch_size = fallback_to_single_infer_
-        ? 1
-        : std::max(1, std::min(model_cfg_.batch_size, backend_->maxBatchSize()));
-    const bool hit_batch = static_cast<int>(pending_events_.size()) >= effective_batch_size;
-    const bool hit_deadline = std::chrono::steady_clock::now() >= batch_deadline_;
-    if (!hit_batch && !hit_deadline) return;
-
-    const int flush_count = std::min(static_cast<int>(pending_events_.size()), effective_batch_size);
-    doFlush(flush_count, emit);
 }
 
 } // namespace infer

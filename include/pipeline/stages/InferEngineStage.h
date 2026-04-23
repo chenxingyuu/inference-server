@@ -29,9 +29,17 @@ public:
     void process(const EventEnvelope& input, const EmitFn& emit) override;
 
 private:
-    // Runs inference on pending_events_[0..flush_count). Called with pending_mutex_ held.
-    void doFlush(int flush_count, const EmitFn& emit);
-    // Background thread: flushes pending batch when deadline expires between frame arrivals.
+    // Under pending_mutex_: pop up to flush_count frames and reset deadline.
+    // Returns the extracted frames; caller must NOT hold pending_mutex_ afterwards
+    // when calling inferAndEmit().
+    std::vector<EventEnvelope> extractBatch(int flush_count);
+
+    // Run TRT inference + decode + emit on an already-extracted batch.
+    // Must NOT be called with pending_mutex_ held (emit can block on downstream queues).
+    // Serialized internally by infer_mutex_ to prevent concurrent GPU calls.
+    void inferAndEmit(std::vector<EventEnvelope> events, const EmitFn& emit);
+
+    // Background thread: fires every max_queue_delay_us/2 to flush stale frames.
     void flushLoop();
 
     std::string id_;
@@ -39,10 +47,11 @@ private:
     std::unique_ptr<IInferBackend> backend_;
     std::unique_ptr<IYOLODecoder> decoder_;
 
-    std::mutex pending_mutex_;
+    std::mutex pending_mutex_;              // guards pending_events_, batch_deadline_, last_emit_
+    std::mutex infer_mutex_;               // serializes GPU inference between process() and flushLoop()
     std::vector<EventEnvelope> pending_events_;
     std::chrono::steady_clock::time_point batch_deadline_;
-    EmitFn last_emit_;          // updated each process() call; used by flush thread
+    EmitFn last_emit_;
 
     std::thread flush_thread_;
     std::atomic<bool> flush_stop_{false};
