@@ -20,6 +20,7 @@ struct ServerConfig {
 // Model type: detector outputs bounding boxes; classifier outputs class probabilities.
 enum class ModelType { Detector, Classifier };
 enum class TrackerType { None, ByteTrack, DeepSort };
+enum class SamplingMode { FrameCount, TimeBased };
 
 struct ByteTrackConfig {
     float high_det_thresh{0.5f};
@@ -73,8 +74,9 @@ struct StreamConfig {
     std::string id;
     std::string url;
     std::string model_id;
-    int         sample_fps{5};
-    int         reconnect_delay_ms{3000};
+    int          sample_fps{5};
+    SamplingMode sampling_mode{SamplingMode::FrameCount};
+    int          reconnect_delay_ms{3000};
     int         max_reconnect_delay_ms{60000};  // Phase 10: exponential backoff ceiling
     int         degraded_threshold{5};           // consecutive failures before DEGRADED
     int         max_reconnect_attempts{5};       // consecutive failures before FAILED (terminal)
@@ -123,8 +125,9 @@ struct TaskConfig {
     std::string id;
     std::string source_id;
     std::string pipeline_id;
-    int         sample_fps{5};
-    bool        use_hwdec{false};
+    int          sample_fps{5};
+    SamplingMode sampling_mode{SamplingMode::FrameCount};
+    bool         use_hwdec{false};
 };
 
 struct KafkaConfig {
@@ -216,6 +219,9 @@ DeviceType parseDeviceType(const std::string& s);
 
 // Convert string → TrackerType
 TrackerType parseTrackerType(const std::string& s);
+
+// Convert string → SamplingMode ("frame_count" | "time_based")
+SamplingMode parseSamplingMode(const std::string& s);
 EdgeDropPolicy parseEdgeDropPolicy(const std::string& s);
 // Validate stream-scoped ByteTrack config. Throws std::runtime_error on invalid values.
 void validateByteTrackConfig(const ByteTrackConfig& cfg);

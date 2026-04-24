@@ -21,7 +21,7 @@ StageFactory::Context makeContext() {
     source.degraded_threshold = 5;
     source.max_reconnect_attempts = 5;
     static DummyPublisher publisher;
-    return StageFactory::Context{cfg, source, publisher, nullptr, 5, false};
+    return StageFactory::Context{cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount, false};
 }
 
 } // namespace

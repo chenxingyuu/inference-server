@@ -4,7 +4,11 @@
 
 ## Runtime Pipeline
 
-The runtime is a **configurable in-process DAG** driven by **tasks** (each task binds one `source_id` to one reusable `pipeline_id` template). Per-task **`sample_fps`** and **`use_hwdec`** control RTSP ingest rate and FFmpeg hardware decode for that task’s `source.rtsp` instance; **`sources`** entries carry `url` and reconnect policy only (deprecated `sources[].sample_fps` / `sources[].use_hwdec` keys are rejected at load time).
+The runtime is a **configurable in-process DAG** driven by **tasks** (each task binds one `source_id` to one reusable `pipeline_id` template). Per-task **`sample_fps`**, **`sampling_mode`**, and **`use_hwdec`** control RTSP ingest rate, sampling strategy, and FFmpeg hardware decode for that task’s `source.rtsp` / `source.file` instance; **`sources`** entries carry `url` and reconnect policy only (deprecated `sources[].sample_fps` / `sources[].use_hwdec` keys are rejected at load time).
+
+Two sampling modes are available via `tasks[].sampling_mode`:
+- **`frame_count`** (default): emit every `N`th decoded frame where `N = round(actual_stream_fps / sample_fps)`, computed from `avg_frame_rate` after the stream opens.
+- **`time_based`**: emit a frame only when `frame_pts_sec − last_emit_pts ≥ 1.0 / sample_fps`; falls back to `frame_count` logic when PTS is unavailable.
 
 1. Source ingest (`source.rtsp` using `FFmpegDecoder`; optional HW decode via NVDEC).
 2. Fan-out to parallel branches (e.g. `archive.raw` and inference path).

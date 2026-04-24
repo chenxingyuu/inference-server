@@ -7,10 +7,11 @@
 namespace infer {
 
 SourceFileStage::SourceFileStage(std::string id, const PipelineSourceConfig& src,
-                                 int sample_fps, bool use_hwdec, bool loop)
+                                 int sample_fps, SamplingMode sampling_mode, bool use_hwdec, bool loop)
     : id_(std::move(id))
     , source_(src)
     , sample_fps_(sample_fps)
+    , sampling_mode_(sampling_mode)
     , use_hwdec_(use_hwdec)
     , loop_(loop)
     , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps * 2))) {}
@@ -25,7 +26,8 @@ void SourceFileStage::start() {
     StreamConfig cfg;
     cfg.id                   = source_.id;
     cfg.url                  = source_.url;
-    cfg.sample_fps           = sample_fps_;
+    cfg.sample_fps    = sample_fps_;
+    cfg.sampling_mode = sampling_mode_;
     cfg.open_timeout_ms      = source_.open_timeout_ms;
     cfg.read_timeout_ms      = source_.read_timeout_ms;
     cfg.use_hwdec            = use_hwdec_;

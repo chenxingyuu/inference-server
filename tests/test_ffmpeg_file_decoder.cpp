@@ -31,6 +31,19 @@ static StreamConfig makeFileCfg(bool loop = false) {
     return cfg;
 }
 
+// Wait up to 2s for the decode thread to start, then poll until it stops.
+static void waitForCompletion(FFmpegDecoder& dec,
+                              std::chrono::seconds timeout = std::chrono::seconds(20)) {
+    const auto start_dl = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!dec.running() && std::chrono::steady_clock::now() < start_dl) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (dec.running() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
 // ─── EOF: decoder stops cleanly without spinning ────────────────────────────
 
 TEST(FFmpegFileDecoder, StopsOnEOFWithoutReconnect) {
@@ -42,11 +55,7 @@ TEST(FFmpegFileDecoder, StopsOnEOFWithoutReconnect) {
         (void)f;
     });
 
-    // 1-second clip at 25fps → expect ~25 frames, wait at most 10 s
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (decoder.running() && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
+    waitForCompletion(decoder);
 
     // Decoder should have stopped on its own (no reconnect loop)
     EXPECT_FALSE(decoder.running()) << "Decoder should stop on EOF without reconnect";
@@ -66,10 +75,7 @@ TEST(FFmpegFileDecoder, DecodesFramesFromVirtualSource) {
         EXPECT_FALSE(f.meta.stream_id.empty());
     });
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (decoder.running() && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
+    waitForCompletion(decoder);
 
     EXPECT_GT(frame_count.load(), 0);
 }

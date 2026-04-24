@@ -12,7 +12,8 @@ namespace infer {
 
 class SourceRtspStage final : public IStage {
 public:
-    SourceRtspStage(std::string id, const PipelineSourceConfig& src, int sample_fps, bool use_hwdec);
+    SourceRtspStage(std::string id, const PipelineSourceConfig& src,
+                    int sample_fps, SamplingMode sampling_mode, bool use_hwdec);
 
     std::string id() const override;
     bool isSource() const override;
@@ -25,6 +26,7 @@ private:
     std::string id_;
     PipelineSourceConfig source_;
     int sample_fps_;
+    SamplingMode sampling_mode_;
     bool use_hwdec_;
     FFmpegDecoder decoder_;
     std::atomic<bool> running_{false};

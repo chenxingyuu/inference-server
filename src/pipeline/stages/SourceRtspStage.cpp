@@ -6,10 +6,12 @@
 
 namespace infer {
 
-SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src, int sample_fps, bool use_hwdec)
+SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src,
+                                 int sample_fps, SamplingMode sampling_mode, bool use_hwdec)
     : id_(std::move(id))
     , source_(src)
     , sample_fps_(sample_fps)
+    , sampling_mode_(sampling_mode)
     , use_hwdec_(use_hwdec)
     , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps * 2))) {}
 
@@ -23,7 +25,8 @@ void SourceRtspStage::start() {
     StreamConfig cfg;
     cfg.id = source_.id;
     cfg.url = source_.url;
-    cfg.sample_fps = sample_fps_;
+    cfg.sample_fps    = sample_fps_;
+    cfg.sampling_mode = sampling_mode_;
     cfg.reconnect_delay_ms = source_.reconnect_delay_ms;
     cfg.max_reconnect_delay_ms = source_.max_reconnect_delay_ms;
     cfg.degraded_threshold = source_.degraded_threshold;
