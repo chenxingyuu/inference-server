@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package inference;
+
+option cc_generic_services = false;
+
+service InferenceService {
+  // Subscribe to detection frames for one or more streams.
+  // An empty stream_ids list subscribes to all streams.
+  rpc Subscribe (SubscribeRequest) returns (stream DetectionFrame);
+}
+
+message SubscribeRequest {
+  repeated string stream_ids = 1;
+}
+
+message BBox {
+  float x1 = 1;
+  float y1 = 2;
+  float x2 = 3;
+  float y2 = 4;
+}
+
+message Detection {
+  int32  class_id   = 1;
+  string class_name = 2;
+  float  confidence = 3;
+  BBox   bbox       = 4;
+  int64  track_id   = 5;   // 0 = not tracked
+  map<string, string> attributes = 6;
+}
+
+message DetectionFrame {
+  string   stream_id   = 1;
+  double   frame_ts    = 2;
+  double   infer_ts    = 3;
+  double   latency_ms  = 4;
+  string   model_id    = 5;
+  uint64   frame_seq   = 6;
+  repeated Detection detections = 7;
+}

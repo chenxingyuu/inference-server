@@ -173,10 +173,10 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(t->pipeline_id, "pipe_01");
     EXPECT_EQ(cfg.findTask("missing"), nullptr);
 
-    // kafka
-    EXPECT_EQ(cfg.kafka.brokers, "localhost:9092");
-    EXPECT_EQ(cfg.kafka.topic,   "test-results");
-    EXPECT_EQ(cfg.kafka.batch_size, 50);
+    // kafka (via legacy fallback into publishers.kafka)
+    EXPECT_EQ(cfg.publishers.kafka.brokers, "localhost:9092");
+    EXPECT_EQ(cfg.publishers.kafka.topic,   "test-results");
+    EXPECT_EQ(cfg.publishers.kafka.batch_size, 50);
 
     // frame archive
     EXPECT_TRUE(cfg.frame_archive.enabled);
@@ -545,4 +545,67 @@ TEST(LoadConfig, SinkStreamInvalidProtocolThrows) {
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());
+}
+
+// ── Publishers config ─────────────────────────────────────────────────────
+
+TEST(LoadConfig, ParsePublishersBlock) {
+    AppConfig cfg = loadConfig("data/test_config_publishers.yaml");
+    EXPECT_TRUE(cfg.publishers.kafka.enabled);
+    EXPECT_EQ(cfg.publishers.kafka.brokers, "broker:9093");
+    EXPECT_EQ(cfg.publishers.kafka.topic, "pub-results");
+    EXPECT_EQ(cfg.publishers.kafka.batch_size, 200);
+    EXPECT_EQ(cfg.publishers.kafka.linger_ms, 15);
+    EXPECT_EQ(cfg.publishers.kafka.compression, "gzip");
+    EXPECT_EQ(cfg.publishers.kafka.queue_capacity, 5000);
+    EXPECT_EQ(cfg.publishers.kafka.heartbeat_topic, "pub-heartbeat");
+    EXPECT_EQ(cfg.publishers.kafka.heartbeat_interval_ms, 3000);
+    EXPECT_EQ(cfg.publishers.kafka.control_topic, "pub-control");
+    EXPECT_TRUE(cfg.publishers.grpc.enabled);
+    EXPECT_EQ(cfg.publishers.grpc.port, 50052);
+    EXPECT_EQ(cfg.publishers.grpc.max_connections, 50);
+    EXPECT_TRUE(cfg.publishers.redis.enabled);
+    EXPECT_EQ(cfg.publishers.redis.host, "redis-host");
+    EXPECT_EQ(cfg.publishers.redis.port, 6380);
+    EXPECT_EQ(cfg.publishers.redis.stream_prefix, "infer");
+    EXPECT_EQ(cfg.publishers.redis.max_len, 500);
+    EXPECT_EQ(cfg.publishers.redis.queue_capacity, 2000);
+}
+
+TEST(LoadConfig, LegacyKafkaKeyFallback) {
+    AppConfig cfg = loadConfig("data/test_config.yaml");
+    EXPECT_TRUE(cfg.publishers.kafka.enabled);
+    EXPECT_EQ(cfg.publishers.kafka.brokers, "localhost:9092");
+    EXPECT_EQ(cfg.publishers.kafka.topic, "test-results");
+}
+
+TEST(LoadConfig, NoPublisherEnabledThrows) {
+    const std::string path = "data/test_no_publisher.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n  - id: cam_1\n    url: rtsp://localhost/test\n";
+        out << "models:\n  - id: m1\n    version: yolov8\n    backend: tensorrt\n    input_size: [640, 640]\n";
+        out << "pipelines:\n  - id: p1\n    nodes:\n      - id: cam_1\n        type: source.rtsp\n";
+        out << "      - id: sink_1\n        type: sink.kafka\n    edges:\n      - from: cam_1\n        to: sink_1\n";
+        out << "tasks:\n  - id: t1\n    source_id: cam_1\n    pipeline_id: p1\n";
+        out << "publishers:\n  kafka:\n    enabled: false\n  grpc:\n    enabled: false\n  redis:\n    enabled: false\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, GrpcConfigDefaults) {
+    AppConfig cfg = loadConfig("data/test_config.yaml");
+    EXPECT_FALSE(cfg.publishers.grpc.enabled);
+    EXPECT_EQ(cfg.publishers.grpc.port, 50051);
+    EXPECT_EQ(cfg.publishers.grpc.max_connections, 100);
+}
+
+TEST(LoadConfig, RedisConfigDefaults) {
+    AppConfig cfg = loadConfig("data/test_config.yaml");
+    EXPECT_FALSE(cfg.publishers.redis.enabled);
+    EXPECT_EQ(cfg.publishers.redis.host, "localhost");
+    EXPECT_EQ(cfg.publishers.redis.port, 6379);
+    EXPECT_EQ(cfg.publishers.redis.stream_prefix, "inference");
+    EXPECT_EQ(cfg.publishers.redis.max_len, 1000);
 }

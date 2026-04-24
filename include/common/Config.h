@@ -128,17 +128,41 @@ struct TaskConfig {
 };
 
 struct KafkaConfig {
+    bool        enabled{true};
     std::string brokers{"kafka:9092"};
     std::string topic{"inference-results"};
     int         batch_size{100};
     int         linger_ms{5};
     std::string compression{"lz4"};
     int         queue_capacity{10000};
-    // Phase 10: heartbeat
     std::string heartbeat_topic{"inference-heartbeat"};
     int         heartbeat_interval_ms{5000};
-    // Phase 14: control topic
     std::string control_topic{"inference-control"};
+};
+
+struct GrpcConfig {
+    bool enabled{false};
+    int  port{50051};
+    int  max_connections{100};
+};
+
+struct RedisConfig {
+    bool        enabled{false};
+    std::string host{"localhost"};
+    int         port{6379};
+    std::string stream_prefix{"inference"};
+    int         max_len{1000};
+    int         queue_capacity{10000};
+};
+
+struct PublishersConfig {
+    KafkaConfig kafka;
+    GrpcConfig  grpc;
+    RedisConfig redis;
+
+    bool anyEnabled() const noexcept {
+        return kafka.enabled || grpc.enabled || redis.enabled;
+    }
 };
 
 struct MinioConfig {
@@ -170,7 +194,7 @@ struct AppConfig {
     std::vector<PipelineSourceConfig> sources;
     std::vector<PipelineConfig> pipelines;
     std::vector<TaskConfig>    tasks;
-    KafkaConfig             kafka;
+    PublishersConfig        publishers;
     FrameArchiveConfig      frame_archive;
 
     // Find by id helpers

@@ -15,6 +15,8 @@ option(BUILD_ONNX_BACKEND        "Build ONNX Runtime backend (CPU + MPS)" OFF)
 option(BUILD_ONNX_BACKEND_COREML "Enable CoreML EP for MPS (macOS only)"  OFF)
 option(BUILD_TESTS               "Build unit tests"                        OFF)
 option(ENABLE_ASAN               "Enable AddressSanitizer"                 OFF)
+option(BUILD_GRPC_PUBLISHER      "Build gRPC streaming publisher"          OFF)
+option(BUILD_REDIS_PUBLISHER     "Build Redis Streams publisher"           OFF)
 
 # ── Module path ───────────────────────────────────────────────────────────────
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
@@ -175,7 +177,72 @@ set(PUBLISHER_SOURCES
     src/publisher/HeartbeatPublisher.cpp
     src/publisher/ControlPublisher.cpp
     src/publisher/ControlEventBus.cpp
+    src/publisher/MultiPublisher.cpp
+    $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:${CMAKE_SOURCE_DIR}/src/publisher/GrpcPublisher.cpp>
+    $<$<BOOL:${BUILD_REDIS_PUBLISHER}>:${CMAKE_SOURCE_DIR}/src/publisher/RedisPublisher.cpp>
 )
+
+# ── gRPC publisher ────────────────────────────────────────────────────────────
+if(BUILD_GRPC_PUBLISHER)
+    find_package(gRPC CONFIG REQUIRED)
+
+    set(PROTO_SRC_DIR "${CMAKE_SOURCE_DIR}/proto")
+    set(PROTO_OUT_DIR "${CMAKE_BINARY_DIR}/generated")
+    file(MAKE_DIRECTORY ${PROTO_OUT_DIR})
+
+    find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
+
+    add_custom_command(
+        OUTPUT
+            "${PROTO_OUT_DIR}/inference.pb.cc"
+            "${PROTO_OUT_DIR}/inference.pb.h"
+            "${PROTO_OUT_DIR}/inference.grpc.pb.cc"
+            "${PROTO_OUT_DIR}/inference.grpc.pb.h"
+        COMMAND ${GRPC_CPP_PLUGIN} --version || true
+        COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+            -I ${PROTO_SRC_DIR}
+            --cpp_out=${PROTO_OUT_DIR}
+            --grpc_out=${PROTO_OUT_DIR}
+            --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN}
+            ${PROTO_SRC_DIR}/inference.proto
+        DEPENDS "${PROTO_SRC_DIR}/inference.proto"
+    )
+
+    add_library(inference_proto STATIC
+        "${PROTO_OUT_DIR}/inference.pb.cc"
+        "${PROTO_OUT_DIR}/inference.grpc.pb.cc"
+    )
+    target_include_directories(inference_proto PUBLIC ${PROTO_OUT_DIR})
+    target_link_libraries(inference_proto PUBLIC
+        protobuf::libprotobuf
+        gRPC::grpc++
+    )
+endif()
+
+# ── Redis publisher ───────────────────────────────────────────────────────────
+if(BUILD_REDIS_PUBLISHER)
+    find_package(hiredis QUIET)
+    find_package(redis++ QUIET)
+    if(NOT hiredis_FOUND OR NOT redis++_FOUND)
+        include(FetchContent)
+        FetchContent_Declare(hiredis
+            GIT_REPOSITORY https://github.com/redis/hiredis.git
+            GIT_TAG        v1.2.0
+            GIT_SHALLOW    TRUE
+        )
+        set(DISABLE_TESTS ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(hiredis)
+
+        FetchContent_Declare(redis_plus_plus
+            GIT_REPOSITORY https://github.com/sewenew/redis-plus-plus.git
+            GIT_TAG        1.3.12
+            GIT_SHALLOW    TRUE
+        )
+        set(REDIS_PLUS_PLUS_BUILD_TEST   OFF CACHE BOOL "" FORCE)
+        set(REDIS_PLUS_PLUS_BUILD_STATIC ON  CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(redis_plus_plus)
+    endif()
+endif()
 
 set(ARCHIVE_SOURCES
     src/archive/FrameArchiver.cpp
@@ -209,6 +276,7 @@ target_include_directories(infer_core PUBLIC
     ${FFMPEG_INCLUDE_DIRS}
     ${RDKAFKA_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
+    $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:${PROTO_OUT_DIR}>
 )
 
 target_link_directories(infer_core PUBLIC
@@ -230,6 +298,8 @@ target_link_libraries(infer_core PUBLIC
     $<$<BOOL:${BUILD_TRT_BACKEND}>:CUDA::cudart>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:AscendCL::ascendcl>
     $<$<BOOL:${BUILD_ONNX_BACKEND}>:onnxruntime>
+    $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:inference_proto>
+    $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:gRPC::grpc++>
 )
 
 target_compile_definitions(infer_core PUBLIC
@@ -237,6 +307,8 @@ target_compile_definitions(infer_core PUBLIC
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:BUILD_ASCEND_BACKEND>
     $<$<BOOL:${BUILD_ONNX_BACKEND}>:BUILD_ONNX_BACKEND>
     $<$<BOOL:${BUILD_ONNX_BACKEND_COREML}>:BUILD_ONNX_BACKEND_COREML>
+    $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:BUILD_GRPC_PUBLISHER>
+    $<$<BOOL:${BUILD_REDIS_PUBLISHER}>:BUILD_REDIS_PUBLISHER>
 )
 
 # ── Executable ────────────────────────────────────────────────────────────────
