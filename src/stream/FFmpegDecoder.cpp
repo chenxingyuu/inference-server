@@ -156,11 +156,14 @@ bool FFmpegDecoder::openStream(const StreamConfig& cfg) {
 
     // "lavfi:<filtergraph>" URLs require the lavfi input device with the filtergraph
     // string passed as the filename (not the full "lavfi:<graph>" URL).
-    const AVInputFormat* input_fmt = nullptr;
+    // avformat_open_input takes AVInputFormat* in FFmpeg <5 and const AVInputFormat* in FFmpeg >=5.
+    // Use the non-const pointer here to satisfy both.
+    AVInputFormat* input_fmt = nullptr;
     std::string open_url = cfg.url;
     static constexpr std::string_view kLavfiPrefix = "lavfi:";
     if (cfg.url.compare(0, kLavfiPrefix.size(), kLavfiPrefix) == 0) {
-        input_fmt = av_find_input_format("lavfi");
+        // Cast away const: pre-FFmpeg-5 avformat_open_input takes AVInputFormat* (non-const).
+        input_fmt = const_cast<AVInputFormat*>(av_find_input_format("lavfi"));
         open_url  = cfg.url.substr(kLavfiPrefix.size());
     }
 
