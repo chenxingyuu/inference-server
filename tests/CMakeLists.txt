@@ -175,3 +175,68 @@ add_test(NAME test_gpu_fault_recovery COMMAND test_gpu_fault_recovery
 
 # TrtUtils pure-logic unit tests — no GPU required, no TRT dependency
 add_infer_test(test_trt_utils)
+
+# Multi-publisher fan-out (no Kafka/GPU deps)
+add_executable(test_multi_publisher test_multi_publisher.cpp
+    ${CMAKE_SOURCE_DIR}/src/publisher/MultiPublisher.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+)
+target_include_directories(test_multi_publisher PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(test_multi_publisher PRIVATE
+    GTest::gtest_main
+    GTest::gmock
+    spdlog::spdlog
+    nlohmann_json::nlohmann_json
+    ${OpenCV_LIBS}
+    Threads::Threads
+)
+add_test(NAME test_multi_publisher COMMAND test_multi_publisher
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+# Redis Streams publisher (mock client — no real Redis required for tests)
+add_executable(test_redis_publisher test_redis_publisher.cpp
+    ${CMAKE_SOURCE_DIR}/src/publisher/RedisPublisher.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+)
+target_include_directories(test_redis_publisher PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(test_redis_publisher PRIVATE
+    GTest::gtest_main
+    GTest::gmock
+    spdlog::spdlog
+    nlohmann_json::nlohmann_json
+    ${OpenCV_LIBS}
+    Threads::Threads
+)
+add_test(NAME test_redis_publisher COMMAND test_redis_publisher
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+# gRPC publisher (requires BUILD_GRPC_PUBLISHER=ON)
+if(BUILD_GRPC_PUBLISHER)
+    add_executable(test_grpc_publisher test_grpc_publisher.cpp
+        ${CMAKE_SOURCE_DIR}/src/publisher/GrpcPublisher.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+    )
+    target_include_directories(test_grpc_publisher PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_BINARY_DIR}/generated
+        ${OpenCV_INCLUDE_DIRS}
+    )
+    target_link_libraries(test_grpc_publisher PRIVATE
+        GTest::gtest_main
+        GTest::gmock
+        inference_proto
+        gRPC::grpc++
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json
+        ${OpenCV_LIBS}
+        Threads::Threads
+    )
+    add_test(NAME test_grpc_publisher COMMAND test_grpc_publisher
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+endif()

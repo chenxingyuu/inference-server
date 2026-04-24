@@ -3,8 +3,15 @@
 #include "stream/FFmpegDecoder.h"
 #include "pipeline/TaskManager.h"
 #include "publisher/KafkaPublisher.h"
+#include "publisher/MultiPublisher.h"
 #include "publisher/HeartbeatPublisher.h"
 #include "publisher/ControlEventBus.h"
+#ifdef BUILD_REDIS_PUBLISHER
+#include "publisher/RedisPublisher.h"
+#endif
+#ifdef BUILD_GRPC_PUBLISHER
+#include "publisher/GrpcPublisher.h"
+#endif
 #include "server/ManagementServer.h"
 #include "archive/FrameArchiver.h"
 #include <curl/curl.h>
@@ -22,6 +29,23 @@ struct CurlGlobalGuard {
     CurlGlobalGuard() = default;
     ~CurlGlobalGuard() { curl_global_cleanup(); }
 };
+
+std::unique_ptr<infer::IPublisher> buildPublisher(const infer::PublishersConfig& cfg) {
+    std::vector<std::unique_ptr<infer::IPublisher>> pubs;
+    if (cfg.kafka.enabled)
+        pubs.push_back(std::make_unique<infer::KafkaPublisher>(cfg.kafka));
+#ifdef BUILD_REDIS_PUBLISHER
+    if (cfg.redis.enabled)
+        pubs.push_back(std::make_unique<infer::RedisPublisher>(cfg.redis));
+#endif
+#ifdef BUILD_GRPC_PUBLISHER
+    if (cfg.grpc.enabled)
+        pubs.push_back(std::make_unique<infer::GrpcPublisher>(cfg.grpc));
+#endif
+    if (pubs.size() == 1)
+        return std::move(pubs[0]);
+    return std::make_unique<infer::MultiPublisher>(std::move(pubs));
+}
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -61,9 +85,9 @@ int main(int argc, char* argv[]) {
     // ── Create publisher ──────────────────────────────────────────────────────
     std::unique_ptr<infer::IPublisher> publisher;
     try {
-        publisher = std::make_unique<infer::KafkaPublisher>(cfg.kafka);
+        publisher = buildPublisher(cfg.publishers);
     } catch (const std::exception& e) {
-        LOG_CRITICAL("KafkaPublisher init failed: {}", e.what());
+        LOG_CRITICAL("Publisher init failed: {}", e.what());
         return 1;
     }
 
@@ -75,7 +99,7 @@ int main(int argc, char* argv[]) {
     // ── Start heartbeat publisher (Phase 10) ─────────────────────────────────
     std::unique_ptr<infer::HeartbeatPublisher> heartbeat;
     try {
-        heartbeat = std::make_unique<infer::HeartbeatPublisher>(cfg.kafka);
+        heartbeat = std::make_unique<infer::HeartbeatPublisher>(cfg.publishers.kafka);
         heartbeat->start();
     } catch (const std::exception& e) {
         LOG_WARN("HeartbeatPublisher init failed (non-fatal): {}", e.what());
@@ -85,7 +109,7 @@ int main(int argc, char* argv[]) {
     // ── Start control publisher (Phase 14) ───────────────────────────────────
     std::shared_ptr<infer::ControlPublisher> control;
     try {
-        control = std::make_shared<infer::ControlPublisher>(cfg.kafka.brokers, cfg.kafka.control_topic);
+        control = std::make_shared<infer::ControlPublisher>(cfg.publishers.kafka.brokers, cfg.publishers.kafka.control_topic);
         infer::ControlEventBus::get().setPublisher(control);
     } catch (const std::exception& e) {
         LOG_WARN("ControlPublisher init failed (non-fatal): {}", e.what());

@@ -352,16 +352,38 @@ AppConfig loadConfig(const std::string& yaml_path) {
             cfg.tasks.push_back(std::move(t));
         }
     }
-    if (auto kn = root["kafka"]) {
-        cfg.kafka.brokers               = kn["brokers"].as<std::string>("kafka:9092");
-        cfg.kafka.topic                 = kn["topic"].as<std::string>("inference-results");
-        cfg.kafka.batch_size            = kn["batch_size"].as<int>(100);
-        cfg.kafka.linger_ms             = kn["linger_ms"].as<int>(5);
-        cfg.kafka.compression           = kn["compression"].as<std::string>("lz4");
-        cfg.kafka.queue_capacity        = kn["queue_capacity"].as<int>(10000);
-        cfg.kafka.heartbeat_topic       = kn["heartbeat_topic"].as<std::string>("inference-heartbeat");
-        cfg.kafka.heartbeat_interval_ms = kn["heartbeat_interval_ms"].as<int>(5000);
-        cfg.kafka.control_topic         = kn["control_topic"].as<std::string>("inference-control");
+    auto parseKafkaNode = [](const YAML::Node& kn, KafkaConfig& k) {
+        k.enabled               = kn["enabled"].as<bool>(true);
+        k.brokers               = kn["brokers"].as<std::string>("kafka:9092");
+        k.topic                 = kn["topic"].as<std::string>("inference-results");
+        k.batch_size            = kn["batch_size"].as<int>(100);
+        k.linger_ms             = kn["linger_ms"].as<int>(5);
+        k.compression           = kn["compression"].as<std::string>("lz4");
+        k.queue_capacity        = kn["queue_capacity"].as<int>(10000);
+        k.heartbeat_topic       = kn["heartbeat_topic"].as<std::string>("inference-heartbeat");
+        k.heartbeat_interval_ms = kn["heartbeat_interval_ms"].as<int>(5000);
+        k.control_topic         = kn["control_topic"].as<std::string>("inference-control");
+    };
+    if (auto pn = root["publishers"]) {
+        if (auto kn = pn["kafka"]) parseKafkaNode(kn, cfg.publishers.kafka);
+        if (auto gn = pn["grpc"]) {
+            cfg.publishers.grpc.enabled        = gn["enabled"].as<bool>(false);
+            cfg.publishers.grpc.port           = gn["port"].as<int>(50051);
+            cfg.publishers.grpc.max_connections = gn["max_connections"].as<int>(100);
+        }
+        if (auto rn = pn["redis"]) {
+            cfg.publishers.redis.enabled        = rn["enabled"].as<bool>(false);
+            cfg.publishers.redis.host           = rn["host"].as<std::string>("localhost");
+            cfg.publishers.redis.port           = rn["port"].as<int>(6379);
+            cfg.publishers.redis.stream_prefix  = rn["stream_prefix"].as<std::string>("inference");
+            cfg.publishers.redis.max_len        = rn["max_len"].as<int>(1000);
+            cfg.publishers.redis.queue_capacity = rn["queue_capacity"].as<int>(10000);
+        }
+    } else if (auto kn = root["kafka"]) {
+        parseKafkaNode(kn, cfg.publishers.kafka);
+    }
+    if (!cfg.publishers.anyEnabled()) {
+        throw std::runtime_error("At least one publisher must be enabled under publishers:");
     }
     if (auto an = root["frame_archive"]) {
         cfg.frame_archive.enabled        = an["enabled"].as<bool>(false);
