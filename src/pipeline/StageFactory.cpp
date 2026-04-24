@@ -96,7 +96,7 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
     if (cfg.type == "join.byFrameId") {
         return std::make_unique<JoinByFrameStage>(cfg.id);
     }
-    if (cfg.type == "sink.kafka") {
+    if (cfg.type == "sink.publish" || cfg.type == "sink.kafka") {
         return std::make_unique<SinkKafkaStage>(cfg.id, ctx.publisher);
     }
     if (cfg.type == "sink.ffplay") {

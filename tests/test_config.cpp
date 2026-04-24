@@ -214,7 +214,7 @@ TEST(LoadConfig, LogLevelDefaultsToInfo) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: sink_1\n";
-        out << "        type: sink.kafka\n";
+        out << "        type: sink.publish\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: sink_1\n";
@@ -250,7 +250,7 @@ TEST(LoadConfig, InvalidEdgePolicyThrows) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: sink_1\n";
-        out << "        type: sink.kafka\n";
+        out << "        type: sink.publish\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: sink_1\n";
@@ -283,7 +283,7 @@ TEST(LoadConfig, MissingTasksKeyThrows) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: sink_1\n";
-        out << "        type: sink.kafka\n";
+        out << "        type: sink.publish\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: sink_1\n";
@@ -310,7 +310,7 @@ TEST(LoadConfig, EmptyTasksThrows) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: sink_1\n";
-        out << "        type: sink.kafka\n";
+        out << "        type: sink.publish\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: sink_1\n";
@@ -338,7 +338,7 @@ TEST(LoadConfig, DuplicateTaskIdThrows) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: sink_1\n";
-        out << "        type: sink.kafka\n";
+        out << "        type: sink.publish\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: sink_1\n";
@@ -372,7 +372,7 @@ TEST(LoadConfig, TaskUnknownSourceThrows) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: sink_1\n";
-        out << "        type: sink.kafka\n";
+        out << "        type: sink.publish\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: sink_1\n";
@@ -403,7 +403,7 @@ TEST(LoadConfig, TaskUnknownPipelineThrows) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: sink_1\n";
-        out << "        type: sink.kafka\n";
+        out << "        type: sink.publish\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: sink_1\n";
@@ -435,7 +435,7 @@ TEST(LoadConfig, DeprecatedSourceSampleFpsThrows) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: sink_1\n";
-        out << "        type: sink.kafka\n";
+        out << "        type: sink.publish\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: sink_1\n";
@@ -466,7 +466,7 @@ TEST(LoadConfig, TaskSampleFpsBelowOneThrows) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: sink_1\n";
-        out << "        type: sink.kafka\n";
+        out << "        type: sink.publish\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: sink_1\n";
@@ -586,7 +586,7 @@ TEST(LoadConfig, NoPublisherEnabledThrows) {
         out << "sources:\n  - id: cam_1\n    url: rtsp://localhost/test\n";
         out << "models:\n  - id: m1\n    version: yolov8\n    backend: tensorrt\n    input_size: [640, 640]\n";
         out << "pipelines:\n  - id: p1\n    nodes:\n      - id: cam_1\n        type: source.rtsp\n";
-        out << "      - id: sink_1\n        type: sink.kafka\n    edges:\n      - from: cam_1\n        to: sink_1\n";
+        out << "      - id: sink_1\n        type: sink.publish\n    edges:\n      - from: cam_1\n        to: sink_1\n";
         out << "tasks:\n  - id: t1\n    source_id: cam_1\n    pipeline_id: p1\n";
         out << "publishers:\n  kafka:\n    enabled: false\n  grpc:\n    enabled: false\n  redis:\n    enabled: false\n";
     }

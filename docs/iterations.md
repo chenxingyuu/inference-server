@@ -275,7 +275,7 @@
 **新增**：
 - 新配置格式：`sources`（输入源）+ `pipelines`（仅 nodes/edges 的图模板）+ `tasks`（`source_id` + `pipeline_id`，运行实例）
 - 运行时：`TaskManager` + `GraphExecutor` + `EdgeQueue`（每条边独立背压策略；每个 task 一份 executor）
-- Stage：`source.rtsp` / `infer.engine` / `archive.raw` / `track.bytetrack` / `join.byFrameId` / `sink.kafka`（其余为占位 passthrough）
+- Stage：`source.rtsp` / `infer.engine` / `archive.raw` / `track.bytetrack` / `join.byFrameId` / `sink.publish`（`sink.kafka` 保留为别名；其余为占位 passthrough）
 - 管理接口：`GET /tasks`、`POST /tasks/{id}/start|stop`
 
 **关键决策**：

@@ -18,7 +18,7 @@ pipelines:
       - id: cam_01
         type: source.rtsp
       - id: sink_1
-        type: sink.kafka
+        type: sink.publish
     edges:
       - from: cam_01
         to: sink_1

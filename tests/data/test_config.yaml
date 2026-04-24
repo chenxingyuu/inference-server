@@ -64,7 +64,7 @@ pipelines:
       - id: join_1
         type: join.byFrameId
       - id: sink_1
-        type: sink.kafka
+        type: sink.publish
     edges:
       - from: cam_01
         to: decode_1

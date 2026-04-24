@@ -83,7 +83,7 @@ pipelines:
       - id: "join_1"
         type: "join.byFrameId"
       - id: "sink_1"
-        type: "sink.kafka"
+        type: "sink.publish"
       - id: "sink_ffplay_1"
         type: "sink.ffplay"
         with:
