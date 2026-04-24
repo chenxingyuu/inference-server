@@ -35,3 +35,4 @@ build_tests/
 build_agent/
 
 __pycache__/
+.venv/
