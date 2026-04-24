@@ -58,6 +58,7 @@ private:
 
     GrpcConfig                                    cfg_;
     std::unique_ptr<grpc::Server>                 server_;
+    std::atomic<bool>                             stop_{false};
 
     mutable std::mutex                            mu_;
     std::vector<std::shared_ptr<Subscriber>>      subscribers_;

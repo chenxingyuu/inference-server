@@ -22,7 +22,9 @@ GrpcPublisher::GrpcPublisher(const GrpcConfig& cfg) : cfg_(cfg) {
 
 GrpcPublisher::~GrpcPublisher() {
     if (server_) {
-        server_->Shutdown();
+        stop_.store(true);
+        auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(2);
+        server_->Shutdown(deadline);
         server_->Wait();
     }
 }
@@ -70,8 +72,8 @@ grpc::Status GrpcPublisher::Subscribe(
         subscribers_.push_back(sub);
     }
 
-    // Block until subscriber disconnects (active becomes false) or client cancels.
-    while (!ctx->IsCancelled() && sub->active.load()) {
+    // Block until subscriber disconnects, client cancels, or server is shutting down.
+    while (!ctx->IsCancelled() && sub->active.load() && !stop_.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
