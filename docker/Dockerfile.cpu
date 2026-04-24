@@ -23,6 +23,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libboost-dev \
     librdkafka-dev \
     libcurl4-openssl-dev \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    protobuf-compiler-grpc \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -35,6 +39,8 @@ RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
     -DBUILD_TRT_BACKEND=OFF \
     -DBUILD_ASCEND_BACKEND=OFF \
     -DBUILD_ONNX_BACKEND=ON \
+    -DBUILD_REDIS_PUBLISHER=ON \
+    -DBUILD_GRPC_PUBLISHER=ON \
     && cmake --build build --parallel $(nproc)
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
@@ -54,6 +60,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     librdkafka1 \
     libspdlog1 \
     libcurl4 \
+    libgrpc++1 \
+    libprotobuf32 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binary and the ONNX Runtime shared library downloaded by FetchContent

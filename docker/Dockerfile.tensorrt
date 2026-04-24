@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
-    cmake ninja-build pkg-config git \
+    python3-pip ninja-build pkg-config git \
     ccache \
     libssl-dev \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev libavfilter-dev \
@@ -28,7 +28,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libboost-dev \
     librdkafka-dev \
     libcurl4-openssl-dev \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    protobuf-compiler-grpc \
+    && pip3 install --no-cache-dir 'cmake>=3.24,<4' \
     && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/usr/local/bin:${PATH}"
 
 WORKDIR /src
 COPY . .
@@ -39,6 +46,9 @@ RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
     -DBUILD_TRT_BACKEND=ON \
     -DBUILD_ASCEND_BACKEND=OFF \
+    -DBUILD_ONNX_BACKEND=OFF \
+    -DBUILD_REDIS_PUBLISHER=ON \
+    -DBUILD_GRPC_PUBLISHER=ON \
     && cmake --build build --parallel $(nproc)
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
@@ -58,6 +68,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     librdkafka1 \
     libspdlog1 \
     libcurl4 \
+    libgrpc++1 \
+    libprotobuf23 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server

@@ -12,7 +12,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
-    cmake ninja-build pkg-config git \
+    python3-pip ninja-build pkg-config git \
     ccache \
     libssl-dev \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev libavfilter-dev \
@@ -22,7 +22,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libspdlog-dev \
     libboost-dev \
     librdkafka-dev \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    protobuf-compiler-grpc \
+    && pip3 install --no-cache-dir 'cmake>=3.24,<4' \
     && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/usr/local/bin:${PATH}"
 
 # CANN toolkit sets ASCEND_HOME_PATH; expose to CMake
 ENV ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
@@ -36,6 +43,9 @@ RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
     -DBUILD_TRT_BACKEND=OFF \
     -DBUILD_ASCEND_BACKEND=ON \
+    -DBUILD_ONNX_BACKEND=OFF \
+    -DBUILD_REDIS_PUBLISHER=ON \
+    -DBUILD_GRPC_PUBLISHER=ON \
     && cmake --build build --parallel $(nproc)
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
@@ -55,6 +65,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libyaml-cpp0.7 \
     librdkafka1 \
     libspdlog1 \
+    libgrpc++1 \
+    libprotobuf23 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server
