@@ -113,7 +113,7 @@ pipelines:
       - id: "join_1"
         type: "join.byFrameId"
       - id: "sink_1"
-        type: "sink.publish"
+        type: "sink.kafka"
       - id: "sink_stream_1"
         type: "sink.stream"
         with:
@@ -162,7 +162,7 @@ pipelines:
       - id: "post_2"
         type: "postprocess.yolo"
       - id: "sink_2"
-        type: "sink.publish"
+        type: "sink.kafka"
       - id: "sink_stream_2"
         type: "sink.stream"
         with:

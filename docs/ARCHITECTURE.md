@@ -13,7 +13,7 @@ The runtime is a **configurable in-process DAG** driven by **tasks** (each task 
 5. YOLO decode (`IYOLODecoder` / `ClassifierDecoder`) and optional tracking (`track.bytetrack`).
 6. Optional join/merge (`join.byFrameId`) to enrich inference results with archive metadata.
 7. Optional draw + output: restream via ffmpeg pipe (`sink.stream` → RTSP/RTMP), or local preview via `ffplay` stdin (`sink.ffplay`, raw BGR).
-8. Publish (`sink.publish` stage → `IPublisher::publish()` → `buildPublisher()` factory, see **Publishers** section below).
+8. Publish via `buildPublisher()` factory (see **Publishers** section below).
 9. Background heartbeat emission (`HeartbeatPublisher`) and management endpoints (`ManagementServer`).
 
 ## Publishers
