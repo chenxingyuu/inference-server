@@ -51,6 +51,7 @@ void SourceRtspStage::stop() {
 
 void SourceRtspStage::process(const EventEnvelope&, const EmitFn& emit) {
     Frame frame;
+    std::size_t source_queue_size = 0;
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (queue_.empty()) {
@@ -59,11 +60,13 @@ void SourceRtspStage::process(const EventEnvelope&, const EmitFn& emit) {
         }
         frame = std::move(queue_.front());
         queue_.pop_front();
+        source_queue_size = queue_.size();
     }
     EventEnvelope out;
     out.event_id = frame.meta.stream_id + ":" + std::to_string(frame.meta.frame_seq);
     out.stream_id = frame.meta.stream_id;
     out.frame_seq = frame.meta.frame_seq;
+    out.source_queue_size = source_queue_size;
     out.frame = std::make_shared<Frame>(std::move(frame));
     emit(out);
 }

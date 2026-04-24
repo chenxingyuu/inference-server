@@ -120,8 +120,19 @@ void InferEngineStage::inferAndEmit(std::vector<EventEnvelope> events, const Emi
             const uint64_t cap_ns = events[i].frame->meta.capture_mono_ns;
             if (cap_ns != 0 && batch_start_ns >= cap_ns) {
                 const double q_ms = nsToMs(batch_start_ns - cap_ns);
-                LOG_WARN("InferEngineStage[{}]: seq={} queue_latency_ms={:.1f} infer_ms={:.1f} pending_queue={} max_pending={}",
-                         id_, events[i].frame->meta.frame_seq, q_ms, infer_ms, pending_q, max_pending_);
+                const std::size_t source_q = events[i].source_queue_size.value_or(0);
+                const std::string ingress_edge = events[i].ingress_edge.value_or("unknown");
+                const std::size_t ingress_edge_q = events[i].ingress_edge_queue_size.value_or(0);
+                LOG_WARN("InferEngineStage[{}]: seq={} queue_latency_ms={:.1f} infer_ms={:.1f} pending_queue={} max_pending={} source_queue={} ingress_edge={} ingress_edge_queue={}",
+                         id_,
+                         events[i].frame->meta.frame_seq,
+                         q_ms,
+                         infer_ms,
+                         pending_q,
+                         max_pending_,
+                         source_q,
+                         ingress_edge,
+                         ingress_edge_q);
             }
         }
         for (int i = 0; i < batch.size(); ++i) {

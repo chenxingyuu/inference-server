@@ -98,6 +98,8 @@ void GraphExecutor::runNodeWorker(const std::string& node_id) {
                 auto q = edges_.at(key);
                 EventEnvelope event;
                 if (q->pop(event, 20)) {
+                    event.ingress_edge = key;
+                    event.ingress_edge_queue_size = q->size();
                     stage->process(event, [this, node_id](const EventEnvelope& out) {
                         emitToDownstream(node_id, out);
                     });
