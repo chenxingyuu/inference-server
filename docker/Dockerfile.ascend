@@ -15,7 +15,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     cmake ninja-build pkg-config git \
     ccache \
     libssl-dev \
-    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev libavfilter-dev \
     libopencv-dev \
     libyaml-cpp-dev \
     nlohmann-json3-dev \
@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
-    libavcodec58 libavformat58 libavutil56 libswscale5 \
+    libavcodec58 libavformat58 libavutil56 libswscale5 libavdevice58 libavfilter7 \
     libopencv-core4.5d libopencv-imgproc4.5d \
     libyaml-cpp0.7 \
     librdkafka1 \
