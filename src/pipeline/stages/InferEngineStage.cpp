@@ -120,16 +120,22 @@ void InferEngineStage::inferAndEmit(std::vector<EventEnvelope> events, const Emi
             const uint64_t cap_ns = events[i].frame->meta.capture_mono_ns;
             if (cap_ns != 0 && batch_start_ns >= cap_ns) {
                 const double q_ms = nsToMs(batch_start_ns - cap_ns);
+                const uint64_t recv_ns = events[i].received_at_infer_ns;
+                const double transit_ms = (recv_ns != 0 && recv_ns >= cap_ns)
+                    ? nsToMs(recv_ns - cap_ns) : -1.0;
+                const double pending_ms = (recv_ns != 0 && batch_start_ns >= recv_ns)
+                    ? nsToMs(batch_start_ns - recv_ns) : -1.0;
                 const std::size_t source_q = events[i].source_queue_size.value_or(0);
                 const std::string ingress_edge = events[i].ingress_edge.value_or("unknown");
                 const std::size_t ingress_edge_q = events[i].ingress_edge_queue_size.value_or(0);
-                LOG_WARN("InferEngineStage[{}]: seq={} queue_latency_ms={:.1f} infer_ms={:.1f} pending_queue={} max_pending={} source_queue={} ingress_edge={} ingress_edge_queue={}",
+                LOG_WARN("InferEngineStage[{}]: seq={} queue_latency_ms={:.1f} transit_ms={:.1f} pending_ms={:.1f} infer_ms={:.1f} pending_queue={} source_queue={} ingress_edge={} ingress_edge_queue={}",
                          id_,
                          events[i].frame->meta.frame_seq,
                          q_ms,
+                         transit_ms,
+                         pending_ms,
                          infer_ms,
                          pending_q,
-                         max_pending_,
                          source_q,
                          ingress_edge,
                          ingress_edge_q);
@@ -306,7 +312,9 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
                          max_pending_);
                 pending_events_.erase(pending_events_.begin());
             }
-            pending_events_.push_back(input);
+            EventEnvelope stamped = input;
+            stamped.received_at_infer_ns = nowSteadyNs();
+            pending_events_.push_back(std::move(stamped));
         }
         last_emit_ = emit;
 
