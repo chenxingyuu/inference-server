@@ -201,18 +201,29 @@ tasks:
     sample_fps: 5
     use_hwdec: true
 
-kafka:
-  brokers: "kafka:9092"
-  topic: "inference-results"
-  batch_size: 100
-  linger_ms: 5
-  compression: "lz4"
-  queue_capacity: 10000
-  # Phase 10: heartbeat — allows downstream to distinguish 3 silence conditions
-  heartbeat_topic: "inference-heartbeat"
-  heartbeat_interval_ms: 5000
-  # Phase 14: control events — stream dropped/recovered/terminal-failed
-  control_topic: "inference-control"
+publishers:
+  kafka:
+    enabled: true
+    brokers: "kafka:9092"
+    topic: "inference-results"
+    batch_size: 100
+    linger_ms: 5
+    compression: "lz4"
+    queue_capacity: 10000
+    heartbeat_topic: "inference-heartbeat"
+    heartbeat_interval_ms: 5000
+    control_topic: "inference-control"
+  redis:
+    enabled: false
+    host: "redis"
+    port: 6379
+    stream_prefix: "inference"
+    max_len: 1000
+    queue_capacity: 10000
+  grpc:
+    enabled: false
+    port: 50051
+    max_connections: 100
 
 frame_archive:
   enabled: true
