@@ -114,6 +114,15 @@ void InferEngineStage::inferAndEmit(std::vector<EventEnvelope> events, const Emi
 
         const uint64_t finish_ns = nowSteadyNs();
         const double infer_ts = nowEpoch();
+        // Log per-frame queue latency so we can see how long frames waited before inference.
+        for (int i = 0; i < flush_count; ++i) {
+            const uint64_t cap_ns = events[i].frame->meta.capture_mono_ns;
+            if (cap_ns != 0 && batch_start_ns >= cap_ns) {
+                const double q_ms = nsToMs(batch_start_ns - cap_ns);
+                LOG_WARN("InferEngineStage[{}]: seq={} queue_latency_ms={:.1f} infer_ms={:.1f}",
+                         id_, events[i].frame->meta.frame_seq, q_ms, infer_ms);
+            }
+        }
         for (int i = 0; i < batch.size(); ++i) {
             EventEnvelope out = events[i];
             InferResult r;
