@@ -250,11 +250,12 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
     }
 
     // CPU path: host preprocessing → H2D → inference → D2H (synchronous)
+    LOG_WARN("TRTBackend: using CPU preprocess path (is_gpu=false, hwdec not active) bs={}", bs);
     auto pre_start = std::chrono::steady_clock::now();
     preprocessCPU(input, input_staging_.data(), bs, input_h_, input_w_);
     const double pre_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - pre_start).count();
-    LOG_DEBUG("TRTBackend: CPU preprocess bs={} pre_ms={:.1f}", bs, pre_ms);
+    LOG_WARN("TRTBackend: CPU preprocess done bs={} pre_ms={:.1f}", bs, pre_ms);
 
     PooledBuffer* slot = buffer_pool_.acquire();
     if (!slot) {
