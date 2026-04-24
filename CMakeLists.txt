@@ -261,6 +261,7 @@ if(BUILD_REDIS_PUBLISHER)
             OVERRIDE_FIND_PACKAGE
         )
         set(DISABLE_TESTS ON CACHE BOOL "" FORCE)
+        set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(hiredis)
 
         # redis++ FindHiredis: OVERRIDE_FIND_PACKAGE leaves hiredis_INCLUDE_DIRS empty and its
@@ -289,6 +290,7 @@ if(BUILD_REDIS_PUBLISHER)
         )
         set(REDIS_PLUS_PLUS_BUILD_TEST   OFF CACHE BOOL "" FORCE)
         set(REDIS_PLUS_PLUS_BUILD_STATIC ON  CACHE BOOL "" FORCE)
+        set(REDIS_PLUS_PLUS_BUILD_SHARED OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(redis_plus_plus)
         # redis++ enables -Werror; Clang rejects hiredis C headers (flexible array members) in C++ mode.
         foreach(_rpp_tgt IN ITEMS redis++_static redis++)
