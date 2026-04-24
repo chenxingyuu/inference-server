@@ -31,16 +31,21 @@ FrameArchiver::FrameArchiver(FrameArchiveConfig cfg)
         LOG_INFO("FrameArchiver: disabled");
         return;
     }
-    LOG_INFO("FrameArchiver: starting local_dir={} interval={} minio={}",
-             cfg_.local_dir, cfg_.save_interval, cfg_.minio.enabled ? "on" : "off");
-    worker_ = std::thread(&FrameArchiver::workerLoop, this);
+    LOG_INFO("FrameArchiver: starting local_dir={} interval={} minio={} worker_count={}",
+             cfg_.local_dir, cfg_.save_interval, cfg_.minio.enabled ? "on" : "off", cfg_.worker_count);
+    workers_.reserve(static_cast<std::size_t>(cfg_.worker_count));
+    for (int i = 0; i < cfg_.worker_count; ++i) {
+        workers_.emplace_back(&FrameArchiver::workerLoop, this);
+    }
 }
 
 FrameArchiver::~FrameArchiver() {
     stop_.store(true);
     cv_.notify_all();
-    if (worker_.joinable()) worker_.join();
-    LOG_INFO("FrameArchiver: stopped");
+    for (auto& worker : workers_) {
+        if (worker.joinable()) worker.join();
+    }
+    LOG_INFO("FrameArchiver: stopped worker_count={}", workers_.size());
 }
 
 std::string FrameArchiver::buildObjectKey(const StreamMeta& meta) const {
@@ -136,11 +141,13 @@ void FrameArchiver::workerLoop() {
             }
             const auto write_end = std::chrono::steady_clock::now();
             const auto write_ms = std::chrono::duration_cast<std::chrono::milliseconds>(write_end - write_start).count();
+            const auto worker_tid = std::hash<std::thread::id>{}(std::this_thread::get_id());
             Metrics::get().incFramesArchived();
-            LOG_DEBUG("FrameArchiver: wrote {} write_ms={} queue_depth_after_pop={}",
+            LOG_DEBUG("FrameArchiver: wrote {} write_ms={} queue_depth_after_pop={} worker_tid={}",
                       task.local_path,
                       write_ms,
-                      queue_depth_after_pop);
+                      queue_depth_after_pop,
+                      worker_tid);
             if (cfg_.minio.enabled) {
                 if (uploadToMinio(task.local_path, task.object_key)) {
                     Metrics::get().incFramesUploaded();

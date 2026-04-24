@@ -181,6 +181,7 @@ TEST(LoadConfig, ParsesFullYaml) {
     // frame archive
     EXPECT_TRUE(cfg.frame_archive.enabled);
     EXPECT_FALSE(cfg.frame_archive.allow_gpu_frames);
+    EXPECT_EQ(cfg.frame_archive.worker_count, 3);
     EXPECT_EQ(cfg.frame_archive.local_dir, "/tmp/infer-frames");
     EXPECT_EQ(cfg.frame_archive.save_interval, 2);
     EXPECT_EQ(cfg.frame_archive.jpeg_quality, 85);
@@ -673,4 +674,72 @@ TEST(LoadConfig, RedisConfigDefaults) {
     EXPECT_EQ(cfg.publishers.redis.port, 6379);
     EXPECT_EQ(cfg.publishers.redis.stream_prefix, "inference");
     EXPECT_EQ(cfg.publishers.redis.max_len, 1000);
+}
+
+TEST(LoadConfig, FrameArchiveWorkerCountDefaultsToOne) {
+    const std::string path = "data/test_frame_archive_worker_default.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+        out << "frame_archive:\n";
+        out << "  enabled: true\n";
+    }
+    AppConfig cfg = loadConfig(path);
+    EXPECT_EQ(cfg.frame_archive.worker_count, 1);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, FrameArchiveWorkerCountMustBePositive) {
+    const std::string path = "data/test_frame_archive_worker_invalid.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+        out << "frame_archive:\n";
+        out << "  enabled: true\n";
+        out << "  worker_count: 0\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
 }

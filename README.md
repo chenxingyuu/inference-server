@@ -124,6 +124,7 @@ curl -X POST http://localhost:8080/tasks/task_cam_001/stop
 - `source.rtsp`：RTSP/文件输入（内部使用 `FFmpegDecoder`）
 - `decode.ffmpeg`：解码阶段（当前为占位 passthrough，解码由 source 完成）
 - `archive.raw`：原图归档（复用 `FrameArchiver`，支持 `use_hwdec=true` 的 GPU 帧，默认开启）
+  - 可通过 `frame_archive.worker_count` 配置归档并发 worker 数（默认 `1`）。
 - `preprocess.yolo` / `postprocess.yolo`：占位 passthrough（后续可落地真实算子）
 - `infer.engine`：推理 stage（引用 `models[].id`）
 - `track.bytetrack`：ByteTrack 追踪

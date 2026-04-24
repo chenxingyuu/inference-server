@@ -425,10 +425,12 @@ AppConfig loadConfig(const std::string& yaml_path) {
     if (auto an = root["frame_archive"]) {
         cfg.frame_archive.enabled        = an["enabled"].as<bool>(false);
         cfg.frame_archive.allow_gpu_frames = an["allow_gpu_frames"].as<bool>(true);
+        cfg.frame_archive.worker_count   = an["worker_count"].as<int>(1);
         cfg.frame_archive.local_dir      = an["local_dir"].as<std::string>("./data/frames");
         cfg.frame_archive.save_interval  = an["save_interval"].as<int>(1);
         cfg.frame_archive.jpeg_quality   = an["jpeg_quality"].as<int>(90);
         cfg.frame_archive.queue_capacity = an["queue_capacity"].as<int>(4096);
+        if (cfg.frame_archive.worker_count <= 0) throw std::runtime_error("frame_archive.worker_count must be >= 1");
         if (cfg.frame_archive.save_interval <= 0) throw std::runtime_error("frame_archive.save_interval must be >= 1");
         if (cfg.frame_archive.jpeg_quality < 1 || cfg.frame_archive.jpeg_quality > 100) throw std::runtime_error("frame_archive.jpeg_quality must be in [1, 100]");
         if (cfg.frame_archive.queue_capacity <= 0) throw std::runtime_error("frame_archive.queue_capacity must be >= 1");

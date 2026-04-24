@@ -10,6 +10,7 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace infer {
 
@@ -50,7 +51,7 @@ private:
     std::mutex              mu_;
     std::condition_variable cv_;
     std::queue<ArchiveTask> queue_;
-    std::thread             worker_;
+    std::vector<std::thread> workers_;
 };
 
 } // namespace infer

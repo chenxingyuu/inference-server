@@ -184,6 +184,7 @@ struct MinioConfig {
 struct FrameArchiveConfig {
     bool        enabled{false};
     bool        allow_gpu_frames{true};
+    int         worker_count{1};
     std::string local_dir{"./data/frames"};
     int         save_interval{1};      // save every N frames
     int         jpeg_quality{90};      // [1,100]

@@ -106,6 +106,7 @@ kafka:
 frame_archive:
   enabled: true
   allow_gpu_frames: false
+  worker_count: 3
   local_dir: /tmp/infer-frames
   save_interval: 2
   jpeg_quality: 85
