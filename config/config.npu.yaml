@@ -41,15 +41,31 @@ streams:
     use_hwdec: false
     tracker: "none"
 
-kafka:
-  brokers: "192.168.3.135:9092"
-  topic: "inference-results"
-  batch_size: 100
-  linger_ms: 5
-  compression: "lz4"
-  queue_capacity: 10000
-  heartbeat_topic: "inference-heartbeat"
-  heartbeat_interval_ms: 5000
+# 推理结果发布（buildPublisher）：与 CPU/GPU 模板一致；无 pipeline 的 streams 布局同样依赖此块。
+# gRPC / Redis 需二进制打开 BUILD_GRPC_PUBLISHER / BUILD_REDIS_PUBLISHER（见 Makefile configure-*）。
+publishers:
+  kafka:
+    enabled: false
+    brokers: "192.168.3.135:9092"
+    topic: "inference-results"
+    batch_size: 100
+    linger_ms: 5
+    compression: "lz4"
+    queue_capacity: 10000
+    heartbeat_topic: "inference-heartbeat"
+    heartbeat_interval_ms: 5000
+    control_topic: "inference-control"
+  grpc:
+    enabled: true
+    port: 50051
+    max_connections: 100
+  redis:
+    enabled: true
+    host: "127.0.0.1"
+    port: 6379
+    stream_prefix: "inference"
+    max_len: 1000
+    queue_capacity: 10000
 
 frame_archive:
   enabled: false

@@ -112,8 +112,9 @@ pipelines:
           min_hits_to_confirm: "2"
       - id: "join_1"
         type: "join.byFrameId"
+      # 推理结果出口：写入根配置 publishers: 里启用的 IPublisher（本例 gRPC + Redis）。
       - id: "sink_1"
-        type: "sink.kafka"
+        type: "sink.publish"
       - id: "sink_stream_1"
         type: "sink.stream"
         with:
@@ -161,8 +162,9 @@ pipelines:
           model_id: "yolov8n_trt"
       - id: "post_2"
         type: "postprocess.yolo"
+      # 推理结果出口：同上 publishers:（gRPC + Redis）。
       - id: "sink_2"
-        type: "sink.kafka"
+        type: "sink.publish"
       - id: "sink_stream_2"
         type: "sink.stream"
         with:
@@ -201,18 +203,33 @@ tasks:
     sample_fps: 5
     use_hwdec: true
 
-kafka:
-  brokers: "kafka:9092"
-  topic: "inference-results"
-  batch_size: 100
-  linger_ms: 5
-  compression: "lz4"
-  queue_capacity: 10000
-  # Phase 10: heartbeat — allows downstream to distinguish 3 silence conditions
-  heartbeat_topic: "inference-heartbeat"
-  heartbeat_interval_ms: 5000
-  # Phase 14: control events — stream dropped/recovered/terminal-failed
-  control_topic: "inference-control"
+# 推理结果发布（buildPublisher）：可同时启用多种通道；至少须有一个 enabled: true。
+# 管线里用 sink.publish（或与 sink.publish 等价的 sink.kafka）把 join / post 输出交给上述 IPublisher。
+# gRPC：客户端连 host:<grpc.port>，订阅 InferenceService::Subscribe。
+# Redis：XADD 到流键 {stream_prefix}:{stream_id}，按需改 host/port。
+publishers:
+  kafka:
+    enabled: false
+    brokers: "kafka:9092"
+    topic: "inference-results"
+    batch_size: 100
+    linger_ms: 5
+    compression: "lz4"
+    queue_capacity: 10000
+    heartbeat_topic: "inference-heartbeat"
+    heartbeat_interval_ms: 5000
+    control_topic: "inference-control"
+  grpc:
+    enabled: true
+    port: 50051
+    max_connections: 100
+  redis:
+    enabled: true
+    host: "127.0.0.1"
+    port: 6379
+    stream_prefix: "inference"
+    max_len: 1000
+    queue_capacity: 10000
 
 frame_archive:
   enabled: true
