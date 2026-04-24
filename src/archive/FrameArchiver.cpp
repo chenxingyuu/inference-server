@@ -112,6 +112,7 @@ FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* 
 void FrameArchiver::workerLoop() {
     while (!stop_.load() || !queue_.empty()) {
         ArchiveTask task;
+        std::size_t queue_depth_after_pop = 0;
         {
             std::unique_lock<std::mutex> lock(mu_);
             cv_.wait_for(lock, std::chrono::milliseconds(50), [this] {
@@ -120,10 +121,12 @@ void FrameArchiver::workerLoop() {
             if (queue_.empty()) continue;
             task = std::move(queue_.front());
             queue_.pop();
-            Metrics::get().setFrameArchiveQueueDepth(static_cast<uint64_t>(queue_.size()));
+            queue_depth_after_pop = queue_.size();
+            Metrics::get().setFrameArchiveQueueDepth(static_cast<uint64_t>(queue_depth_after_pop));
         }
 
         try {
+            const auto write_start = std::chrono::steady_clock::now();
             fs::create_directories(fs::path(task.local_path).parent_path());
             std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, cfg_.jpeg_quality};
             if (!cv::imwrite(task.local_path, task.frame, params)) {
@@ -131,8 +134,13 @@ void FrameArchiver::workerLoop() {
                 LOG_WARN("FrameArchiver: failed to write local frame {}", task.local_path);
                 continue;
             }
+            const auto write_end = std::chrono::steady_clock::now();
+            const auto write_ms = std::chrono::duration_cast<std::chrono::milliseconds>(write_end - write_start).count();
             Metrics::get().incFramesArchived();
-            LOG_DEBUG("FrameArchiver: wrote {}", task.local_path);
+            LOG_DEBUG("FrameArchiver: wrote {} write_ms={} queue_depth_after_pop={}",
+                      task.local_path,
+                      write_ms,
+                      queue_depth_after_pop);
             if (cfg_.minio.enabled) {
                 if (uploadToMinio(task.local_path, task.object_key)) {
                     Metrics::get().incFramesUploaded();
