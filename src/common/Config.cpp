@@ -170,6 +170,12 @@ TrackerType parseTrackerType(const std::string& s) {
     throw std::runtime_error("Unknown tracker type: " + s);
 }
 
+SamplingMode parseSamplingMode(const std::string& s) {
+    if (s == "frame_count" || s.empty()) return SamplingMode::FrameCount;
+    if (s == "time_based")               return SamplingMode::TimeBased;
+    throw std::runtime_error("Unknown sampling_mode: " + s);
+}
+
 EdgeDropPolicy parseEdgeDropPolicy(const std::string& s) {
     if (s == "block") return EdgeDropPolicy::Block;
     if (s == "drop_oldest") return EdgeDropPolicy::DropOldest;
@@ -347,8 +353,9 @@ AppConfig loadConfig(const std::string& yaml_path) {
             t.id = tn["id"].as<std::string>();
             t.source_id = tn["source_id"].as<std::string>();
             t.pipeline_id = tn["pipeline_id"].as<std::string>();
-            t.sample_fps = tn["sample_fps"].as<int>(5);
-            t.use_hwdec = tn["use_hwdec"].as<bool>(false);
+            t.sample_fps     = tn["sample_fps"].as<int>(5);
+            t.sampling_mode  = parseSamplingMode(tn["sampling_mode"].as<std::string>("frame_count"));
+            t.use_hwdec      = tn["use_hwdec"].as<bool>(false);
             cfg.tasks.push_back(std::move(t));
         }
     }

@@ -16,7 +16,7 @@ namespace infer {
 class SourceFileStage final : public IStage {
 public:
     SourceFileStage(std::string id, const PipelineSourceConfig& src,
-                    int sample_fps, bool use_hwdec, bool loop);
+                    int sample_fps, SamplingMode sampling_mode, bool use_hwdec, bool loop);
 
     std::string id() const override;
     bool isSource() const override;
@@ -29,6 +29,7 @@ private:
     std::string id_;
     PipelineSourceConfig source_;
     int sample_fps_;
+    SamplingMode sampling_mode_;
     bool use_hwdec_;
     bool loop_;
     FFmpegDecoder decoder_;

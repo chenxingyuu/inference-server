@@ -27,7 +27,7 @@ find_package(Threads REQUIRED)
 
 # FFmpeg
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libavutil libswscale)
+pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libavutil libswscale libavdevice libavfilter)
 
 # yaml-cpp
 find_package(yaml-cpp REQUIRED)

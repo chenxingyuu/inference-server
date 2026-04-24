@@ -93,6 +93,14 @@ target_link_libraries(test_ffmpeg_file_decoder PRIVATE
 )
 add_test(NAME test_ffmpeg_file_decoder COMMAND test_ffmpeg_file_decoder
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+add_executable(test_frame_sampling test_frame_sampling.cpp)
+target_link_libraries(test_frame_sampling PRIVATE
+    infer_core
+    GTest::gtest_main
+)
+add_test(NAME test_frame_sampling COMMAND test_frame_sampling
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 add_executable(test_draw_and_stream_stage test_draw_and_stream_stage.cpp
     ${CMAKE_SOURCE_DIR}/src/pipeline/stages/DrawAndStreamStage.cpp
     ${CMAKE_SOURCE_DIR}/src/pipeline/stages/DetectionOverlay.cpp

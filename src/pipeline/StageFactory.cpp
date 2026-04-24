@@ -64,11 +64,11 @@ std::string getStringWithDefault(
 
 std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Context& ctx) {
     if (cfg.type == "source.rtsp") {
-        return std::make_unique<SourceRtspStage>(cfg.id, ctx.source, ctx.ingest_sample_fps, ctx.ingest_use_hwdec);
+        return std::make_unique<SourceRtspStage>(cfg.id, ctx.source, ctx.ingest_sample_fps, ctx.ingest_sampling_mode, ctx.ingest_use_hwdec);
     }
     if (cfg.type == "source.file") {
         bool loop = getStringWithDefault(cfg.with, "loop", "false") == "true";
-        return std::make_unique<SourceFileStage>(cfg.id, ctx.source, ctx.ingest_sample_fps, ctx.ingest_use_hwdec, loop);
+        return std::make_unique<SourceFileStage>(cfg.id, ctx.source, ctx.ingest_sample_fps, ctx.ingest_sampling_mode, ctx.ingest_use_hwdec, loop);
     }
     if (cfg.type == "decode.ffmpeg" || cfg.type == "preprocess.yolo" || cfg.type == "postprocess.yolo") {
         return std::make_unique<PassthroughStage>(cfg.id);

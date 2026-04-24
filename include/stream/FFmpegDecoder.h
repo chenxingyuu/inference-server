@@ -1,7 +1,9 @@
 #pragma once
 
+#include "common/Config.h"
 #include "stream/IStreamDecoder.h"
 #include "stream/InterruptCtx.h"
+#include <optional>
 #include <thread>
 #include <atomic>
 #include <string>
@@ -19,6 +21,23 @@ extern "C" {
 }
 
 namespace infer {
+
+// Compute frame-count sample interval from actual and target fps.
+// Falls back to 25 fps if stream_fps <= 0. Result is always >= 1.
+int computeSampleInterval(double stream_fps, int sample_fps);
+
+// Per-reconnect sampling state passed into readAndDecode().
+struct SamplingParams {
+    SamplingMode mode{SamplingMode::FrameCount};
+    int          sample_fps{5};
+    int          sample_interval{1};   // used in FrameCount mode
+    double       last_emit_pts{-1.0};  // TimeBased: seconds since stream start, -1 = unset
+
+    // Returns true if the current frame should be emitted.
+    // pts: frame presentation time in seconds; nullopt means AV_NOPTS_VALUE.
+    // frame_seq: 0-based decoded-frame count since last reconnect.
+    bool shouldEmit(std::optional<double> pts, uint64_t frame_seq);
+};
 
 // Set FFmpeg's global log threshold at runtime.
 // Valid values: "quiet", "panic", "fatal", "error", "warning", "info", "verbose", "debug", "trace".
@@ -49,7 +68,7 @@ private:
     void decodeLoop(StreamConfig cfg, FrameCallback cb);
     bool openStream(const StreamConfig& cfg);
     void closeStream();
-    ReadExitReason readAndDecode(FrameCallback& cb, int sample_interval);
+    ReadExitReason readAndDecode(FrameCallback& cb, SamplingParams& params);
 
     // Called by FFmpeg to select the hw pixel format
     static AVPixelFormat getHWFormat(AVCodecContext* ctx, const AVPixelFormat* pix_fmts);

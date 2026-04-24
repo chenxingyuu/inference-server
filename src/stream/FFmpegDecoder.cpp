@@ -6,6 +6,7 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavdevice/avdevice.h>
 #include <libavformat/avformat.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
@@ -80,6 +81,26 @@ static int parseFfmpegLogLevel(const std::string& s) {
 }
 } // namespace
 
+// ─── Free functions ───────────────────────────────────────────────────────────
+
+int computeSampleInterval(double stream_fps, int sample_fps) {
+    if (stream_fps <= 0.0) stream_fps = 25.0;
+    return std::max(1, static_cast<int>(std::round(stream_fps / std::max(1, sample_fps))));
+}
+
+bool SamplingParams::shouldEmit(std::optional<double> pts, uint64_t frame_seq) {
+    if (mode == SamplingMode::TimeBased && pts.has_value()) {
+        const double min_gap = 1.0 / std::max(1, sample_fps);
+        if (last_emit_pts < 0.0 || (pts.value() - last_emit_pts) >= min_gap) {
+            last_emit_pts = pts.value();
+            return true;
+        }
+        return false;
+    }
+    // FrameCount mode, or TimeBased fallback when pts == AV_NOPTS_VALUE
+    return (frame_seq % static_cast<uint64_t>(sample_interval)) == 0;
+}
+
 void setFfmpegLogLevel(const std::string& level) {
     configureFfmpegLogLevelOnce();   // ensure callback is registered
     av_log_set_level(parseFfmpegLogLevel(level));
@@ -128,12 +149,27 @@ bool FFmpegDecoder::openStream(const StreamConfig& cfg) {
     av_dict_set(&opts, "analyzeduration", "1000000", 0);
     av_dict_set(&opts, "probesize", "1000000", 0);
 
+    // lavfi is an input device; register devices so av_find_input_format("lavfi") works.
+    // avdevice_register_all() is idempotent.
+    static std::once_flag avdevice_init;
+    std::call_once(avdevice_init, avdevice_register_all);
+
+    // "lavfi:<filtergraph>" URLs require the lavfi input device with the filtergraph
+    // string passed as the filename (not the full "lavfi:<graph>" URL).
+    const AVInputFormat* input_fmt = nullptr;
+    std::string open_url = cfg.url;
+    static constexpr std::string_view kLavfiPrefix = "lavfi:";
+    if (cfg.url.compare(0, kLavfiPrefix.size(), kLavfiPrefix) == 0) {
+        input_fmt = av_find_input_format("lavfi");
+        open_url  = cfg.url.substr(kLavfiPrefix.size());
+    }
+
     // Pre-allocate so we can attach the interrupt callback before the blocking open.
     fmt_ctx_ = avformat_alloc_context();
     fmt_ctx_->interrupt_callback = {InterruptCtx::check, &interrupt_ctx_};
 
     interrupt_ctx_.arm(open_timeout_us_);
-    int open_ret = avformat_open_input(&fmt_ctx_, cfg.url.c_str(), nullptr, &opts);
+    int open_ret = avformat_open_input(&fmt_ctx_, open_url.c_str(), input_fmt, &opts);
     interrupt_ctx_.disarm();
     av_dict_free(&opts);
 
@@ -239,7 +275,7 @@ void FFmpegDecoder::closeStream() {
     video_stream_idx_ = -1;
 }
 
-ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interval) {
+ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& params) {
     AVPacket* pkt   = av_packet_alloc();
     AVFrame*  frame = av_frame_alloc();
     ReadExitReason exit_reason = ReadExitReason::FramesOk;
@@ -268,7 +304,15 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, int sample_interv
         if (pkt->stream_index == video_stream_idx_) {
             if (avcodec_send_packet(codec_ctx_, pkt) == 0) {
                 while (avcodec_receive_frame(codec_ctx_, frame) == 0) {
-                    if ((frame_seq_++ % sample_interval) == 0) {
+                    const uint64_t seq = frame_seq_++;
+
+                    std::optional<double> frame_pts;
+                    if (frame->pts != AV_NOPTS_VALUE) {
+                        AVStream* vs = fmt_ctx_->streams[video_stream_idx_];
+                        frame_pts = frame->pts * av_q2d(vs->time_base);
+                    }
+
+                    if (params.shouldEmit(frame_pts, seq)) {
                         Frame f;
                         f.meta.stream_id   = stream_id_;
                         f.meta.capture_ts  = nowEpoch();
@@ -357,8 +401,6 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
     auto& reg = StreamHealthRegistry::get();
     reg.onStreamAdded(cfg.id, cfg.degraded_threshold, cfg.max_reconnect_attempts);
 
-    const int sample_interval = std::max(1, 25 / std::max(1, cfg.sample_fps));
-
     while (!stop_flag_.load()) {
         if (!openStream(cfg)) {
             // File sources: a failed open is terminal — don't retry.
@@ -409,7 +451,21 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
             }
         }
 
-        auto reason = readAndDecode(cb, sample_interval);
+        // Build SamplingParams from actual stream fps (only valid after openStream()).
+        frame_seq_ = 0;
+        SamplingParams params;
+        params.mode      = cfg.sampling_mode;
+        params.sample_fps = cfg.sample_fps;
+        {
+            AVStream* vs = fmt_ctx_->streams[video_stream_idx_];
+            params.sample_interval = computeSampleInterval(av_q2d(vs->avg_frame_rate), cfg.sample_fps);
+        }
+        LOG_INFO("[{}] sampling mode={} sample_fps={} interval={}",
+                 cfg.id,
+                 params.mode == SamplingMode::TimeBased ? "time_based" : "frame_count",
+                 params.sample_fps, params.sample_interval);
+
+        auto reason = readAndDecode(cb, params);
         closeStream();
 
         // File sources: EOF is a clean terminal; optionally loop by re-opening.
