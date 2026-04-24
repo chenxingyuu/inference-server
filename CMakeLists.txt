@@ -184,7 +184,33 @@ set(PUBLISHER_SOURCES
 
 # ── gRPC publisher ────────────────────────────────────────────────────────────
 if(BUILD_GRPC_PUBLISHER)
-    find_package(gRPC CONFIG REQUIRED)
+    find_package(gRPC CONFIG QUIET)
+    if(NOT gRPC_FOUND)
+        # Fallback: apt-installed gRPC on Ubuntu provides pkg-config but not cmake config
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(GRPCPP REQUIRED grpc++)
+        if(NOT TARGET gRPC::grpc++)
+            add_library(gRPC::grpc++ INTERFACE IMPORTED)
+            set_target_properties(gRPC::grpc++ PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${GRPCPP_INCLUDE_DIRS}"
+                INTERFACE_LINK_LIBRARIES "${GRPCPP_LINK_LIBRARIES}"
+                INTERFACE_LINK_DIRECTORIES "${GRPCPP_LIBRARY_DIRS}"
+                INTERFACE_COMPILE_OPTIONS "${GRPCPP_CFLAGS_OTHER}"
+            )
+        endif()
+        if(NOT TARGET protobuf::libprotobuf)
+            pkg_check_modules(PROTOBUF REQUIRED protobuf)
+            add_library(protobuf::libprotobuf INTERFACE IMPORTED)
+            set_target_properties(protobuf::libprotobuf PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${PROTOBUF_INCLUDE_DIRS}"
+                INTERFACE_LINK_LIBRARIES "${PROTOBUF_LINK_LIBRARIES}"
+                INTERFACE_LINK_DIRECTORIES "${PROTOBUF_LIBRARY_DIRS}"
+            )
+        endif()
+        message(STATUS "gRPC found via pkg-config: ${GRPCPP_VERSION}")
+    else()
+        message(STATUS "gRPC found via cmake config: ${gRPC_VERSION}")
+    endif()
 
     set(PROTO_SRC_DIR "${CMAKE_SOURCE_DIR}/proto")
     set(PROTO_OUT_DIR "${CMAKE_BINARY_DIR}/generated")
@@ -235,6 +261,7 @@ if(BUILD_REDIS_PUBLISHER)
             OVERRIDE_FIND_PACKAGE
         )
         set(DISABLE_TESTS ON CACHE BOOL "" FORCE)
+        set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(hiredis)
 
         # redis++ FindHiredis: OVERRIDE_FIND_PACKAGE leaves hiredis_INCLUDE_DIRS empty and its
@@ -263,6 +290,7 @@ if(BUILD_REDIS_PUBLISHER)
         )
         set(REDIS_PLUS_PLUS_BUILD_TEST   OFF CACHE BOOL "" FORCE)
         set(REDIS_PLUS_PLUS_BUILD_STATIC ON  CACHE BOOL "" FORCE)
+        set(REDIS_PLUS_PLUS_BUILD_SHARED OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(redis_plus_plus)
         # redis++ enables -Werror; Clang rejects hiredis C headers (flexible array members) in C++ mode.
         foreach(_rpp_tgt IN ITEMS redis++_static redis++)

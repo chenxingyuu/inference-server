@@ -2,6 +2,7 @@
 #include "common/Logger.h"
 
 #include <grpcpp/server_builder.h>
+#include <thread>
 
 namespace infer {
 
