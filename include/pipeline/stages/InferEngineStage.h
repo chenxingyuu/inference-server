@@ -41,6 +41,7 @@ private:
 
     // Background thread: fires every max_queue_delay_us/2 to flush stale frames.
     void flushLoop();
+    std::size_t pendingQueueSize();
 
     std::string id_;
     ModelConfig model_cfg_;

@@ -1,5 +1,6 @@
 #include "pipeline/TaskManager.h"
 #include "pipeline/StageFactory.h"
+#include "common/Logger.h"
 
 namespace infer {
 
@@ -31,6 +32,12 @@ void TaskManager::loadAll() {
             executor->addStage(StageFactory::create(node, ctx));
         }
         executor->build();
+        LOG_INFO(
+            "Pipeline built for task={} (template_pipeline={}, source={})\n{}",
+            task.id,
+            task.pipeline_id,
+            task.source_id,
+            executor->graphText());
         entries_[task.id] = Entry{std::move(executor), State::Stopped};
     }
 }

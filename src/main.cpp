@@ -64,6 +64,26 @@ std::unique_ptr<infer::IPublisher> buildPublisher(const infer::PublishersConfig&
         return std::move(pubs[0]);
     return std::make_unique<infer::MultiPublisher>(std::move(pubs));
 }
+
+void logConfiguredPipelinesAndTasks(const infer::AppConfig& cfg) {
+    LOG_INFO("Configured pipelines: {}", cfg.pipelines.size());
+    for (const auto& pipeline : cfg.pipelines) {
+        LOG_INFO("  pipeline id={} nodes={} edges={}",
+                 pipeline.id,
+                 pipeline.nodes.size(),
+                 pipeline.edges.size());
+    }
+
+    LOG_INFO("Configured tasks: {}", cfg.tasks.size());
+    for (const auto& task : cfg.tasks) {
+        LOG_INFO("  task id={} source={} pipeline={} sample_fps={} hwdec={}",
+                 task.id,
+                 task.source_id,
+                 task.pipeline_id,
+                 task.sample_fps,
+                 task.use_hwdec ? "true" : "false");
+    }
+}
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -89,6 +109,7 @@ int main(int argc, char* argv[]) {
 
     // Re-apply log level from config now that it is parsed.
     infer::initLogger(cfg.server.log_level);
+    logConfiguredPipelinesAndTasks(cfg);
 
     // ── FFmpeg log level: env var > YAML > default ────────────────────────────
     {

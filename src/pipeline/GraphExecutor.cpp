@@ -1,5 +1,6 @@
 #include "pipeline/GraphExecutor.h"
 
+#include <sstream>
 #include <stdexcept>
 
 namespace infer {
@@ -32,6 +33,21 @@ void GraphExecutor::build() {
         edges_[key] = std::make_shared<EdgeQueue>(e);
         incoming_edge_keys_[e.to].push_back(key);
     }
+}
+
+std::string GraphExecutor::graphText() const {
+    std::ostringstream oss;
+    oss << "pipeline=" << cfg_.id << '\n';
+    oss << "  nodes(" << cfg_.nodes.size() << ")\n";
+    for (const auto& node : cfg_.nodes) {
+        oss << "    - " << node.id << " [" << node.type << "]\n";
+    }
+    oss << "  edges(" << cfg_.edges.size() << ")\n";
+    for (const auto& edge : cfg_.edges) {
+        oss << "    - " << edge.from << " -> " << edge.to
+            << " (cap=" << edge.capacity << ")\n";
+    }
+    return oss.str();
 }
 
 void GraphExecutor::start() {

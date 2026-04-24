@@ -8,6 +8,7 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <string>
 
 namespace infer {
 
@@ -20,6 +21,7 @@ public:
     void build();
     void start();
     void stop();
+    std::string graphText() const;
     bool running() const { return running_.load(); }
     const std::string& pipelineId() const { return cfg_.id; }
 
