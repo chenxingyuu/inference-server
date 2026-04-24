@@ -424,6 +424,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
     }
     if (auto an = root["frame_archive"]) {
         cfg.frame_archive.enabled        = an["enabled"].as<bool>(false);
+        cfg.frame_archive.allow_gpu_frames = an["allow_gpu_frames"].as<bool>(true);
         cfg.frame_archive.local_dir      = an["local_dir"].as<std::string>("./data/frames");
         cfg.frame_archive.save_interval  = an["save_interval"].as<int>(1);
         cfg.frame_archive.jpeg_quality   = an["jpeg_quality"].as<int>(90);

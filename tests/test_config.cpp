@@ -180,6 +180,7 @@ TEST(LoadConfig, ParsesFullYaml) {
 
     // frame archive
     EXPECT_TRUE(cfg.frame_archive.enabled);
+    EXPECT_FALSE(cfg.frame_archive.allow_gpu_frames);
     EXPECT_EQ(cfg.frame_archive.local_dir, "/tmp/infer-frames");
     EXPECT_EQ(cfg.frame_archive.save_interval, 2);
     EXPECT_EQ(cfg.frame_archive.jpeg_quality, 85);

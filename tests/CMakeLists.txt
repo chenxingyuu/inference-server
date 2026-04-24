@@ -112,6 +112,25 @@ target_link_libraries(test_draw_and_stream_stage PRIVATE
 add_test(NAME test_draw_and_stream_stage COMMAND test_draw_and_stream_stage
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+add_executable(test_archive_raw_stage test_archive_raw_stage.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/ArchiveRawStage.cpp
+    ${CMAKE_SOURCE_DIR}/src/archive/FrameArchiver.cpp
+)
+target_include_directories(test_archive_raw_stage PRIVATE
+    ${FFMPEG_INCLUDE_DIRS}
+)
+target_link_directories(test_archive_raw_stage PRIVATE
+    ${FFMPEG_LIBRARY_DIRS}
+)
+target_link_libraries(test_archive_raw_stage PRIVATE
+    infer_testable
+    GTest::gtest_main
+    CURL::libcurl
+    ${FFMPEG_LIBRARIES}
+)
+add_test(NAME test_archive_raw_stage COMMAND test_archive_raw_stage
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
 # Phase 10: heartbeat JSON serialization (needs rdkafka for linking HeartbeatPublisher.cpp)
 add_executable(test_heartbeat_publisher test_heartbeat_publisher.cpp
     ${CMAKE_SOURCE_DIR}/src/publisher/HeartbeatPublisher.cpp

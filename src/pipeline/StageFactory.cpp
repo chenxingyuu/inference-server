@@ -74,7 +74,10 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         return std::make_unique<PassthroughStage>(cfg.id);
     }
     if (cfg.type == "archive.raw") {
-        return std::make_unique<ArchiveRawStage>(cfg.id, ctx.frame_archiver);
+        return std::make_unique<ArchiveRawStage>(
+            cfg.id,
+            ctx.frame_archiver,
+            ctx.app_config.frame_archive.allow_gpu_frames);
     }
     if (cfg.type == "infer.engine") {
         auto model_id_it = cfg.with.find("model_id");
