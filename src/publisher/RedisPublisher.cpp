@@ -21,8 +21,8 @@ public:
     void xadd(const std::string& key,
               const std::vector<std::pair<std::string,std::string>>& fields,
               long long maxlen) override {
-        redis_->xadd(key, "*", fields.begin(), fields.end(),
-                     sw::redis::MAXLEN{maxlen, false});
+        // redis-plus-plus 1.3.x: MAXLEN via (count, approx) overload instead of sw::redis::MAXLEN.
+        redis_->xadd(key, "*", fields.begin(), fields.end(), maxlen, false);
     }
 
 private:

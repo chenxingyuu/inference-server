@@ -36,6 +36,8 @@ configure-cpu:
 	  -DBUILD_ASCEND_BACKEND=OFF \
 	  -DBUILD_ONNX_BACKEND=ON \
 	  -DBUILD_ONNX_BACKEND_COREML=ON \
+	  -DBUILD_REDIS_PUBLISHER=ON \
+	  -DBUILD_GRPC_PUBLISHER=ON \
 	  -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
 
 configure-gpu:
@@ -102,8 +104,8 @@ docker-build-gpu:
 	DOCKER_BUILDKIT=1 docker build \
 	  -t inference-server:tensorrt \
 	  -f docker/Dockerfile.tensorrt \
-	  --build-arg CUDA_DEVEL_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04 \
-	  --build-arg CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 \
+	  --build-arg TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
+	  --build-arg TRT_RUNTIME_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
 	  .
 
 docker-build-npu:

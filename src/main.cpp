@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 
 namespace {
@@ -42,6 +43,23 @@ std::unique_ptr<infer::IPublisher> buildPublisher(const infer::PublishersConfig&
     if (cfg.grpc.enabled)
         pubs.push_back(std::make_unique<infer::GrpcPublisher>(cfg.grpc));
 #endif
+    if (pubs.empty()) {
+        std::ostringstream msg;
+        msg << "No result publisher could be constructed: ";
+        if (!cfg.kafka.enabled)
+            msg << "publishers.kafka.enabled is false; ";
+#if !defined(BUILD_REDIS_PUBLISHER)
+        if (cfg.redis.enabled)
+            msg << "publishers.redis.enabled but binary built without BUILD_REDIS_PUBLISHER; ";
+#endif
+#if !defined(BUILD_GRPC_PUBLISHER)
+        if (cfg.grpc.enabled)
+            msg << "publishers.grpc.enabled but binary built without BUILD_GRPC_PUBLISHER; ";
+#endif
+        msg << "set publishers.kafka.enabled: true, or re-run cmake with "
+               "-DBUILD_REDIS_PUBLISHER=ON -DBUILD_GRPC_PUBLISHER=ON (see Makefile configure-cpu).";
+        throw std::runtime_error(msg.str());
+    }
     if (pubs.size() == 1)
         return std::move(pubs[0]);
     return std::make_unique<infer::MultiPublisher>(std::move(pubs));

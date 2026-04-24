@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 project(InferenceServer VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -191,6 +191,8 @@ if(BUILD_GRPC_PUBLISHER)
     file(MAKE_DIRECTORY ${PROTO_OUT_DIR})
 
     find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
+    # gRPC's protobuf import does not always expose Protobuf_PROTOC_EXECUTABLE to this scope.
+    find_program(INFER_PROTOC_EXECUTABLE protoc REQUIRED)
 
     add_custom_command(
         OUTPUT
@@ -198,8 +200,7 @@ if(BUILD_GRPC_PUBLISHER)
             "${PROTO_OUT_DIR}/inference.pb.h"
             "${PROTO_OUT_DIR}/inference.grpc.pb.cc"
             "${PROTO_OUT_DIR}/inference.grpc.pb.h"
-        COMMAND ${GRPC_CPP_PLUGIN} --version || true
-        COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+        COMMAND ${INFER_PROTOC_EXECUTABLE}
             -I ${PROTO_SRC_DIR}
             --cpp_out=${PROTO_OUT_DIR}
             --grpc_out=${PROTO_OUT_DIR}
@@ -220,27 +221,57 @@ if(BUILD_GRPC_PUBLISHER)
 endif()
 
 # ── Redis publisher ───────────────────────────────────────────────────────────
+# When FetchContent is used, always bundle hiredis too. If only redis++ is missing but
+# system hiredis is found, skipping FetchContent hiredis makes redis++ compile against
+# Homebrew hiredis headers while redis++ enables -Werror (Clang flexible-array-member).
 if(BUILD_REDIS_PUBLISHER)
-    find_package(hiredis QUIET)
     find_package(redis++ QUIET)
-    if(NOT hiredis_FOUND OR NOT redis++_FOUND)
+    if(NOT redis++_FOUND)
         include(FetchContent)
         FetchContent_Declare(hiredis
             GIT_REPOSITORY https://github.com/redis/hiredis.git
-            GIT_TAG        v1.2.0
+            GIT_TAG        v1.3.0
             GIT_SHALLOW    TRUE
+            OVERRIDE_FIND_PACKAGE
         )
         set(DISABLE_TESTS ON CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(hiredis)
 
+        # redis++ FindHiredis: OVERRIDE_FIND_PACKAGE leaves hiredis_INCLUDE_DIRS empty and its
+        # fallback find_path does not match FetchContent's hiredis-src layout. Provide
+        # include/hiredis/*.h so <hiredis/hiredis.h> resolves against the bundled tree.
+        set(INFER_FETCHED_HIREDIS_INCLUDE "${CMAKE_BINARY_DIR}/hiredis_vendor_include")
+        if(EXISTS "${INFER_FETCHED_HIREDIS_INCLUDE}")
+            file(REMOVE_RECURSE "${INFER_FETCHED_HIREDIS_INCLUDE}")
+        endif()
+        file(MAKE_DIRECTORY "${INFER_FETCHED_HIREDIS_INCLUDE}/hiredis")
+        file(GLOB _INFER_HIREDIS_HDRS "${hiredis_SOURCE_DIR}/*.h")
+        foreach(_hdr IN LISTS _INFER_HIREDIS_HDRS)
+            get_filename_component(_hname "${_hdr}" NAME)
+            file(CREATE_LINK "${_hdr}" "${INFER_FETCHED_HIREDIS_INCLUDE}/hiredis/${_hname}" SYMBOLIC)
+        endforeach()
+        if(IS_DIRECTORY "${hiredis_SOURCE_DIR}/adapters")
+            file(CREATE_LINK "${hiredis_SOURCE_DIR}/adapters"
+                 "${INFER_FETCHED_HIREDIS_INCLUDE}/hiredis/adapters" SYMBOLIC)
+        endif()
+        set(hiredis_INCLUDE_DIRS "${INFER_FETCHED_HIREDIS_INCLUDE}" CACHE INTERNAL "" FORCE)
+
         FetchContent_Declare(redis_plus_plus
             GIT_REPOSITORY https://github.com/sewenew/redis-plus-plus.git
-            GIT_TAG        1.3.12
+            GIT_TAG        1.3.15
             GIT_SHALLOW    TRUE
         )
         set(REDIS_PLUS_PLUS_BUILD_TEST   OFF CACHE BOOL "" FORCE)
         set(REDIS_PLUS_PLUS_BUILD_STATIC ON  CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(redis_plus_plus)
+        # redis++ enables -Werror; Clang rejects hiredis C headers (flexible array members) in C++ mode.
+        foreach(_rpp_tgt IN ITEMS redis++_static redis++)
+            if(TARGET ${_rpp_tgt})
+                target_compile_options(${_rpp_tgt} PRIVATE
+                    $<$<COMPILE_LANGUAGE:CXX>:-Wno-error>
+                    $<$<COMPILE_LANGUAGE:CXX>:-Wno-c99-extensions>)
+            endif()
+        endforeach()
     endif()
 endif()
 
@@ -301,6 +332,19 @@ target_link_libraries(infer_core PUBLIC
     $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:inference_proto>
     $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:gRPC::grpc++>
 )
+
+# FetchContent / find_package redis++ exposes static and/or shared targets.
+if(BUILD_REDIS_PUBLISHER)
+    if(TARGET redis++::redis++_static)
+        target_link_libraries(infer_core PUBLIC redis++::redis++_static)
+    elseif(TARGET redis++::redis++)
+        target_link_libraries(infer_core PUBLIC redis++::redis++)
+    elseif(TARGET redis++)
+        target_link_libraries(infer_core PUBLIC redis++)
+    else()
+        message(FATAL_ERROR "BUILD_REDIS_PUBLISHER is ON but no redis++ CMake target is defined")
+    endif()
+endif()
 
 target_compile_definitions(infer_core PUBLIC
     $<$<BOOL:${BUILD_TRT_BACKEND}>:BUILD_TRT_BACKEND>
