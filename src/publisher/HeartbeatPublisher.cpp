@@ -11,6 +11,15 @@ namespace infer {
 using json = nlohmann::json;
 
 namespace {
+void requireKafkaConfSet(rd_kafka_conf_t* conf,
+                         const char* key,
+                         const std::string& value,
+                         char* errstr,
+                         std::size_t errstr_size) {
+    if (rd_kafka_conf_set(conf, key, value.c_str(), errstr, errstr_size) != RD_KAFKA_CONF_OK) {
+        throw std::runtime_error(std::string("HeartbeatPublisher: invalid kafka conf for ") + key + ": " + errstr);
+    }
+}
 double nowEpoch() {
     using namespace std::chrono;
     return duration<double>(system_clock::now().time_since_epoch()).count();
@@ -22,19 +31,23 @@ HeartbeatPublisher::HeartbeatPublisher(const KafkaConfig& cfg)
 {
     char errstr[512];
     rd_kafka_conf_t* conf = rd_kafka_conf_new();
-    rd_kafka_conf_set(conf, "bootstrap.servers", cfg.brokers.c_str(),
-                      errstr, sizeof(errstr));
+    requireKafkaConfSet(conf, "bootstrap.servers", cfg.brokers, errstr, sizeof(errstr));
     // heartbeat messages are tiny — no batching/compression needed
-    rd_kafka_conf_set(conf, "linger.ms", "0", errstr, sizeof(errstr));
+    requireKafkaConfSet(conf, "linger.ms", "0", errstr, sizeof(errstr));
 
     producer_ = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
-    if (!producer_)
+    if (!producer_) {
+        rd_kafka_conf_destroy(conf);
         throw std::runtime_error(
             std::string("HeartbeatPublisher: rd_kafka_new failed: ") + errstr);
+    }
 
     topic_ = rd_kafka_topic_new(producer_, cfg.heartbeat_topic.c_str(), nullptr);
-    if (!topic_)
+    if (!topic_) {
+        rd_kafka_destroy(producer_);
+        producer_ = nullptr;
         throw std::runtime_error("HeartbeatPublisher: rd_kafka_topic_new failed");
+    }
 
     LOG_INFO("HeartbeatPublisher: connected to {} heartbeat_topic={} interval={}ms",
              cfg.brokers, cfg.heartbeat_topic, interval_ms_);

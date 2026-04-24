@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <queue>
+#include <regex>
+#include <cmath>
 
 namespace infer {
 
@@ -18,11 +20,29 @@ std::string scalarToString(const YAML::Node& node) {
 }
 
 void validateSources(const AppConfig& cfg) {
+    static const std::regex kStreamIdPattern("^[A-Za-z0-9_-]+$");
     std::unordered_set<std::string> source_ids;
     for (const auto& src : cfg.sources) {
         if (src.id.empty()) throw std::runtime_error("source.id must not be empty");
+        if (!std::regex_match(src.id, kStreamIdPattern)) {
+            throw std::runtime_error("source.id contains illegal characters: " + src.id);
+        }
         if (!source_ids.insert(src.id).second) {
             throw std::runtime_error("duplicate source id: " + src.id);
+        }
+    }
+}
+
+void validateModels(const AppConfig& cfg) {
+    static const std::regex kModelIdPattern("^[A-Za-z0-9_-]+$");
+    std::unordered_set<std::string> model_ids;
+    for (const auto& model : cfg.models) {
+        if (model.id.empty()) throw std::runtime_error("model.id must not be empty");
+        if (!std::regex_match(model.id, kModelIdPattern)) {
+            throw std::runtime_error("model.id contains illegal characters: " + model.id);
+        }
+        if (!model_ids.insert(model.id).second) {
+            throw std::runtime_error("duplicate model id: " + model.id);
         }
     }
 }
@@ -65,6 +85,9 @@ void validatePipelineGraphs(const AppConfig& cfg) {
                     }
                     if (fps <= 0.0f) {
                         throw std::runtime_error("sink.ffplay fps must be > 0");
+                    }
+                    if (!std::isfinite(fps) || fps > 240.0f) {
+                        throw std::runtime_error("sink.ffplay fps must be finite and <= 240");
                     }
                 }
                 auto qc_it = n.with.find("queue_capacity");
@@ -140,6 +163,7 @@ void validateTasks(const AppConfig& cfg) {
 }
 
 void validateAppConfig(const AppConfig& cfg) {
+    validateModels(cfg);
     validateSources(cfg);
     validatePipelineGraphs(cfg);
     validateTasks(cfg);
@@ -268,7 +292,13 @@ AppConfig loadConfig(const std::string& yaml_path) {
         is.channels   = 3;
         is.batch      = m.batch_size;
         if (auto op = mn["om_paths"]) {
-            for (const auto& kv : op) m.om_paths[kv.first.as<int>()] = kv.second.as<std::string>();
+            for (const auto& kv : op) {
+                try {
+                    m.om_paths[kv.first.as<int>()] = kv.second.as<std::string>();
+                } catch (const YAML::Exception& e) {
+                    throw std::runtime_error("om_paths keys must be integers: " + std::string(e.what()));
+                }
+            }
         }
         if (auto cn = mn["class_names"]) {
             for (const auto& n : cn) m.class_names.push_back(n.as<std::string>());

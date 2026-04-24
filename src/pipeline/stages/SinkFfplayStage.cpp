@@ -5,8 +5,18 @@
 #include "pipeline/stages/DetectionOverlay.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <cerrno>
+#include <limits>
+#include <spawn.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <utility>
+
+extern char** environ;
 
 namespace infer {
 
@@ -120,13 +130,58 @@ bool SinkFfplayStage::ensureFfplayOpened(const cv::Mat& frame) {
     if (now < next_reconnect_at_) return false;
 
     reconnect_attempts_.fetch_add(1, std::memory_order_relaxed);
-    const std::string cmd =
-        "ffplay -loglevel error -fflags nobuffer -flags low_delay "
-        "-f rawvideo -pixel_format bgr24 "
-        "-video_size " + std::to_string(frame.cols) + "x" + std::to_string(frame.rows) + " "
-        "-framerate " + std::to_string(cfg_.fps) + " -";
-    ffplay_pipe_ = popen(cmd.c_str(), "w");
+    if (!std::isfinite(cfg_.fps) || cfg_.fps <= 0.0 || cfg_.fps > 240.0) {
+        LOG_WARN("SinkFfplayStage[{}]: invalid fps={}, skip ffplay launch", id_, cfg_.fps);
+        onFfplayFailure();
+        return false;
+    }
+
+    int pipe_fd[2];
+    if (pipe(pipe_fd) != 0) {
+        LOG_WARN("SinkFfplayStage[{}]: pipe() failed: {}", id_, std::strerror(errno));
+        onFfplayFailure();
+        return false;
+    }
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, pipe_fd[0], STDIN_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipe_fd[0]);
+    posix_spawn_file_actions_addclose(&actions, pipe_fd[1]);
+
+    const std::string video_size = std::to_string(frame.cols) + "x" + std::to_string(frame.rows);
+    const std::string framerate = std::to_string(cfg_.fps);
+    char* const argv[] = {
+        const_cast<char*>("ffplay"),
+        const_cast<char*>("-loglevel"), const_cast<char*>("error"),
+        const_cast<char*>("-fflags"), const_cast<char*>("nobuffer"),
+        const_cast<char*>("-flags"), const_cast<char*>("low_delay"),
+        const_cast<char*>("-f"), const_cast<char*>("rawvideo"),
+        const_cast<char*>("-pixel_format"), const_cast<char*>("bgr24"),
+        const_cast<char*>("-video_size"), const_cast<char*>(video_size.c_str()),
+        const_cast<char*>("-framerate"), const_cast<char*>(framerate.c_str()),
+        const_cast<char*>("-"),
+        nullptr
+    };
+    const int spawn_rc = posix_spawnp(&ffplay_pid_, "ffplay", &actions, nullptr, argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipe_fd[0]);
+    if (spawn_rc != 0) {
+        close(pipe_fd[1]);
+        ffplay_pid_ = -1;
+        LOG_WARN("SinkFfplayStage[{}]: failed to launch ffplay (attempt={}): rc={}",
+                 id_, reconnect_attempts_.load(std::memory_order_relaxed), spawn_rc);
+        onFfplayFailure();
+        return false;
+    }
+    ffplay_pipe_ = fdopen(pipe_fd[1], "w");
     if (ffplay_pipe_ == nullptr) {
+        close(pipe_fd[1]);
+        if (ffplay_pid_ > 0) {
+            ::kill(ffplay_pid_, SIGTERM);
+            int status = 0;
+            (void)::waitpid(ffplay_pid_, &status, 0);
+            ffplay_pid_ = -1;
+        }
         LOG_WARN("SinkFfplayStage[{}]: failed to launch ffplay (attempt={})",
                  id_, reconnect_attempts_.load(std::memory_order_relaxed));
         onFfplayFailure();
@@ -161,11 +216,16 @@ bool SinkFfplayStage::writeFfplayFrame(const cv::Mat& frame) {
 
 void SinkFfplayStage::closeFfplay() {
     if (ffplay_pipe_ != nullptr) {
-        const int rc = pclose(ffplay_pipe_);
+        const int rc = fclose(ffplay_pipe_);
         ffplay_pipe_ = nullptr;
         if (rc != 0) {
             LOG_WARN("SinkFfplayStage[{}]: ffplay exited with status {}", id_, rc);
         }
+    }
+    if (ffplay_pid_ > 0) {
+        int status = 0;
+        (void)::waitpid(ffplay_pid_, &status, 0);
+        ffplay_pid_ = -1;
     }
 }
 

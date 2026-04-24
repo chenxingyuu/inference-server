@@ -44,6 +44,7 @@ private:
 
     std::atomic<uint64_t>   published_{0};
     std::atomic<uint64_t>   dropped_{0};
+    std::atomic<uint64_t>   queue_depth_{0};
 };
 
 } // namespace infer

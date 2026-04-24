@@ -547,6 +547,70 @@ TEST(LoadConfig, SinkStreamInvalidProtocolThrows) {
     std::remove(path.c_str());
 }
 
+TEST(LoadConfig, SourceIdPathTraversalStyleRejected) {
+    const std::string path = "data/test_invalid_source_id.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: ../cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: source_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: source_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: ../cam_1\n";
+        out << "    pipeline_id: p1\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, SinkFfplayInvalidFpsRejected) {
+    const std::string path = "data/test_invalid_sink_ffplay_fps.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: source_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.ffplay\n";
+        out << "        with:\n";
+        out << "          fps: .nan\n";
+        out << "    edges:\n";
+        out << "      - from: source_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
 // ── Publishers config ─────────────────────────────────────────────────────
 
 TEST(LoadConfig, ParsePublishersBlock) {

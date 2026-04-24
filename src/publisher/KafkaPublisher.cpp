@@ -7,26 +7,40 @@
 namespace infer {
 
 using json = nlohmann::json;
+namespace {
+void requireKafkaConfSet(rd_kafka_conf_t* conf,
+                         const char* key,
+                         const std::string& value,
+                         char* errstr,
+                         std::size_t errstr_size) {
+    if (rd_kafka_conf_set(conf, key, value.c_str(), errstr, errstr_size) != RD_KAFKA_CONF_OK) {
+        throw std::runtime_error(std::string("KafkaPublisher: invalid kafka conf for ") + key + ": " + errstr);
+    }
+}
+}
 
 KafkaPublisher::KafkaPublisher(const KafkaConfig& cfg) : cfg_(cfg) {
     char errstr[512];
 
     rd_kafka_conf_t* conf = rd_kafka_conf_new();
-    rd_kafka_conf_set(conf, "bootstrap.servers", cfg.brokers.c_str(), errstr, sizeof(errstr));
-    rd_kafka_conf_set(conf, "compression.codec", cfg.compression.c_str(), errstr, sizeof(errstr));
+    requireKafkaConfSet(conf, "bootstrap.servers", cfg.brokers, errstr, sizeof(errstr));
+    requireKafkaConfSet(conf, "compression.codec", cfg.compression, errstr, sizeof(errstr));
     {
         std::string linger = std::to_string(cfg.linger_ms);
-        rd_kafka_conf_set(conf, "linger.ms", linger.c_str(), errstr, sizeof(errstr));
+        requireKafkaConfSet(conf, "linger.ms", linger, errstr, sizeof(errstr));
     }
     rd_kafka_conf_set_dr_msg_cb(conf, &KafkaPublisher::deliveryCallback);
 
     producer_ = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!producer_) {
+        rd_kafka_conf_destroy(conf);
         throw std::runtime_error(std::string("KafkaPublisher: rd_kafka_new failed: ") + errstr);
     }
 
     topic_ = rd_kafka_topic_new(producer_, cfg.topic.c_str(), nullptr);
     if (!topic_) {
+        rd_kafka_destroy(producer_);
+        producer_ = nullptr;
         throw std::runtime_error("KafkaPublisher: rd_kafka_topic_new failed");
     }
 
@@ -57,6 +71,7 @@ void KafkaPublisher::publish(InferResult result) {
         return;
     }
     queue_.push(std::move(result));
+    queue_depth_.store(queue_.size(), std::memory_order_relaxed);
     lock.unlock();
     cv_.notify_one();
 }
@@ -79,6 +94,7 @@ void KafkaPublisher::publishLoop() {
             }
             r = std::move(queue_.front());
             queue_.pop();
+            queue_depth_.store(queue_.size(), std::memory_order_relaxed);
         }
 
         std::string payload = serialize(r);
@@ -101,7 +117,7 @@ void KafkaPublisher::publishLoop() {
             if (n % 1000 == 0) {
                 LOG_INFO("KafkaPublisher: published={} dropped={} queue={}",
                          n, dropped_.load(std::memory_order_relaxed),
-                         [&]{ std::unique_lock l(mutex_); return queue_.size(); }());
+                         queue_depth_.load(std::memory_order_relaxed));
             }
         }
         rd_kafka_poll(producer_, 0);

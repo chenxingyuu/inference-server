@@ -1,8 +1,9 @@
 #include "pipeline/stages/SourceRtspStage.h"
 
+#include "metrics/Metrics.h"
+
 #include <algorithm>
 #include <chrono>
-#include <thread>
 
 namespace infer {
 
@@ -38,14 +39,17 @@ void SourceRtspStage::start() {
         std::lock_guard<std::mutex> lock(mu_);
         if (queue_.size() >= max_queue_size_) {
             queue_.pop_front();
+            Metrics::get().incFramesDropped(source_.id);
         }
         queue_.push_back(std::move(frame));
+        cv_.notify_one();
     });
 }
 
 void SourceRtspStage::stop() {
     bool expected = true;
     if (!running_.compare_exchange_strong(expected, false)) return;
+    cv_.notify_all();
     decoder_.stop();
 }
 
@@ -53,9 +57,11 @@ void SourceRtspStage::process(const EventEnvelope&, const EmitFn& emit) {
     Frame frame;
     std::size_t source_queue_size = 0;
     {
-        std::lock_guard<std::mutex> lock(mu_);
+        std::unique_lock<std::mutex> lock(mu_);
         if (queue_.empty()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            cv_.wait_for(lock, std::chrono::milliseconds(2), [this] { return !queue_.empty() || !running_.load(); });
+        }
+        if (queue_.empty()) {
             return;
         }
         frame = std::move(queue_.front());

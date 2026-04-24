@@ -120,6 +120,7 @@ int main(int argc, char* argv[]) {
     // ── Signal handling ───────────────────────────────────────────────────────
     std::signal(SIGINT,  signalHandler);
     std::signal(SIGTERM, signalHandler);
+    std::signal(SIGPIPE, SIG_IGN);
 
     // ── Create publisher ──────────────────────────────────────────────────────
     std::unique_ptr<infer::IPublisher> publisher;

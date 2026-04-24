@@ -58,12 +58,26 @@ void BatchScheduler::scheduleLoop() {
 
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::microseconds(delay_us);
+    auto stream_refresh_deadline = std::chrono::steady_clock::now();
+    std::vector<std::string> model_streams;
 
     while (!stop_flag_.load()) {
+        // Refresh stream list periodically to reduce lock pressure on StreamPool.
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= stream_refresh_deadline || model_streams.empty()) {
+            model_streams.clear();
+            auto streams = pool_.activeStreams();
+            model_streams.reserve(streams.size());
+            for (const auto& sid : streams) {
+                if (pool_.getStreamModelId(sid) == model_cfg_.id) {
+                    model_streams.push_back(sid);
+                }
+            }
+            stream_refresh_deadline = now + std::chrono::milliseconds(200);
+        }
+
         // Collect frames from streams assigned to this model
-        auto streams = pool_.activeStreams();
-        for (const auto& sid : streams) {
-            if (pool_.getStreamModelId(sid) != model_cfg_.id) continue;
+        for (const auto& sid : model_streams) {
 
             FrameBuffer* buf = pool_.getBuffer(sid);
             if (!buf) continue;
@@ -92,8 +106,7 @@ void BatchScheduler::scheduleLoop() {
             if (static_cast<int>(batch.size()) >= max_bs) break;
         }
 
-        auto now     = std::chrono::steady_clock::now();
-        bool timeout = (now >= deadline);
+        bool timeout = (std::chrono::steady_clock::now() >= deadline);
 
         // Flush decision: prefer largest target size to improve GPU utilisation.
         // A partial batch is sent if the deadline has passed.
@@ -113,7 +126,7 @@ void BatchScheduler::scheduleLoop() {
         if (should_flush) {
             LOG_DEBUG("BatchScheduler[{}]: flush batch_size={} trigger={} active_streams={}",
                       model_cfg_.id, batch.size(), timeout ? "timeout" : "full",
-                      pool_.activeStreams().size());
+                      model_streams.size());
             callback_(std::move(batch));
             batch.frames.clear();
             batch.gpu_frames.clear();
@@ -128,6 +141,9 @@ void BatchScheduler::scheduleLoop() {
                 deadline = std::chrono::steady_clock::now() +
                            std::chrono::microseconds(delay_us);
             }
+        } else {
+            // Non-empty but below preferred size and not timed out yet.
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
         }
     }
 

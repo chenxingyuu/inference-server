@@ -16,6 +16,11 @@
 namespace infer {
 
 namespace {
+int yoloAnchorCount(int h, int w) {
+    return (h / 8) * (w / 8) +
+           (h / 16) * (w / 16) +
+           (h / 32) * (w / 32);
+}
 
 class TRTLogger : public nvinfer1::ILogger {
     void log(Severity severity, const char* msg) noexcept override {
@@ -47,6 +52,9 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
     input_h_        = cfg.input_shape.height;
     input_w_        = cfg.input_shape.width;
     num_classes_    = cfg.num_classes;
+    if (input_h_ <= 0 || input_w_ <= 0 || input_h_ > 4096 || input_w_ > 4096) {
+        throw std::runtime_error("TRTBackend: input resolution must be in range (0, 4096]");
+    }
 
     CUDA_CHECK(cudaSetDevice(device_id_));
 
@@ -100,7 +108,8 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
 
     // Pre-compute buffer sizes
     input_bytes_  = max_batch_size_ * 3 * input_h_ * input_w_ * sizeof(float);
-    output_bytes_ = max_batch_size_ * (4 + num_classes_) * 8400 * sizeof(float);
+    const int anchors = yoloAnchorCount(input_h_, input_w_);
+    output_bytes_ = max_batch_size_ * (4 + num_classes_) * anchors * sizeof(float);
 
     // Initialize pre-allocated GPU buffer pool (Phase 7a-2)
     const int pool_size = (cfg.buffer_pool_size > 0) ? cfg.buffer_pool_size : 4;
@@ -214,7 +223,8 @@ void TRTBackend::inferGPU(const Batch& input, std::vector<float>& output) {
 #endif
 
         // Stage 3: async D2H copy on infer_stream_ (follows inference in stream order).
-        size_t out_bytes = bs * (4 + num_classes_) * 8400 * sizeof(float);
+        const int anchors = yoloAnchorCount(input_h_, input_w_);
+        size_t out_bytes = bs * (4 + num_classes_) * anchors * sizeof(float);
         output.resize(out_bytes / sizeof(float));
         CUDA_CHECK(cudaMemcpyAsync(output.data(), slot->output_device,
                                    out_bytes, cudaMemcpyDeviceToHost, infer_stream_));
@@ -276,7 +286,8 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
         bool ok = context_->executeV2(bindings);
         if (!ok) throw std::runtime_error("TRTBackend: executeV2 failed");
 
-        size_t out_bytes = bs * (4 + num_classes_) * 8400 * sizeof(float);
+        const int anchors = yoloAnchorCount(input_h_, input_w_);
+        size_t out_bytes = bs * (4 + num_classes_) * anchors * sizeof(float);
         output.resize(out_bytes / sizeof(float));
         CUDA_CHECK(cudaMemcpy(output.data(), slot->output_device,
                               out_bytes, cudaMemcpyDeviceToHost));

@@ -11,6 +11,19 @@
 namespace infer {
 
 namespace fs = std::filesystem;
+namespace {
+bool isSafeStreamId(const std::string& stream_id) {
+    if (stream_id.empty()) return false;
+    for (const char c : stream_id) {
+        const bool ok = (c >= 'a' && c <= 'z') ||
+                        (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') ||
+                        c == '_' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+}
 
 FrameArchiver::FrameArchiver(FrameArchiveConfig cfg)
     : cfg_(std::move(cfg)) {
@@ -31,6 +44,9 @@ FrameArchiver::~FrameArchiver() {
 }
 
 std::string FrameArchiver::buildObjectKey(const StreamMeta& meta) const {
+    if (!isSafeStreamId(meta.stream_id)) {
+        throw std::runtime_error("FrameArchiver: invalid stream_id for object key");
+    }
     const int64_t ts_ms = static_cast<int64_t>(meta.capture_ts * 1000.0);
     std::ostringstream oss;
     oss << meta.stream_id << "/" << ts_ms << "_" << meta.frame_seq << ".jpg";
@@ -60,6 +76,12 @@ bool FrameArchiver::enqueue(ArchiveTask task) {
 
 FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* frame) {
     FrameArchiveResult out;
+    if (!isSafeStreamId(meta.stream_id)) {
+        Metrics::get().incFramesArchiveDropped();
+        out.upload_state = "failed";
+        LOG_WARN("FrameArchiver: reject unsafe stream_id={}", meta.stream_id);
+        return out;
+    }
     if (!cfg_.enabled || frame == nullptr || frame->empty()) {
         out.upload_state = "disabled";
         return out;

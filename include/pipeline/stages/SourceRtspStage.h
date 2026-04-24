@@ -4,6 +4,7 @@
 #include "pipeline/IStage.h"
 #include "stream/FFmpegDecoder.h"
 #include <atomic>
+#include <condition_variable>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -31,6 +32,7 @@ private:
     FFmpegDecoder decoder_;
     std::atomic<bool> running_{false};
     std::mutex mu_;
+    std::condition_variable cv_;
     std::deque<Frame> queue_;
     std::size_t max_queue_size_{64};
 };

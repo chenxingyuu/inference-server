@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -50,7 +51,7 @@ private:
 
     std::mutex pending_mutex_;              // guards pending_events_, batch_deadline_, last_emit_
     std::mutex infer_mutex_;               // serializes GPU inference between process() and flushLoop()
-    std::vector<EventEnvelope> pending_events_;
+    std::deque<EventEnvelope> pending_events_;
     std::chrono::steady_clock::time_point batch_deadline_;
     EmitFn last_emit_;
 

@@ -8,19 +8,33 @@
 namespace infer {
 
 using json = nlohmann::json;
+namespace {
+void requireKafkaConfSet(rd_kafka_conf_t* conf,
+                         const char* key,
+                         const std::string& value,
+                         char* errstr,
+                         std::size_t errstr_size) {
+    if (rd_kafka_conf_set(conf, key, value.c_str(), errstr, errstr_size) != RD_KAFKA_CONF_OK) {
+        throw std::runtime_error(std::string("ControlPublisher: invalid kafka conf for ") + key + ": " + errstr);
+    }
+}
+}
 
 ControlPublisher::ControlPublisher(const std::string& brokers, const std::string& topic) {
     char errstr[512];
     rd_kafka_conf_t* conf = rd_kafka_conf_new();
-    rd_kafka_conf_set(conf, "bootstrap.servers", brokers.c_str(), errstr, sizeof(errstr));
-    rd_kafka_conf_set(conf, "linger.ms", "0", errstr, sizeof(errstr));
+    requireKafkaConfSet(conf, "bootstrap.servers", brokers, errstr, sizeof(errstr));
+    requireKafkaConfSet(conf, "linger.ms", "0", errstr, sizeof(errstr));
 
     producer_ = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!producer_) {
+        rd_kafka_conf_destroy(conf);
         throw std::runtime_error(std::string("ControlPublisher: rd_kafka_new failed: ") + errstr);
     }
     topic_ = rd_kafka_topic_new(producer_, topic.c_str(), nullptr);
     if (!topic_) {
+        rd_kafka_destroy(producer_);
+        producer_ = nullptr;
         throw std::runtime_error("ControlPublisher: rd_kafka_topic_new failed");
     }
     LOG_INFO("ControlPublisher: connected to {} control_topic={}", brokers, topic);

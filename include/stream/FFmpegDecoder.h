@@ -7,6 +7,7 @@
 #include <thread>
 #include <atomic>
 #include <string>
+#include <random>
 
 // Forward-declare FFmpeg types to keep this header clean
 struct AVFormatContext;
@@ -69,6 +70,7 @@ private:
     bool openStream(const StreamConfig& cfg);
     void closeStream();
     ReadExitReason readAndDecode(FrameCallback& cb, SamplingParams& params);
+    int64_t backoffDelayMs(int base_ms, int ceiling_ms, uint32_t failures);
 
     // Called by FFmpeg to select the hw pixel format
     static AVPixelFormat getHWFormat(AVCodecContext* ctx, const AVPixelFormat* pix_fmts);
@@ -92,6 +94,7 @@ private:
     InterruptCtx     interrupt_ctx_;
     int64_t          read_timeout_us_{5'000'000LL};   // default 5 s
     int64_t          open_timeout_us_{10'000'000LL};  // default 10 s
+    std::mt19937     rng_{std::random_device{}()};
 };
 
 } // namespace infer

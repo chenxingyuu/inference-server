@@ -21,10 +21,10 @@ void mapDetectionsFromModelToFrame(
     const float sy = static_cast<float>(frame_h) / static_cast<float>(model_shape.height);
     if (sx == 1.f && sy == 1.f) return;
     for (auto& d : detections) {
-        d.bbox.x1 *= sx;
-        d.bbox.x2 *= sx;
-        d.bbox.y1 *= sy;
-        d.bbox.y2 *= sy;
+        d.bbox.x1 = std::max(0.0f, d.bbox.x1 * sx);
+        d.bbox.x2 = std::max(0.0f, d.bbox.x2 * sx);
+        d.bbox.y1 = std::max(0.0f, d.bbox.y1 * sy);
+        d.bbox.y2 = std::max(0.0f, d.bbox.y2 * sy);
     }
 }
 

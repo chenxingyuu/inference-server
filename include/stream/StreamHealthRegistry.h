@@ -6,6 +6,7 @@
 #include <shared_mutex>
 #include <chrono>
 #include <cstdint>
+#include <atomic>
 
 namespace infer {
 
@@ -91,6 +92,8 @@ private:
         StreamHealth health;
         int          degraded_threshold{5};
         int          max_reconnect_attempts{0};
+        std::atomic<double> last_frame_ts_atomic{0.0};
+        std::atomic<uint64_t> frames_since_last_hb_atomic{0};
     };
 
     static double now();
