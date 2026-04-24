@@ -31,10 +31,10 @@ struct SamplingParams {
     SamplingMode mode{SamplingMode::FrameCount};
     int          sample_fps{5};
     int          sample_interval{1};   // used in FrameCount mode
-    double       last_emit_pts{-1.0};  // TimeBased: seconds since stream start, -1 = unset
+    double       last_emit_pts{-1.0};  // TimeBased: wall-clock epoch seconds, -1 = unset
 
     // Returns true if the current frame should be emitted.
-    // pts: frame presentation time in seconds; nullopt means AV_NOPTS_VALUE.
+    // pts: unused in TimeBased mode (wall clock used instead).
     // frame_seq: 0-based decoded-frame count since last reconnect.
     bool shouldEmit(std::optional<double> pts, uint64_t frame_seq);
 };

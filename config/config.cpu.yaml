@@ -113,8 +113,6 @@ pipelines:
         to: "track_1"
       - from: "track_1"
         to: "join_1"
-      - from: "track_1"
-        to: "sink_ffplay_1"
       - from: "archive_1"
         to: "join_1"
       - from: "join_1"
@@ -124,7 +122,8 @@ tasks:
   - id: "task_cam_001"
     source_id: "cam_001"
     pipeline_id: "pipeline_default"
-    sample_fps: 7
+    sample_fps: 2
+    sampling_mode: "time_based"
     use_hwdec: false
 
 # 推理结果发布（buildPublisher）：可同时启用多种通道；至少须有一个 enabled: true。
@@ -148,7 +147,7 @@ publishers:
     port: 50051
     max_connections: 100
   redis:
-    enabled: true
+    enabled: false
     host: "127.0.0.1"
     port: 6379
     stream_prefix: "inference"

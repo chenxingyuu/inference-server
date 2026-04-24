@@ -89,15 +89,16 @@ int computeSampleInterval(double stream_fps, int sample_fps) {
 }
 
 bool SamplingParams::shouldEmit(std::optional<double> pts, uint64_t frame_seq) {
-    if (mode == SamplingMode::TimeBased && pts.has_value()) {
+    if (mode == SamplingMode::TimeBased) {
         const double min_gap = 1.0 / std::max(1, sample_fps);
-        if (last_emit_pts < 0.0 || (pts.value() - last_emit_pts) >= min_gap) {
-            last_emit_pts = pts.value();
+        const double now = nowEpoch();
+        if (last_emit_pts < 0.0 || (now - last_emit_pts) >= min_gap) {
+            last_emit_pts = now;
             return true;
         }
         return false;
     }
-    // FrameCount mode, or TimeBased fallback when pts == AV_NOPTS_VALUE
+    // FrameCount mode
     return (frame_seq % static_cast<uint64_t>(sample_interval)) == 0;
 }
 
