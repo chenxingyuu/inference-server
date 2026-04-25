@@ -48,10 +48,26 @@ void InferWorkerGroup::stop() {
     for (auto& w : workers_) w->stop();
 }
 
-void InferWorkerGroup::enqueue(Batch batch) {
+void InferWorkerGroup::enqueue(Batch batch, std::optional<int> restrict_cuda_device_id) {
     const std::size_t n = workers_.size();
-    // Start from the round-robin candidate; skip RECOVERING/STOPPED workers.
     const std::size_t start = round_robin_idx_.fetch_add(1, std::memory_order_relaxed) % n;
+
+    // For GPU batches with a device restriction, prefer workers on the matching device.
+    if (batch.is_gpu && restrict_cuda_device_id.has_value()) {
+        const int target = *restrict_cuda_device_id;
+        for (std::size_t i = 0; i < n; ++i) {
+            auto& w = workers_[(start + i) % n];
+            if (w->state() == WorkerState::RUNNING && w->cudaDeviceId() == target) {
+                w->enqueue(std::move(batch));
+                return;
+            }
+        }
+        // No matching-device RUNNING worker — fall back to any RUNNING worker.
+        LOG_WARN("InferWorkerGroup: no RUNNING worker on device {}, falling back to any",
+                 target);
+    }
+
+    // Standard round-robin: skip RECOVERING/STOPPED workers.
     for (std::size_t i = 0; i < n; ++i) {
         auto& w = workers_[(start + i) % n];
         if (w->state() == WorkerState::RUNNING) {
@@ -59,8 +75,7 @@ void InferWorkerGroup::enqueue(Batch batch) {
             return;
         }
     }
-    // No RUNNING worker found — fall back to first RECOVERING worker so the batch
-    // is processed once recovery completes, rather than being dropped immediately.
+    // No RUNNING worker — fall back to first RECOVERING worker.
     for (std::size_t i = 0; i < n; ++i) {
         auto& w = workers_[(start + i) % n];
         if (w->state() == WorkerState::RECOVERING) {

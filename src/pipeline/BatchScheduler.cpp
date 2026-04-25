@@ -95,6 +95,9 @@ void BatchScheduler::scheduleLoop() {
                 }
 
                 if (f.is_gpu) {
+                    if (batch.gpu_frames.empty()) {
+                        batch.cuda_device_id = f.gpu_buf.cuda_device_id;
+                    }
                     batch.gpu_frames.push_back(std::move(f.gpu_buf));
                     batch.is_gpu = true;
                 } else {
@@ -132,6 +135,7 @@ void BatchScheduler::scheduleLoop() {
             batch.gpu_frames.clear();
             batch.metas.clear();
             batch.is_gpu = false;
+            batch.cuda_device_id = 0;
             deadline = std::chrono::steady_clock::now() +
                        std::chrono::microseconds(delay_us);
         } else if (batch.empty()) {

@@ -88,6 +88,7 @@ private:
     int              video_stream_idx_{-1};
     uint64_t         frame_seq_{0};
     bool             use_hwdec_{false};
+    int              cuda_device_id_{0};
 
     // Interrupt callback used to time-bound av_read_frame / avformat_open_input.
     // Owned by decodeLoop thread; written before blocking calls, cleared after.

@@ -124,9 +124,10 @@ FFmpegDecoder::~FFmpegDecoder() {
 
 void FFmpegDecoder::start(const StreamConfig& cfg, FrameCallback cb) {
     if (running_.load()) return;
-    stream_id_  = cfg.id;
-    use_hwdec_  = cfg.use_hwdec;
-    stop_flag_  = false;
+    stream_id_      = cfg.id;
+    use_hwdec_      = cfg.use_hwdec;
+    cuda_device_id_ = cfg.cuda_device_id;
+    stop_flag_      = false;
     thread_     = std::thread(&FFmpegDecoder::decodeLoop, this, cfg, std::move(cb));
 }
 
@@ -239,11 +240,12 @@ bool FFmpegDecoder::openStream(const StreamConfig& cfg) {
     }
 
     if (use_hwdec_) {
+        const std::string dev_str = std::to_string(cuda_device_id_);
         if (av_hwdevice_ctx_create(&hw_device_ctx_,
                                    AV_HWDEVICE_TYPE_CUDA,
-                                   nullptr, nullptr, 0) < 0) {
-            LOG_WARN("[{}] av_hwdevice_ctx_create failed, falling back to SW",
-                     stream_id_);
+                                   dev_str.c_str(), nullptr, 0) < 0) {
+            LOG_WARN("[{}] av_hwdevice_ctx_create failed on device {}, falling back to SW",
+                     stream_id_, cuda_device_id_);
             use_hwdec_ = false;
         } else {
             codec_ctx_->hw_device_ctx = av_buffer_ref(hw_device_ctx_);
@@ -339,11 +341,12 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
                             }
 
                             f.is_gpu = true;
-                            f.gpu_buf.y_data  = static_cast<void*>(hw_ref->data[0]);
-                            f.gpu_buf.uv_data = static_cast<void*>(hw_ref->data[1]);
-                            f.gpu_buf.width   = codec_ctx_->width;
-                            f.gpu_buf.height  = codec_ctx_->height;
-                            f.gpu_buf.cuda_stream = nullptr;
+                            f.gpu_buf.y_data        = static_cast<void*>(hw_ref->data[0]);
+                            f.gpu_buf.uv_data       = static_cast<void*>(hw_ref->data[1]);
+                            f.gpu_buf.width         = codec_ctx_->width;
+                            f.gpu_buf.height        = codec_ctx_->height;
+                            f.gpu_buf.cuda_stream   = nullptr;
+                            f.gpu_buf.cuda_device_id = cuda_device_id_;
                             // shared_ptr deleter releases the hw buffer
                             f.gpu_buf.frame_ref = std::shared_ptr<void>(
                                 hw_ref,

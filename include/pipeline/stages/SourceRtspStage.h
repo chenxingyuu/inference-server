@@ -3,9 +3,11 @@
 #include "common/Config.h"
 #include "pipeline/IStage.h"
 #include "stream/FFmpegDecoder.h"
+#include "stream/GpuDeviceAllocator.h"
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -14,7 +16,8 @@ namespace infer {
 class SourceRtspStage final : public IStage {
 public:
     SourceRtspStage(std::string id, const PipelineSourceConfig& src,
-                    int sample_fps, SamplingMode sampling_mode, bool use_hwdec);
+                    int sample_fps, SamplingMode sampling_mode, bool use_hwdec,
+                    std::shared_ptr<GpuDeviceAllocator> gpu_alloc = nullptr);
 
     std::string id() const override;
     bool isSource() const override;
@@ -29,6 +32,8 @@ private:
     int sample_fps_;
     SamplingMode sampling_mode_;
     bool use_hwdec_;
+    std::shared_ptr<GpuDeviceAllocator> gpu_alloc_;
+    int cuda_device_id_{0};
     FFmpegDecoder decoder_;
     std::atomic<bool> running_{false};
     std::mutex mu_;

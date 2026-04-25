@@ -7,6 +7,7 @@
 #include "common/Config.h"
 #include "tracker/TrackerManager.h"
 #include "archive/FrameArchiver.h"
+#include <optional>
 #include <vector>
 #include <memory>
 #include <atomic>
@@ -42,8 +43,10 @@ public:
     void start();
     void stop();
 
-    // Distribute batch to the next available worker (round-robin).
-    void enqueue(Batch batch);
+    // Distribute batch to an available worker.
+    // For GPU batches: if restrict_cuda_device_id is set, only workers on that
+    // device are eligible (falls back to any RUNNING worker if none match).
+    void enqueue(Batch batch, std::optional<int> restrict_cuda_device_id = std::nullopt);
 
     // Wire cascade routing on every worker. Must be called before start().
     void setCascadeRouter(CascadeRouter* router, ResultMerger* merger);

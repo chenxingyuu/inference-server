@@ -6,6 +6,7 @@
 #include "infer/BackendFactory.h"
 #include "decoder/DecoderFactory.h"
 #include "pipeline/IStage.h"
+#include "stream/GpuDeviceAllocator.h"
 #include <memory>
 #include <string>
 
@@ -21,6 +22,7 @@ public:
         int          ingest_sample_fps{5};
         SamplingMode ingest_sampling_mode{SamplingMode::FrameCount};
         bool         ingest_use_hwdec{false};
+        std::shared_ptr<GpuDeviceAllocator> gpu_alloc; // null if hwdec disabled
     };
 
     static std::unique_ptr<IStage> create(const StageConfig& cfg, const Context& ctx);

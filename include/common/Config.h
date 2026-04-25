@@ -83,6 +83,7 @@ struct StreamConfig {
     int         open_timeout_ms{10000};          // avformat_open_input timeout
     int         read_timeout_ms{5000};           // av_read_frame timeout
     bool        use_hwdec{false};  // true → NVDEC hardware decode
+    int         cuda_device_id{0}; // set programmatically by GpuDeviceAllocator; not from YAML
     TrackerType tracker{TrackerType::None};
     ByteTrackConfig byte_track{};
     SourceType  source_type{SourceType::RTSP};  // RTSP stream or local file

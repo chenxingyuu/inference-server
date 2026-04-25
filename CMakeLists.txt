@@ -116,6 +116,7 @@ set(STREAM_SOURCES
     src/stream/FrameBuffer.cpp
     src/stream/StreamPool.cpp
     src/stream/StreamHealthRegistry.cpp
+    src/stream/GpuDeviceAllocator.cpp
 )
 
 set(INFER_SOURCES

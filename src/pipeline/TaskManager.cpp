@@ -1,6 +1,9 @@
 #include "pipeline/TaskManager.h"
 #include "pipeline/StageFactory.h"
+#include "stream/GpuDeviceAllocator.h"
 #include "common/Logger.h"
+
+#include <set>
 
 namespace infer {
 
@@ -20,6 +23,25 @@ void TaskManager::loadAll() {
         }
     }
     entries_.clear();
+
+    // Build a shared GpuDeviceAllocator from all model device IDs so that
+    // SourceRtspStage instances can automatically pick the least-loaded GPU.
+    std::shared_ptr<GpuDeviceAllocator> gpu_alloc;
+    {
+        std::set<int> device_id_set;
+        for (const auto& model : cfg_.models) {
+            if (!model.device_ids.empty()) {
+                for (int id : model.device_ids) device_id_set.insert(id);
+            } else {
+                device_id_set.insert(model.device_id);
+            }
+        }
+        if (!device_id_set.empty()) {
+            gpu_alloc = std::make_shared<GpuDeviceAllocator>(
+                std::vector<int>(device_id_set.begin(), device_id_set.end()));
+        }
+    }
+
     for (const auto& task : cfg_.tasks) {
         auto source = cfg_.findSource(task.source_id);
         auto pipeline_tpl = cfg_.findPipeline(task.pipeline_id);
@@ -27,7 +49,7 @@ void TaskManager::loadAll() {
         PipelineConfig runtime_cfg = *pipeline_tpl;
         runtime_cfg.id = task.id;
         auto executor = std::make_unique<GraphExecutor>(runtime_cfg);
-        StageFactory::Context ctx{cfg_, *source, publisher_, frame_archiver_, task.sample_fps, task.sampling_mode, task.use_hwdec};
+        StageFactory::Context ctx{cfg_, *source, publisher_, frame_archiver_, task.sample_fps, task.sampling_mode, task.use_hwdec, gpu_alloc};
         for (const auto& node : runtime_cfg.nodes) {
             executor->addStage(StageFactory::create(node, ctx));
         }

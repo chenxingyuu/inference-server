@@ -75,6 +75,7 @@ struct GpuBuffer {
     int     height{0};
     void*   cuda_stream{nullptr};            // cudaStream_t cast to void*
     std::shared_ptr<void> frame_ref;         // keeps AVFrame alive
+    int     cuda_device_id{0};              // CUDA device that owns this buffer
 };
 
 // ── A decoded frame ready for preprocessing ──────────────────────────────────
@@ -91,6 +92,7 @@ struct Batch {
     std::vector<GpuBuffer>  gpu_frames; // GPU path: NVDEC NV12 buffers
     std::vector<StreamMeta> metas;
     bool                    is_gpu{false};
+    int                     cuda_device_id{0}; // device that decoded this batch
 
     int  size()  const noexcept { return static_cast<int>(metas.size()); }
     bool empty() const noexcept { return metas.empty(); }

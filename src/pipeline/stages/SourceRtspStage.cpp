@@ -8,12 +8,14 @@
 namespace infer {
 
 SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src,
-                                 int sample_fps, SamplingMode sampling_mode, bool use_hwdec)
+                                 int sample_fps, SamplingMode sampling_mode, bool use_hwdec,
+                                 std::shared_ptr<GpuDeviceAllocator> gpu_alloc)
     : id_(std::move(id))
     , source_(src)
     , sample_fps_(sample_fps)
     , sampling_mode_(sampling_mode)
     , use_hwdec_(use_hwdec)
+    , gpu_alloc_(std::move(gpu_alloc))
     , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps * 2))) {}
 
 std::string SourceRtspStage::id() const { return id_; }
@@ -23,6 +25,11 @@ bool SourceRtspStage::isSource() const { return true; }
 void SourceRtspStage::start() {
     bool expected = false;
     if (!running_.compare_exchange_strong(expected, true)) return;
+
+    if (use_hwdec_ && gpu_alloc_) {
+        cuda_device_id_ = gpu_alloc_->acquire();
+    }
+
     StreamConfig cfg;
     cfg.id = source_.id;
     cfg.url = source_.url;
@@ -35,6 +42,7 @@ void SourceRtspStage::start() {
     cfg.open_timeout_ms = source_.open_timeout_ms;
     cfg.read_timeout_ms = source_.read_timeout_ms;
     cfg.use_hwdec = use_hwdec_;
+    cfg.cuda_device_id = cuda_device_id_;
     decoder_.start(cfg, [this](Frame frame) {
         std::lock_guard<std::mutex> lock(mu_);
         if (queue_.size() >= max_queue_size_) {
@@ -51,6 +59,10 @@ void SourceRtspStage::stop() {
     if (!running_.compare_exchange_strong(expected, false)) return;
     cv_.notify_all();
     decoder_.stop();
+
+    if (use_hwdec_ && gpu_alloc_) {
+        gpu_alloc_->release(cuda_device_id_);
+    }
 }
 
 void SourceRtspStage::process(const EventEnvelope&, const EmitFn& emit) {

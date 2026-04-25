@@ -125,6 +125,7 @@ void InferEngineWorkerStage::flushToWorkers(std::vector<PendingEmit> events) {
         if (!ev.frame) continue;
         if (!have_first) {
             batch.is_gpu = ev.frame->is_gpu;
+            if (batch.is_gpu) batch.cuda_device_id = ev.frame->gpu_buf.cuda_device_id;
             have_first = true;
         }
         batch.metas.push_back(ev.frame->meta);
@@ -133,7 +134,9 @@ void InferEngineWorkerStage::flushToWorkers(std::vector<PendingEmit> events) {
     }
     if (batch.empty()) return;
 
-    group_->enqueue(std::move(batch));
+    const std::optional<int> dev = batch.is_gpu
+        ? std::optional<int>(batch.cuda_device_id) : std::nullopt;
+    group_->enqueue(std::move(batch), dev);
 }
 
 void InferEngineWorkerStage::onInferResult(InferResult r) {

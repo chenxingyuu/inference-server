@@ -29,6 +29,7 @@ add_library(infer_testable STATIC
     # Phase 10: no hardware dependencies
     ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/ReconnectPolicy.cpp
+    ${CMAKE_SOURCE_DIR}/src/stream/GpuDeviceAllocator.cpp
     ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
 )
 
@@ -60,6 +61,7 @@ endfunction()
 # ── Test executables ───────────────────────────────────────────────────────
 add_infer_test(test_types)
 add_infer_test(test_config)
+add_infer_test(test_gpu_device_allocator)
 add_infer_test(test_iou_nms)
 add_infer_test(test_yolov5_decoder)
 add_infer_test(test_result_merger)

@@ -195,7 +195,11 @@ void ModelManager::startPipeline(ModelEntry& entry) {
     InferWorkerGroup* group_ptr = entry.group.get();
     entry.scheduler = std::make_unique<BatchScheduler>(
         entry.cfg, pool_,
-        [group_ptr](Batch b) { group_ptr->enqueue(std::move(b)); });
+        [group_ptr](Batch b) {
+            const std::optional<int> dev = b.is_gpu
+                ? std::optional<int>(b.cuda_device_id) : std::nullopt;
+            group_ptr->enqueue(std::move(b), dev);
+        });
 
     entry.group->start();
     entry.scheduler->start();
