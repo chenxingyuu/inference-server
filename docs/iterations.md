@@ -352,3 +352,97 @@
 **关键决策**：
 - `batch_start_mono_ns` 提到循环外，消除每帧重复计算
 - 所有 uint64_t 延迟减法前加 `>=` 判断：跨 NUMA 节点时 `capture_mono_ns` 可能略大于参考时间戳，无符号下溢会产生 ~1.8×10¹³ ms 的异常值
+
+---
+
+## Hotfix — InferEngineStage 背压死锁 + 低帧率积压
+
+**目标**：修复 DAG 生产环境两个严重问题：低采样率（5fps）下 `queue_latency` 高达 700-900ms；下游 `EdgeQueue` 满时持锁推理导致整个 stage 冻结 1-2 秒。
+
+**修复内容**：
+- **CRITICAL**：新增 `flushLoop()` 后台线程，每 `max_queue_delay_us / 2` 唤醒一次，若 deadline 已过期且没有新帧到达则强制触发 batch flush。旧逻辑 deadline 仅在 `process()` 内检查，低帧率下两帧间隔远超 deadline 窗口。
+- **CRITICAL**：两锁分离设计——`pending_mutex_` 只保护 `pending_events_` / `batch_deadline_` / `last_emit_`（持有时间 ≤ 微秒级，绝不跨 I/O 或 GPU 调用）；`infer_mutex_` 独立序列化 GPU 推理，防止 `process()` 与 `flushLoop()` 并发推理。旧设计在 `doFlush()` 全程持 `pending_mutex_`，下游满载时 `emit()` 阻塞会连带冻结入队路径。
+- **HIGH**：`InferEngineStage` 补填 `Detection.class_name`（在 `InferWorker` 中存在但 DAG 路径遗漏，导致 Kafka 输出中 class_name 为空）。
+- **MEDIUM**：`8c96349` 补充每帧入队延迟 debug 日志（`queue_latency_ms`），便于在生产环境定位积压。
+
+**关键决策**：
+- `process()` 和 `flushLoop()` 均调用 `extractBatch()`（加 `pending_mutex_`）后立即释放，再进入 `inferAndEmit()`（加 `infer_mutex_`），两阶段完全解耦
+- `flushLoop()` 检查间隔取 `max_queue_delay_us / 2` 而非固定值，保证最坏延迟 ≤ 1.5× 配置值
+
+---
+
+## Phase 17 — 帧采样模式重构（TimeBased / FrameCount）
+
+**目标**：修复旧采样逻辑在非 25fps 源上的帧率偏差，引入基于 PTS 的时间戳采样模式，满足跨帧率源统一输出帧率的需求。
+
+**旧问题**：
+1. `sample_interval = 25 / sample_fps` 固定假设源为 25fps，30fps 源请求 5fps 实际输出 6fps
+2. interval 在 `openStream()` 之前计算，无法获知真实帧率
+
+**新增**：
+- `SamplingMode` 枚举（`FrameCount` | `TimeBased`），通过 `sampling_mode` 字段在 `StreamConfig` / `TaskConfig` 中配置
+- **FrameCount**（默认）：`interval = round(actual_fps / sample_fps)`，在 `openStream()` 成功后从 `avg_frame_rate` 计算；每次重连重置 `frame_seq_` 保持 phase 对齐
+- **TimeBased**（新模式）：`frame_pts_sec - last_emit_pts >= 1.0 / sample_fps`，使用 `frame->pts × av_q2d(time_base)`；PTS 无效时自动退回 FrameCount
+- `computeSampleInterval()` 提取为独立自由函数，无 FFmpeg 依赖，可单元测试
+- `SamplingParams::shouldEmit()` 封装每次重连状态，`SourceRtspStage` / `SourceFileStage` / `StageFactory` / `TaskManager` 全链路传递 `sampling_mode`
+- `avdevice_register_all()` 移至 `openStream()` 内调用，支持 `lavfi:` 虚拟源 URL（测试用）
+
+**测试**：`test_frame_sampling.cpp` 16 个测试（12 单元 + 4 集成）全绿；`test_ffmpeg_file_decoder.cpp` 修复预存竞态条件（`waitForCompletion()` helper）。
+
+**关键决策**：
+- TimeBased 不依赖系统时钟，完全基于流内 PTS，视频文件循环回绕时不会产生采样跳变（`836f91c` 修复的 wall-clock 回归问题）
+
+---
+
+## Phase 18 — 多路发布扇出（gRPC + Redis Streams + MultiPublisher）
+
+**目标**：支持推理结果同时下发到多个异构消费端（Kafka / gRPC / Redis），消费端按需订阅，不修改推理热路径。
+
+**新增**：
+- **`MultiPublisher`**：扇出至所有启用的 publisher，每个子 publisher 独立 try-catch 隔离，单路失败不影响其余路
+- **`GrpcPublisher`**：实现 `InferenceService::Subscribe` server-streaming RPC，按 `stream_id` 过滤帧；慢订阅者超过 `kMaxPendingFrames=64` 时主动丢帧（防止单个慢客户端拖垮服务端）；`shutdown()` 等待 gRPC 客户端断连后返回（`4b4a701` 修复的阻塞关闭问题）
+- **`RedisPublisher`**：`XADD` 到 Redis Streams，内部队列异步写（与 `KafkaPublisher` 相同模式），maxlen 可配；`pkg-config` fallback 兼容无 CMake 配置文件的旧版 gRPC（`56bf01c`）
+- **`proto/inference.proto`**：定义 `InferenceService`（`Subscribe` RPC）+ `InferenceResult` / `BoundingBox` / `Detection` message
+- **新配置块**：
+  ```yaml
+  publishers:
+    kafka:    { enabled: true, ... }
+    grpc:     { enabled: false, port: 50051 }
+    redis:    { enabled: false, addr: "localhost:6379", stream_key: "infer:results" }
+  ```
+  旧 `kafka:` 根键自动 fallback 至 `publishers.kafka`，零迁移成本
+- **`buildPublisher()`** 工厂：只有一路启用时直接返回单 publisher，多路时包装为 `MultiPublisher`
+- **用户示例**：`docs/grpc_examples/`（Python + Go gRPC 订阅端示例，`6187f21`）
+
+**测试**：`test_multi_publisher`（扇出、部分失败隔离、并发安全）、`test_grpc_publisher`（订阅/接收、stream-id 过滤、慢订阅者丢帧）、`test_redis_publisher`（stream key 格式、JSON payload、maxlen、队列丢帧、flush/drain）、`test_config`（新增 5 个 publishers 配置用例）全绿。
+
+**构建选项**：`-DBUILD_GRPC_PUBLISHER=ON`（需 gRPC）、`-DBUILD_REDIS_PUBLISHER=ON`（需 hiredis）
+
+---
+
+## Phase 9 补丁 — GPU 帧归档 + FrameArchiver 多 Worker
+
+**目标**：补齐 NVDEC 硬解路径的归档缺失，并提升高写盘压力下的归档吞吐量。
+
+**修复与新增**：
+- **`c9f88d2` — GPU 路径归档**：`InferWorker` 原有 `!batch.is_gpu` 守卫导致 GPU 批次静默跳过归档。新增 `nv12GpuToBgr()` helper（仅 `BUILD_TRT_BACKEND`），通过 `cudaMemcpy` 下载 NV12 Y/UV plane 后 `cv::cvtColor(COLOR_YUV2BGR_NV12)` 转换为 BGR `cv::Mat`，供 `FrameArchiver::submit` 使用
+- **`18430cd` — ArchiveRawStage GPU 支持**：DAG 路径的 `ArchiveRawStage` 新增 `allow_gpu_frames` 配置（`frame_archive.allow_gpu_frames: true`），process 方法对 GPU 帧做相同 NV12→BGR 下载并提交，含 fallback 降级逻辑；补充完整 CPU/GPU 路径单元测试
+- **`5594104` — 落盘计时日志**：worker loop 记录单帧写盘耗时（`write_ms`）与弹出后队列深度（`queue_depth_after_pop`），便于定位写盘瓶颈（日志示例：`FrameArchiver: wrote /data/... write_ms=9 queue_depth_after_pop=2224`）
+- **`6535377` — 多 Worker 支持**：`FrameArchiveConfig` 新增 `worker_count`（默认 1，建议 ≤ CPU 核数），`FrameArchiver` 启动对应数量的后台写盘线程并行消费队列；配置项 `frame_archive.worker_count: 4`
+
+**关键决策**：
+- 多 worker 并发消费同一 `BlockingQueue`，每帧只被一个 worker 写盘，无需额外同步
+- `allow_gpu_frames` 默认关闭，避免在无 CUDA 环境（CPU/Ascend 机器）编译报错
+
+---
+
+## 诊断增强 — EventEnvelope 上下文字段
+
+**目标**：在不修改推理逻辑的前提下，为每帧事件附加队列上下文，便于在日志中快速定位背压位置。
+
+**新增字段**（`include/pipeline/Event.h`）：
+- `source_queue_size`（`SourceRtspStage` 出口填充）：源队列当前深度，反映采集端积压
+- `ingress_edge` / `ingress_edge_queue_size`（`GraphExecutor` 填充）：事件经过的入边名称与该边队列深度
+- `received_at_infer_ns`（`InferEngineStage` 入队时填充）：事件进入推理 stage 的单调时钟时间戳，与 `capture_mono_ns` 做差即得 transit time（采集→推理队列的链路延迟）
+
+**日志输出**：`InferEngineStage` debug 日志增加 `transit_ms`（`received_at_infer_ns - captured_at_ns`）和 `pending_ms`（帧在推理队列中等待的时间），单独可见两段延迟分布。
