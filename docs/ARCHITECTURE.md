@@ -13,8 +13,8 @@ Two sampling modes are available via `tasks[].sampling_mode`:
 1. Source ingest (`source.rtsp` using `FFmpegDecoder`; optional HW decode via NVDEC).
 2. Fan-out to parallel branches (e.g. `archive.raw` and inference path).
 3. Optional frame archiving (`archive.raw` via `FrameArchiver` → local JPEG + MinIO).
-4. Inference (`infer.engine` → `InferEngineStage` using `TRTBackend` / `AscendBackend` / `OnnxBackend`) with per-edge backpressure. `InferEngineStage` accumulates frames into a batch and flushes when the batch is full **or** a background deadline timer fires (`max_queue_delay_us / 2` poll interval), ensuring low-fps streams are not stalled waiting for the next frame.
-5. YOLO decode (`IYOLODecoder` / `ClassifierDecoder`) and optional tracking (`track.bytetrack`).
+4. Inference (`infer.engine` → `InferEngineWorkerStage` → `InferWorkerGroup` using `TRTBackend` / `AscendBackend` / `OnnxBackend`) with per-edge backpressure. The stage accumulates frames into a batch and flushes when the batch is full **or** a background deadline timer fires (`max_queue_delay_us / 2` poll interval), ensuring low-fps streams are not stalled waiting for the next frame. `models[].instance_count` and `models[].device_ids` select parallel workers (see `InferWorkerGroup`). A separate hot-path (`ModelManager` + `BatchScheduler` + `InferWorkerGroup`) still exists for stream-pool–centric scheduling; the DAG stage does not use `BatchScheduler`.
+5. YOLO decode (`IYOLODecoder` / `ClassifierDecoder`) and optional tracking (`track.bytetrack`) — decode runs inside each `InferWorker` after the backend forward pass.
 6. Optional join/merge (`join.byFrameId`) to enrich inference results with archive metadata.
 7. Optional draw + output: restream via ffmpeg pipe (`sink.stream` → RTSP/RTMP), or local preview via `ffplay` stdin (`sink.ffplay`, raw BGR).
 8. Publish via `buildPublisher()` factory (see **Publishers** section below).

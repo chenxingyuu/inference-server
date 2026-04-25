@@ -2,7 +2,7 @@
 
 #include "pipeline/stages/ArchiveRawStage.h"
 #include "pipeline/stages/DrawAndStreamStage.h"
-#include "pipeline/stages/InferEngineStage.h"
+#include "pipeline/stages/InferEngineWorkerStage.h"
 #include "pipeline/stages/SinkFfplayStage.h"
 #include "pipeline/stages/JoinByFrameStage.h"
 #include "pipeline/stages/PassthroughStage.h"
@@ -84,8 +84,11 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         if (model_id_it == cfg.with.end()) throw std::runtime_error("infer.engine requires with.model_id");
         const auto* model_cfg = ctx.app_config.findModel(model_id_it->second);
         if (!model_cfg) throw std::runtime_error("infer.engine model not found: " + model_id_it->second);
-        return std::make_unique<InferEngineStage>(
-            cfg.id, *model_cfg, createBackend(*model_cfg), createDecoder(*model_cfg));
+        return std::make_unique<InferEngineWorkerStage>(
+            cfg.id,
+            *model_cfg,
+            [](const ModelConfig& c) { return createBackend(c); },
+            [](const ModelConfig& c) { return createDecoder(c); });
     }
     if (cfg.type == "track.bytetrack") {
         ByteTrackConfig bt;

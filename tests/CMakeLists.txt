@@ -86,6 +86,14 @@ target_link_libraries(test_stage_factory PRIVATE
 add_test(NAME test_stage_factory COMMAND test_stage_factory
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+add_executable(test_infer_engine_worker_stage test_infer_engine_worker_stage.cpp)
+target_link_libraries(test_infer_engine_worker_stage PRIVATE
+    infer_core
+    GTest::gtest_main
+)
+add_test(NAME test_infer_engine_worker_stage COMMAND test_infer_engine_worker_stage
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
 add_executable(test_ffmpeg_file_decoder test_ffmpeg_file_decoder.cpp)
 target_link_libraries(test_ffmpeg_file_decoder PRIVATE
     infer_core

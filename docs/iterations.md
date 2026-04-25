@@ -1,5 +1,18 @@
 # 迭代记录
 
+## Phase 15 — DAG `infer.engine` 多实例 / 多卡
+
+**目标**：`pipelines` / `tasks` 中的 `infer.engine` 使用 `InferWorkerGroup`，使 `models[].instance_count` 与 `models[].device_ids` 在编排路径下生效。
+
+**新增**：
+- `InferEngineWorkerStage`（`infer.engine`）：沿用 `InferEngineStage` 的 pending + deadline flush，将 `Batch` 交给 `InferWorkerGroup`；通过内部 `IPublisher` 桥接将 `InferResult` 还原为带 `infer_result` 的 `EventEnvelope` 并 `emit`（按 `stream_id` + `frame_meta.frame_seq` 关联，支持多 worker 乱序完成）。
+- `StageFactory`：`infer.engine` 创建该 stage（保留 `InferEngineStage` 源码供对照）。
+- 测试：`tests/test_infer_engine_worker_stage.cpp`（FakeBackend 校验 `device_ids`）；`tests/test_stage_factory.cpp`（`BUILD_ONNX_BACKEND` 下 `dynamic_cast` 校验）。
+
+**状态**: ✅ 完成
+
+---
+
 ## Phase 11 — GPU OOM & 引擎崩溃自愈
 
 **目标**：不重启进程，在进程内完成 GPU 故障自愈；最坏情况下单 Worker 停止，其余流继续运行。

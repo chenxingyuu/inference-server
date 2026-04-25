@@ -126,7 +126,7 @@ curl -X POST http://localhost:8080/tasks/task_cam_001/stop
 - `archive.raw`：原图归档（复用 `FrameArchiver`，支持 `use_hwdec=true` 的 GPU 帧，默认开启）
   - 可通过 `frame_archive.worker_count` 配置归档并发 worker 数（默认 `1`）。
 - `preprocess.yolo` / `postprocess.yolo`：占位 passthrough（后续可落地真实算子）
-- `infer.engine`：推理 stage（引用 `models[].id`）
+- `infer.engine`：推理 stage（引用 `models[].id`）；DAG 路径下由 `InferWorkerGroup` 执行，支持 `models[].instance_count` 与 `models[].device_ids`（每实例一个后端；`device_ids` 拼写须正确）。攒批策略与 `batch_size`、`max_queue_delay_us` 一致（与 `ModelManager` + `BatchScheduler` 的流池攒批路径不同）。
 - `track.bytetrack`：ByteTrack 追踪
 - `join.byFrameId`：归档信息回填到推理结果（按 frame id join）
 - `sink.kafka`：Kafka 输出

@@ -152,6 +152,7 @@ set(PIPELINE_SOURCES
     src/pipeline/stages/DrawAndStreamStage.cpp
     src/pipeline/stages/SinkFfplayStage.cpp
     src/pipeline/stages/InferEngineStage.cpp
+    src/pipeline/stages/InferEngineWorkerStage.cpp
     src/pipeline/stages/JoinByFrameStage.cpp
     src/pipeline/stages/SinkKafkaStage.cpp
     src/pipeline/stages/SourceFileStage.cpp
