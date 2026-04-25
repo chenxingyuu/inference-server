@@ -55,7 +55,7 @@ void SourceRtspStage::process(const EventEnvelope&, const EmitFn& emit) {
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (queue_.empty()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
             return;
         }
         frame = std::move(queue_.front());

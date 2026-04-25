@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -97,10 +98,9 @@ private:
 
     // Labeled counter map: label_value → count
     struct LabeledCounter {
-        mutable std::mutex                                       mu;
-        std::unordered_map<std::string, std::atomic<uint64_t>*> data;
+        mutable std::mutex                                                         mu;
+        std::unordered_map<std::string, std::unique_ptr<std::atomic<uint64_t>>>   data;
 
-        ~LabeledCounter();
         void inc(const std::string& label);
         void snapshot(std::unordered_map<std::string, uint64_t>& out) const;
     };
@@ -125,10 +125,9 @@ private:
 
     // Labeled histogram map: label_value → Histogram
     struct LabeledHistogram {
-        mutable std::mutex                           mu;
-        std::unordered_map<std::string, Histogram*> data;
+        mutable std::mutex                                            mu;
+        std::unordered_map<std::string, std::unique_ptr<Histogram>>  data;
 
-        ~LabeledHistogram();
         void observe(const std::string& label, double ms);
         void snapshot(std::unordered_map<std::string, HistogramData>& out) const;
     };

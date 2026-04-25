@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
 #include "publisher/ControlEventBus.h"
+#include <random>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -385,13 +386,17 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
 
 // Compute exponential backoff delay in milliseconds.
 // delay = min(base * 2^failures, ceiling), with ±10% jitter.
+// Each decode thread uses its own mt19937 so there are no data races.
 static int64_t backoffDelayMs(int base_ms, int ceiling_ms, uint32_t failures) {
     int64_t delay = static_cast<int64_t>(base_ms) * (1LL << std::min(failures, 6u));
     delay = std::min(delay, static_cast<int64_t>(ceiling_ms));
     // ±10% jitter to avoid thundering herd
-    int64_t jitter = (delay / 10);
-    if (jitter > 0)
-        delay += (static_cast<int64_t>(rand()) % (jitter * 2 + 1)) - jitter;
+    const int64_t jitter = (delay / 10);
+    if (jitter > 0) {
+        thread_local std::mt19937_64 rng{std::random_device{}()};
+        std::uniform_int_distribution<int64_t> dist(-jitter, jitter);
+        delay += dist(rng);
+    }
     return std::max(delay, static_cast<int64_t>(base_ms));
 }
 

@@ -22,11 +22,15 @@ KafkaPublisher::KafkaPublisher(const KafkaConfig& cfg) : cfg_(cfg) {
 
     producer_ = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!producer_) {
+        rd_kafka_conf_destroy(conf);  // conf not consumed on failure
         throw std::runtime_error(std::string("KafkaPublisher: rd_kafka_new failed: ") + errstr);
     }
+    // conf is now owned by producer_; do not touch it again.
 
     topic_ = rd_kafka_topic_new(producer_, cfg.topic.c_str(), nullptr);
     if (!topic_) {
+        rd_kafka_destroy(producer_);
+        producer_ = nullptr;
         throw std::runtime_error("KafkaPublisher: rd_kafka_topic_new failed");
     }
 
@@ -99,9 +103,8 @@ void KafkaPublisher::publishLoop() {
             LOG_DEBUG("KafkaPublisher: produced stream={} dets={} bytes={}",
                       r.stream_id, r.detections.size(), payload.size());
             if (n % 1000 == 0) {
-                LOG_INFO("KafkaPublisher: published={} dropped={} queue={}",
-                         n, dropped_.load(std::memory_order_relaxed),
-                         [&]{ std::unique_lock l(mutex_); return queue_.size(); }());
+                LOG_INFO("KafkaPublisher: published={} dropped={}",
+                         n, dropped_.load(std::memory_order_relaxed));
             }
         }
         rd_kafka_poll(producer_, 0);

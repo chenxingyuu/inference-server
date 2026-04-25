@@ -11,8 +11,13 @@ bool EdgeQueue::push(const EventEnvelope& event) {
         if (cfg_.drop_policy == EdgeDropPolicy::DropOldest) {
             queue_.pop_front();
         } else {
-            cv_.wait(lock, [this] { return stopped_ || queue_.size() < static_cast<std::size_t>(cfg_.capacity); });
+            // Block strategy: wait with a 100ms timeout to avoid permanently stalling
+            // the upstream thread if the downstream consumer hangs.
+            const bool ready = cv_.wait_for(lock, std::chrono::milliseconds(100), [this] {
+                return stopped_ || queue_.size() < static_cast<std::size_t>(cfg_.capacity);
+            });
             if (stopped_) return false;
+            if (!ready) return false;  // downstream too slow; caller may drop or retry
         }
     }
     queue_.push_back(event);

@@ -59,12 +59,24 @@ void BatchScheduler::scheduleLoop() {
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::microseconds(delay_us);
 
-    while (!stop_flag_.load()) {
-        // Collect frames from streams assigned to this model
-        auto streams = pool_.activeStreams();
-        for (const auto& sid : streams) {
-            if (pool_.getStreamModelId(sid) != model_cfg_.id) continue;
+    // Cache of stream IDs that belong to this model, rebuilt when stream count changes.
+    std::vector<std::string> filtered_streams;
+    std::size_t last_stream_count = 0;
 
+    while (!stop_flag_.load()) {
+        // Refresh filtered list only when the total stream count changes.
+        auto streams = pool_.activeStreams();
+        if (streams.size() != last_stream_count) {
+            filtered_streams.clear();
+            for (const auto& sid : streams) {
+                if (pool_.getStreamModelId(sid) == model_cfg_.id)
+                    filtered_streams.push_back(sid);
+            }
+            last_stream_count = streams.size();
+        }
+
+        // Collect frames from streams assigned to this model
+        for (const auto& sid : filtered_streams) {
             FrameBuffer* buf = pool_.getBuffer(sid);
             if (!buf) continue;
 
@@ -113,7 +125,7 @@ void BatchScheduler::scheduleLoop() {
         if (should_flush) {
             LOG_DEBUG("BatchScheduler[{}]: flush batch_size={} trigger={} active_streams={}",
                       model_cfg_.id, batch.size(), timeout ? "timeout" : "full",
-                      pool_.activeStreams().size());
+                      filtered_streams.size());
             callback_(std::move(batch));
             batch.frames.clear();
             batch.gpu_frames.clear();

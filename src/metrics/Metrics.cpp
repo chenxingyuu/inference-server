@@ -23,15 +23,11 @@ void Metrics::Histogram::observe(double ms) {
 
 // ── LabeledCounter ────────────────────────────────────────────────────────────
 
-Metrics::LabeledCounter::~LabeledCounter() {
-    for (auto& [k, v] : data) delete v;
-}
-
 void Metrics::LabeledCounter::inc(const std::string& label) {
     std::lock_guard lock(mu);
     auto it = data.find(label);
     if (it == data.end()) {
-        data.emplace(label, new std::atomic<uint64_t>(1));
+        data.emplace(label, std::make_unique<std::atomic<uint64_t>>(1));
     } else {
         it->second->fetch_add(1, std::memory_order_relaxed);
     }
@@ -47,20 +43,17 @@ void Metrics::LabeledCounter::snapshot(
 
 // ── LabeledHistogram ──────────────────────────────────────────────────────────
 
-Metrics::LabeledHistogram::~LabeledHistogram() {
-    for (auto& [k, v] : data) delete v;
-}
-
 void Metrics::LabeledHistogram::observe(const std::string& label, double ms) {
     Histogram* h = nullptr;
     {
         std::lock_guard lock(mu);
         auto it = data.find(label);
         if (it == data.end()) {
-            h = new Histogram{};
-            data.emplace(label, h);
+            auto owned = std::make_unique<Histogram>();
+            h = owned.get();
+            data.emplace(label, std::move(owned));
         } else {
-            h = it->second;
+            h = it->second.get();
         }
     }
     h->observe(ms);
@@ -76,7 +69,7 @@ void Metrics::LabeledHistogram::snapshot(
         snap.sum   = v->sum;
         for (int i = 0; i < kNumHistBuckets; ++i)
             snap.buckets[i] = v->buckets[i];
-        out.emplace(k, snap);
+        out.emplace(k, std::move(snap));
     }
 }
 

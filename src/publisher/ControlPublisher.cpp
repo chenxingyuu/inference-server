@@ -17,10 +17,14 @@ ControlPublisher::ControlPublisher(const std::string& brokers, const std::string
 
     producer_ = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!producer_) {
+        rd_kafka_conf_destroy(conf);  // conf not consumed on failure
         throw std::runtime_error(std::string("ControlPublisher: rd_kafka_new failed: ") + errstr);
     }
+
     topic_ = rd_kafka_topic_new(producer_, topic.c_str(), nullptr);
     if (!topic_) {
+        rd_kafka_destroy(producer_);
+        producer_ = nullptr;
         throw std::runtime_error("ControlPublisher: rd_kafka_topic_new failed");
     }
     LOG_INFO("ControlPublisher: connected to {} control_topic={}", brokers, topic);

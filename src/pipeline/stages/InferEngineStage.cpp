@@ -57,8 +57,12 @@ void InferEngineStage::stop() {
 // Called with pending_mutex_ held. Pops frames and resets deadline; returns the batch.
 std::vector<EventEnvelope> InferEngineStage::extractBatch(int flush_count) {
     flush_count = std::min(flush_count, static_cast<int>(pending_events_.size()));
-    std::vector<EventEnvelope> out(pending_events_.begin(), pending_events_.begin() + flush_count);
-    pending_events_.erase(pending_events_.begin(), pending_events_.begin() + flush_count);
+    std::vector<EventEnvelope> out;
+    out.reserve(flush_count);
+    for (int i = 0; i < flush_count; ++i) {
+        out.push_back(std::move(pending_events_.front()));
+        pending_events_.pop_front();  // O(1) for deque
+    }
     batch_deadline_ = std::chrono::steady_clock::now() +
                       std::chrono::microseconds(model_cfg_.max_queue_delay_us);
     return out;
@@ -310,7 +314,7 @@ void InferEngineStage::process(const EventEnvelope& input, const EmitFn& emit) {
                          id_,
                          pending_events_.size(),
                          max_pending_);
-                pending_events_.erase(pending_events_.begin());
+                pending_events_.pop_front();  // O(1) for deque
             }
             EventEnvelope stamped = input;
             stamped.received_at_infer_ns = nowSteadyNs();

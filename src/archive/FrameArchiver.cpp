@@ -3,6 +3,7 @@
 #include "metrics/Metrics.h"
 #include <curl/curl.h>
 #include <opencv2/imgcodecs.hpp>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -31,9 +32,18 @@ FrameArchiver::~FrameArchiver() {
 }
 
 std::string FrameArchiver::buildObjectKey(const StreamMeta& meta) const {
+    // Sanitize stream_id to prevent path traversal: allow only [A-Za-z0-9_-].
+    std::string safe_id;
+    safe_id.reserve(meta.stream_id.size());
+    for (unsigned char c : meta.stream_id) {
+        if (std::isalnum(c) || c == '_' || c == '-')
+            safe_id += static_cast<char>(c);
+        else
+            safe_id += '_';
+    }
     const int64_t ts_ms = static_cast<int64_t>(meta.capture_ts * 1000.0);
     std::ostringstream oss;
-    oss << meta.stream_id << "/" << ts_ms << "_" << meta.frame_seq << ".jpg";
+    oss << safe_id << "/" << ts_ms << "_" << meta.frame_seq << ".jpg";
     return oss.str();
 }
 

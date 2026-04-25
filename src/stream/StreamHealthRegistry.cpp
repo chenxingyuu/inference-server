@@ -19,12 +19,14 @@ double StreamHealthRegistry::now() {
 
 void StreamHealthRegistry::onStreamAdded(const std::string& id, int degraded_threshold, int max_reconnect_attempts) {
     std::unique_lock lock(mu_);
-    Entry e;
-    e.health.state           = StreamState::CONNECTING;
-    e.health.state_changed_at = now();
-    e.degraded_threshold     = degraded_threshold;
-    e.max_reconnect_attempts = max_reconnect_attempts;
-    map_[id] = std::move(e);
+    // Entry contains std::atomic members so it is not movable; construct in-place.
+    auto& entry = map_[id];
+    entry.health.state            = StreamState::CONNECTING;
+    entry.health.state_changed_at = now();
+    entry.degraded_threshold      = degraded_threshold;
+    entry.max_reconnect_attempts  = max_reconnect_attempts;
+    entry.frame_ts_atomic.store(0.0, std::memory_order_relaxed);
+    entry.frame_count_atomic.store(0, std::memory_order_relaxed);
 }
 
 void StreamHealthRegistry::onStreamOpened(const std::string& id) {
@@ -95,12 +97,13 @@ void StreamHealthRegistry::onReconnectSucceeded(const std::string& id) {
 }
 
 void StreamHealthRegistry::onFrameDecoded(const std::string& id, double capture_ts) {
-    std::unique_lock lock(mu_);
+    // Use shared_lock: we only need the map structure to be stable (no insert/erase),
+    // not exclusive ownership, because the hot-path fields are atomics.
+    std::shared_lock lock(mu_);
     auto it = map_.find(id);
     if (it == map_.end()) return;
-    auto& h = it->second.health;
-    h.last_frame_ts = capture_ts;
-    ++h.frames_since_last_hb;
+    it->second.frame_ts_atomic.store(capture_ts, std::memory_order_relaxed);
+    it->second.frame_count_atomic.fetch_add(1, std::memory_order_relaxed);
 }
 
 void StreamHealthRegistry::onStreamRemoved(const std::string& id) {
@@ -121,22 +124,30 @@ StreamHealth StreamHealthRegistry::getHealth(const std::string& id) const {
         h.state = StreamState::STOPPED;
         return h;
     }
-    return it->second.health;
+    StreamHealth h = it->second.health;
+    h.last_frame_ts        = it->second.frame_ts_atomic.load(std::memory_order_relaxed);
+    h.frames_since_last_hb = it->second.frame_count_atomic.load(std::memory_order_relaxed);
+    return h;
 }
 
 std::vector<std::pair<std::string, StreamHealth>> StreamHealthRegistry::getAllHealth() const {
     std::shared_lock lock(mu_);
     std::vector<std::pair<std::string, StreamHealth>> result;
     result.reserve(map_.size());
-    for (const auto& [id, entry] : map_)
-        result.emplace_back(id, entry.health);
+    for (const auto& [id, entry] : map_) {
+        StreamHealth h = entry.health;
+        h.last_frame_ts        = entry.frame_ts_atomic.load(std::memory_order_relaxed);
+        h.frames_since_last_hb = entry.frame_count_atomic.load(std::memory_order_relaxed);
+        result.emplace_back(id, h);
+    }
     return result;
 }
 
 void StreamHealthRegistry::resetHbCounters() {
-    std::unique_lock lock(mu_);
+    // Only atomics are modified; shared_lock is sufficient to stabilize the map.
+    std::shared_lock lock(mu_);
     for (auto& [id, entry] : map_)
-        entry.health.frames_since_last_hb = 0;
+        entry.frame_count_atomic.store(0, std::memory_order_relaxed);
 }
 
 void StreamHealthRegistry::clear() {

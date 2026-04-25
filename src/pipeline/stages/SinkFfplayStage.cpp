@@ -120,11 +120,13 @@ bool SinkFfplayStage::ensureFfplayOpened(const cv::Mat& frame) {
     if (now < next_reconnect_at_) return false;
 
     reconnect_attempts_.fetch_add(1, std::memory_order_relaxed);
+    // Clamp fps to a safe integer range before embedding in the shell command.
+    const int safe_fps = std::max(1, std::min(static_cast<int>(cfg_.fps), 240));
     const std::string cmd =
         "ffplay -loglevel error -fflags nobuffer -flags low_delay "
         "-f rawvideo -pixel_format bgr24 "
         "-video_size " + std::to_string(frame.cols) + "x" + std::to_string(frame.rows) + " "
-        "-framerate " + std::to_string(cfg_.fps) + " -";
+        "-framerate " + std::to_string(safe_fps) + " -";
     ffplay_pipe_ = popen(cmd.c_str(), "w");
     if (ffplay_pipe_ == nullptr) {
         LOG_WARN("SinkFfplayStage[{}]: failed to launch ffplay (attempt={})",

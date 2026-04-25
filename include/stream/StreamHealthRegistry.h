@@ -1,11 +1,12 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
+#include <chrono>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <shared_mutex>
-#include <chrono>
-#include <cstdint>
 
 namespace infer {
 
@@ -91,6 +92,10 @@ private:
         StreamHealth health;
         int          degraded_threshold{5};
         int          max_reconnect_attempts{0};
+        // Hot-path counters: updated on every decoded frame (2500+/s across 100 streams).
+        // Using atomics with shared_lock avoids write-lock contention against readers.
+        std::atomic<double>    frame_ts_atomic{0.0};
+        std::atomic<uint64_t>  frame_count_atomic{0};
     };
 
     static double now();
