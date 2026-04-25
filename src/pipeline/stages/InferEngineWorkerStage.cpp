@@ -39,7 +39,6 @@ InferEngineWorkerStage::~InferEngineWorkerStage() { stop(); }
 std::string InferEngineWorkerStage::id() const { return id_; }
 
 int InferEngineWorkerStage::effectiveBatchSize() const {
-    if (fallback_to_single_infer_) return 1;
     return std::max(1, model_cfg_.batch_size);
 }
 
@@ -58,9 +57,22 @@ void InferEngineWorkerStage::start() {
 }
 
 void InferEngineWorkerStage::stop() {
+    if (!started_) return;
+    started_ = false;
+
     flush_stop_.store(true);
     flush_cv_.notify_all();
     if (flush_thread_.joinable()) flush_thread_.join();
+
+    {
+        std::lock_guard<std::mutex> lk(pending_mutex_);
+        if (!pending_events_.empty()) {
+            LOG_WARN("InferEngineWorkerStage[{}]: dropping {} pending events on stop",
+                     id_,
+                     pending_events_.size());
+            pending_events_.clear();
+        }
+    }
 
     if (group_) group_->stop();
 
@@ -73,14 +85,13 @@ void InferEngineWorkerStage::stop() {
             inflight_.clear();
         }
     }
-    started_ = false;
 }
 
 void InferEngineWorkerStage::onGraphExecutorDraining() noexcept { draining_.store(true); }
 
-std::vector<EventEnvelope> InferEngineWorkerStage::extractBatch(int flush_count) {
+std::vector<InferEngineWorkerStage::PendingEmit> InferEngineWorkerStage::extractBatch(int flush_count) {
     flush_count = std::min(flush_count, static_cast<int>(pending_events_.size()));
-    std::vector<EventEnvelope> out;
+    std::vector<PendingEmit> out;
     out.reserve(static_cast<std::size_t>(flush_count));
     for (int i = 0; i < flush_count; ++i) {
         out.push_back(std::move(pending_events_.front()));
@@ -91,24 +102,26 @@ std::vector<EventEnvelope> InferEngineWorkerStage::extractBatch(int flush_count)
     return out;
 }
 
-void InferEngineWorkerStage::flushToWorkers(std::vector<EventEnvelope> events, const EmitFn& emit) {
+void InferEngineWorkerStage::flushToWorkers(std::vector<PendingEmit> events) {
     if (events.empty()) return;
 
     Batch batch;
     bool have_first = false;
     {
         std::lock_guard<std::mutex> lk(inflight_mutex_);
-        for (const auto& ev : events) {
+        for (auto& pe : events) {
+            const auto& ev = pe.envelope;
             if (!ev.frame) continue;
-            PendingEmit pe;
-            pe.emit = emit;
-            pe.envelope = ev;
-            pe.envelope.infer_result.reset();
+            PendingEmit stored;
+            stored.emit = pe.emit;            // per-event emit, not a shared last_emit_
+            stored.envelope = ev;
+            stored.envelope.infer_result.reset();
             const PendingKey key{ev.stream_id, ev.frame->meta.frame_seq};
-            inflight_[key] = std::move(pe);
+            inflight_[key] = std::move(stored);
         }
     }
-    for (const auto& ev : events) {
+    for (const auto& pe : events) {
+        const auto& ev = pe.envelope;
         if (!ev.frame) continue;
         if (!have_first) {
             batch.is_gpu = ev.frame->is_gpu;
@@ -156,29 +169,26 @@ void InferEngineWorkerStage::flushLoop() {
         std::max(1000, model_cfg_.max_queue_delay_us / 2));
 
     while (!flush_stop_.load()) {
-        std::vector<EventEnvelope> to_flush;
-        EmitFn emit_copy;
+        std::vector<PendingEmit> to_flush;
         {
             std::unique_lock<std::mutex> lk(pending_mutex_);
             flush_cv_.wait_for(lk, half_delay, [this] { return flush_stop_.load(); });
             if (flush_stop_.load()) break;
 
             if (!pending_events_.empty() &&
-                std::chrono::steady_clock::now() >= batch_deadline_ &&
-                last_emit_) {
+                std::chrono::steady_clock::now() >= batch_deadline_) {
                 const int eff_bs = effectiveBatchSize();
                 const int fc = std::min(static_cast<int>(pending_events_.size()), eff_bs);
                 to_flush = extractBatch(fc);
-                emit_copy = last_emit_;
             }
         }
 
-        if (!to_flush.empty() && emit_copy) flushToWorkers(std::move(to_flush), emit_copy);
+        if (!to_flush.empty()) flushToWorkers(std::move(to_flush));
     }
 }
 
 void InferEngineWorkerStage::process(const EventEnvelope& input, const EmitFn& emit) {
-    std::vector<EventEnvelope> to_flush;
+    std::vector<PendingEmit> to_flush;
     {
         std::unique_lock<std::mutex> lk(pending_mutex_);
 
@@ -195,9 +205,8 @@ void InferEngineWorkerStage::process(const EventEnvelope& input, const EmitFn& e
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now().time_since_epoch())
                     .count());
-            pending_events_.push_back(std::move(stamped));
+            pending_events_.push_back({std::move(stamped), emit});  // store emit per-event
         }
-        last_emit_ = emit;
 
         if (!pending_events_.empty()) {
             const int eff_bs = effectiveBatchSize();
@@ -210,7 +219,7 @@ void InferEngineWorkerStage::process(const EventEnvelope& input, const EmitFn& e
         }
     }
 
-    if (!to_flush.empty()) flushToWorkers(std::move(to_flush), emit);
+    if (!to_flush.empty()) flushToWorkers(std::move(to_flush));
 }
 
 } // namespace infer

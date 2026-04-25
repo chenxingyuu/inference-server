@@ -113,4 +113,110 @@ TEST(InferEngineWorkerStage, LoadsEachInstanceOnDistinctDeviceIds) {
     stage.stop();
 }
 
+// BUG-1 regression: each stream's result must be emitted via its own emit fn.
+// With batch_size=2, both frames accumulate before inline flush; the old code
+// stamped all inflight entries with the *last* emit (emit_b), so cam_a results
+// arrived through emit_b.  After the fix, each PendingEmit carries its own fn.
+TEST(InferEngineWorkerStage, MultiStreamEmitRoutedCorrectly) {
+    ModelConfig mc = makeModel();
+    mc.batch_size    = 2;
+    mc.instance_count = 1;
+    mc.device_ids     = {0};
+
+    auto backend_factory = [](const ModelConfig&) {
+        return std::unique_ptr<IInferBackend>(
+            std::make_unique<FakeBackend>(nullptr));
+    };
+    auto decoder_factory = [](const ModelConfig& c) { return createDecoder(c); };
+
+    InferEngineWorkerStage stage("infer_ms", mc, backend_factory, decoder_factory);
+    stage.start();
+
+    std::mutex              mu_a, mu_b;
+    std::condition_variable cv_a, cv_b;
+    std::atomic<int>        a_count{0}, b_count{0};
+    std::atomic<bool>       a_wrong{false}, b_wrong{false};
+
+    auto make_frame = [](const std::string& sid, uint64_t seq) {
+        EventEnvelope ev;
+        ev.stream_id       = sid;
+        ev.frame_seq       = seq;
+        ev.frame           = std::make_shared<Frame>();
+        ev.frame->is_gpu   = false;
+        ev.frame->image    = cv::Mat::zeros(64, 64, CV_8UC3);
+        ev.frame->meta.stream_id     = sid;
+        ev.frame->meta.frame_seq     = seq;
+        ev.frame->meta.capture_ts    = 1.0;
+        ev.frame->meta.capture_mono_ns = 1000;
+        return ev;
+    };
+
+    EventEnvelope ev_a = make_frame("cam_a", 10);
+    EventEnvelope ev_b = make_frame("cam_b", 20);
+
+    stage.process(ev_a, [&](const EventEnvelope& out) {
+        if (!out.infer_result || out.infer_result->stream_id != "cam_a") a_wrong.store(true);
+        a_count.fetch_add(1, std::memory_order_relaxed);
+        cv_a.notify_all();
+    });
+    stage.process(ev_b, [&](const EventEnvelope& out) {
+        if (!out.infer_result || out.infer_result->stream_id != "cam_b") b_wrong.store(true);
+        b_count.fetch_add(1, std::memory_order_relaxed);
+        cv_b.notify_all();
+    });
+
+    {
+        std::unique_lock<std::mutex> lk(mu_a);
+        ASSERT_TRUE(cv_a.wait_for(lk, std::chrono::seconds(3),
+                                   [&] { return a_count.load() >= 1; }))
+            << "cam_a result never arrived";
+    }
+    {
+        std::unique_lock<std::mutex> lk(mu_b);
+        ASSERT_TRUE(cv_b.wait_for(lk, std::chrono::seconds(3),
+                                   [&] { return b_count.load() >= 1; }))
+            << "cam_b result never arrived";
+    }
+
+    EXPECT_FALSE(a_wrong.load()) << "cam_a result routed through wrong emit fn";
+    EXPECT_FALSE(b_wrong.load()) << "cam_b result routed through wrong emit fn";
+
+    stage.stop();
+}
+
+// BUG-2 regression: explicit stop() + destructor stop() must not crash.
+TEST(InferEngineWorkerStage, DoubleStopDoesNotCrash) {
+    ModelConfig mc = makeModel();
+    mc.instance_count = 1;
+    mc.device_ids     = {0};
+
+    auto backend_factory = [](const ModelConfig&) {
+        return std::unique_ptr<IInferBackend>(
+            std::make_unique<FakeBackend>(nullptr));
+    };
+    auto decoder_factory = [](const ModelConfig& c) { return createDecoder(c); };
+
+    InferEngineWorkerStage stage("infer_ds", mc, backend_factory, decoder_factory);
+    stage.start();
+    stage.stop();
+    EXPECT_NO_FATAL_FAILURE(stage.stop()); // second explicit stop
+    // destructor calls stop() a third time — must also be safe
+}
+
+// BUG-2 variant: stop() before start() must not crash.
+TEST(InferEngineWorkerStage, StopBeforeStartDoesNotCrash) {
+    ModelConfig mc = makeModel();
+    mc.instance_count = 1;
+    mc.device_ids     = {0};
+
+    auto backend_factory = [](const ModelConfig&) {
+        return std::unique_ptr<IInferBackend>(
+            std::make_unique<FakeBackend>(nullptr));
+    };
+    auto decoder_factory = [](const ModelConfig& c) { return createDecoder(c); };
+
+    InferEngineWorkerStage stage("infer_sbs", mc, backend_factory, decoder_factory);
+    EXPECT_NO_FATAL_FAILURE(stage.stop()); // stop before start
+}
+
 } // namespace infer

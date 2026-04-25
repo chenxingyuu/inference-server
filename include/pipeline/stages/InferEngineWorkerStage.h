@@ -59,8 +59,8 @@ private:
 
     using PendingKey = std::pair<std::string, uint64_t>;
 
-    std::vector<EventEnvelope> extractBatch(int flush_count);
-    void                       flushToWorkers(std::vector<EventEnvelope> events, const EmitFn& emit);
+    std::vector<PendingEmit>   extractBatch(int flush_count);
+    void                       flushToWorkers(std::vector<PendingEmit> events);
     void                       flushLoop();
     std::size_t                pendingQueueSize();
 
@@ -78,9 +78,8 @@ private:
     std::unique_ptr<InferWorkerGroup> group_;
 
     std::mutex                pending_mutex_;
-    std::deque<EventEnvelope> pending_events_;
+    std::deque<PendingEmit>   pending_events_;   // each entry owns its emit fn
     std::chrono::steady_clock::time_point batch_deadline_;
-    EmitFn last_emit_;
 
     std::mutex                        inflight_mutex_;
     std::map<PendingKey, PendingEmit> inflight_;
@@ -90,7 +89,6 @@ private:
     std::condition_variable flush_cv_;
 
     int  max_pending_{0};
-    bool fallback_to_single_infer_{false};
     bool started_{false};
     std::atomic<bool> draining_{false};
 };
