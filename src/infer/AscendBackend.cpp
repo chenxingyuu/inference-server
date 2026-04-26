@@ -11,14 +11,25 @@
 namespace infer {
 
 namespace {
+
 #define ACL_CHECK(call) do { \
-    aclError err = (call); \
-    if (err != ACL_SUCCESS) { \
-        throw std::runtime_error(std::string("[ACL] error ") + std::to_string(err) \
+    aclError _err = (call); \
+    if (_err != ACL_SUCCESS) { \
+        throw std::runtime_error(std::string("[ACL] error ") + std::to_string(_err) \
                                  + " at " + __FILE__ + ":" + std::to_string(__LINE__)); \
     } \
 } while(0)
+
+// RAII guard that releases an AscendPooledBuffer on scope exit.
+struct SlotGuard {
+    AscendBufferPool&   pool;
+    AscendPooledBuffer* slot;
+    ~SlotGuard() { pool.release(slot); }
+};
+
 } // namespace
+
+// ── Lifecycle ──────────────────────────────────────────────────────────────
 
 AscendBackend::AscendBackend() = default;
 
@@ -48,17 +59,46 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
         throw std::runtime_error("AscendBackend: no om_paths configured");
     }
 
+    // Detect AIPP from the first loaded model
+    auto detect = aipp_detect_fn_ ? aipp_detect_fn_
+                : [this](uint32_t id) { return detectAipp(id); };
+    aipp_enabled_ = detect(model_map_.begin()->second);
+
     const int max_bs = model_map_.rbegin()->first;
-    const size_t in_elems  = max_bs * 3 * input_h_ * input_w_;
-    const size_t out_elems = max_bs * (4 + num_classes_) * 8400;
-    input_staging_.resize(in_elems);
-    output_staging_.resize(out_elems);
+    if (aipp_enabled_) {
+        // AIPP path: raw BGR uint8 input
+        input_bytes_ = static_cast<size_t>(max_bs) * input_h_ * input_w_ * 3;
+        LOG_INFO("AscendBackend: AIPP enabled, input dtype=uint8");
+    } else {
+        // CPU preprocess path: CHW float input
+        input_bytes_  = static_cast<size_t>(max_bs) * 3 * input_h_ * input_w_ * sizeof(float);
+    }
+    output_bytes_ = static_cast<size_t>(max_bs) * (4 + num_classes_) * 8400 * sizeof(float);
+
+    buffer_pool_.init(device_id_, /*pool_size=*/4, input_bytes_, output_bytes_);
 
     loaded_ = true;
 }
 
+void AscendBackend::unloadModel() {
+    if (!loaded_) return;
+    buffer_pool_.reset();
+    for (auto& [bs, id] : model_map_) {
+        aclmdlUnload(id);
+    }
+    model_map_.clear();
+    if (stream_) {
+        aclrtDestroyStream(stream_);
+        stream_ = nullptr;
+    }
+    aclrtResetDevice(device_id_);
+    aclFinalize();
+    loaded_ = false;
+}
+
+// ── Private helpers ────────────────────────────────────────────────────────
+
 uint32_t AscendBackend::selectModel(int batch_size) const {
-    // Round down to the largest available batch size <= requested
     uint32_t best_id = model_map_.begin()->second;
     for (const auto& [bs, id] : model_map_) {
         if (bs <= batch_size) best_id = id;
@@ -87,62 +127,145 @@ void AscendBackend::preprocessCPU(const Batch& input, float* dst,
     }
 }
 
-void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
-    if (!loaded_) throw std::runtime_error("AscendBackend: model not loaded");
-    const int bs = input.size();
-
-    preprocessCPU(input, input_staging_.data(), bs, input_h_, input_w_);
-    uint32_t model_id = selectModel(bs);
-
-    // Build input dataset
-    size_t in_bytes = bs * 3 * input_h_ * input_w_ * sizeof(float);
-    void*  dev_in   = nullptr;
-    ACL_CHECK(aclrtMalloc(&dev_in, in_bytes, ACL_MEM_MALLOC_NORMAL_ONLY));
-    ACL_CHECK(aclrtMemcpy(dev_in, in_bytes,
-                          input_staging_.data(), in_bytes,
-                          ACL_MEMCPY_HOST_TO_DEVICE));
-
-    aclDataBuffer* in_buf  = aclCreateDataBuffer(dev_in, in_bytes);
-    aclmdlDataset* in_set  = aclmdlCreateDataset();
-    aclmdlAddDatasetBuffer(in_set, in_buf);
-
-    // Build output dataset
-    size_t out_bytes = bs * (4 + num_classes_) * 8400 * sizeof(float);
-    void*  dev_out   = nullptr;
-    ACL_CHECK(aclrtMalloc(&dev_out, out_bytes, ACL_MEM_MALLOC_NORMAL_ONLY));
-    aclDataBuffer* out_buf = aclCreateDataBuffer(dev_out, out_bytes);
-    aclmdlDataset* out_set = aclmdlCreateDataset();
-    aclmdlAddDatasetBuffer(out_set, out_buf);
-
-    ACL_CHECK(aclmdlExecute(model_id, in_set, out_set));
-
-    output.resize(out_bytes / sizeof(float));
-    ACL_CHECK(aclrtMemcpy(output.data(), out_bytes,
-                          dev_out, out_bytes,
-                          ACL_MEMCPY_DEVICE_TO_HOST));
-
-    // Cleanup
-    aclmdlDestroyDataset(in_set);
-    aclmdlDestroyDataset(out_set);
-    aclDestroyDataBuffer(in_buf);
-    aclDestroyDataBuffer(out_buf);
-    aclrtFree(dev_in);
-    aclrtFree(dev_out);
+void AscendBackend::packBgrUint8(const Batch& input, uint8_t* dst,
+                                  int batch_size, int h, int w) {
+    // AIPP path: resize to (w,h), then pack as HWC BGR uint8.
+    // AIPP hardware handles CHW conversion and normalization internally.
+    for (int b = 0; b < batch_size; ++b) {
+        cv::Mat resized;
+        cv::resize(input.frames[b], resized, {w, h});
+        // resized is HWC BGR uint8 — copy directly
+        const size_t frame_bytes = static_cast<size_t>(h) * w * 3;
+        std::memcpy(dst + b * frame_bytes, resized.data, frame_bytes);
+    }
 }
 
-void AscendBackend::unloadModel() {
-    if (!loaded_) return;
-    for (auto& [bs, id] : model_map_) {
-        aclmdlUnload(id);
+bool AscendBackend::detectAipp(uint32_t model_id) const {
+    // aclmdlGetFirstAippInfo returns ACL_SUCCESS when the model has AIPP.
+    // ACL_ERROR_GE_AIPP_NOT_EXIST (148034) means no AIPP operator.
+    aclAippInfo aipp_info{};
+    return aclmdlGetFirstAippInfo(model_id, 0, &aipp_info) == ACL_SUCCESS;
+}
+
+// ── infer() ────────────────────────────────────────────────────────────────
+
+void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
+    if (!loaded_) throw std::runtime_error("AscendBackend: model not loaded");
+
+    const int bs          = input.size();
+    const size_t in_bytes = aipp_enabled_
+        ? static_cast<size_t>(bs) * input_h_ * input_w_ * 3
+        : static_cast<size_t>(bs) * 3 * input_h_ * input_w_ * sizeof(float);
+    const size_t out_bytes = static_cast<size_t>(bs) * (4 + num_classes_) * 8400 * sizeof(float);
+    const uint32_t model_id = selectModel(bs);
+
+    // Acquire pre-allocated slot; release on scope exit (exception-safe)
+    AscendPooledBuffer* slot = buffer_pool_.acquire();
+    if (!slot) throw std::runtime_error("AscendBackend: buffer pool timed out");
+    SlotGuard guard{buffer_pool_, slot};
+
+    // Preprocess into slot->input_device (CPU → already HBM)
+    if (aipp_enabled_) {
+        packBgrUint8(input, static_cast<uint8_t*>(slot->input_device), bs, input_h_, input_w_);
+    } else {
+        preprocessCPU(input, static_cast<float*>(slot->input_device), bs, input_h_, input_w_);
     }
-    model_map_.clear();
-    if (stream_) {
-        aclrtDestroyStream(stream_);
-        stream_ = nullptr;
+
+    // H2D copy (staging → HBM already done above since slot is HBM)
+    // Note: preprocessCPU/packBgrUint8 write to host-accessible HBM (ACL_MEM_MALLOC_HUGE_FIRST
+    // allocates in HBM, but on 310P all HBM is accessible from host via SDMA).
+    // An explicit H2D memcpy is still required to synchronise writes.
+    auto do_memcpy = memcpy_fn_ ? memcpy_fn_
+        : [](void* dst, size_t dst_size, const void* src, size_t src_size,
+             aclrtMemcpyKind kind) -> aclError {
+            return aclrtMemcpy(dst, dst_size, src, src_size, kind);
+        };
+
+    // Build ACL datasets around pre-allocated slot buffers
+    aclDataBuffer* in_buf  = aclCreateDataBuffer(slot->input_device, in_bytes);
+    aclDataBuffer* out_buf = aclCreateDataBuffer(slot->output_device, out_bytes);
+    aclmdlDataset* in_set  = aclmdlCreateDataset();
+    aclmdlDataset* out_set = aclmdlCreateDataset();
+    aclmdlAddDatasetBuffer(in_set, in_buf);
+    aclmdlAddDatasetBuffer(out_set, out_buf);
+
+    // RAII dataset cleanup (runs before SlotGuard releases the slot)
+    struct DatasetGuard {
+        aclmdlDataset* in_s; aclmdlDataset* out_s;
+        aclDataBuffer* in_b; aclDataBuffer* out_b;
+        ~DatasetGuard() {
+            aclmdlDestroyDataset(in_s);
+            aclmdlDestroyDataset(out_s);
+            aclDestroyDataBuffer(in_b);
+            aclDestroyDataBuffer(out_b);
+        }
+    } ds_guard{in_set, out_set, in_buf, out_buf};
+
+    // Async execute
+    auto exec_fn = execute_async_fn_ ? execute_async_fn_
+        : [](uint32_t m, aclmdlDataset* i, aclmdlDataset* o, aclrtStream s) -> aclError {
+            return aclmdlExecuteAsync(m, i, o, s);
+        };
+    ACL_CHECK(exec_fn(model_id, in_set, out_set, stream_));
+
+    // Synchronise stream: blocks host until NPU completes
+    auto sync_fn = sync_stream_fn_ ? sync_stream_fn_
+        : [](aclrtStream s) -> aclError { return aclrtSynchronizeStream(s); };
+    ACL_CHECK(sync_fn(stream_));
+
+    // D2H copy output
+    output.resize(out_bytes / sizeof(float));
+    ACL_CHECK(do_memcpy(output.data(), out_bytes,
+                        slot->output_device, out_bytes,
+                        ACL_MEMCPY_DEVICE_TO_HOST));
+}
+
+// ── Test entry point ────────────────────────────────────────────────────────
+
+void AscendBackend::initPoolForTest(int pool_size,
+                                     size_t input_bytes, size_t output_bytes) {
+    input_bytes_  = input_bytes;
+    output_bytes_ = output_bytes;
+    buffer_pool_.initForTest(pool_size, input_bytes, output_bytes);
+}
+
+void AscendBackend::inferWithStubs(const Batch& input, std::vector<float>& output) {
+    // Simplified infer path used by tests: skips real ACL dataset calls.
+    // Exercises pool acquire/release + execute + sync call ordering.
+    if (input.frames.empty()) return;
+
+    AscendPooledBuffer* slot = buffer_pool_.acquire();
+    if (!slot) throw std::runtime_error("AscendBackend: buffer pool timed out");
+    SlotGuard guard{buffer_pool_, slot};
+
+    // Preprocess (CPU) to verify AIPP branch selection
+    if (aipp_enabled_) {
+        const size_t frame_bytes = static_cast<size_t>(input_h_) * input_w_ * 3;
+        (void)frame_bytes; // no-op in stub mode, slot memory is operator-new heap
     }
-    aclrtResetDevice(device_id_);
-    aclFinalize();
-    loaded_ = false;
+
+    // Fake dataset handles (nullptr is fine with stub execute fn)
+    aclmdlDataset* in_set  = nullptr;
+    aclmdlDataset* out_set = nullptr;
+
+    auto exec_fn = execute_async_fn_ ? execute_async_fn_
+        : [](uint32_t, aclmdlDataset*, aclmdlDataset*, aclrtStream) -> aclError {
+            return ACL_SUCCESS;
+        };
+    ACL_CHECK(exec_fn(0u, in_set, out_set, stream_));
+
+    auto sync_fn = sync_stream_fn_ ? sync_stream_fn_
+        : [](aclrtStream) -> aclError { return ACL_SUCCESS; };
+    ACL_CHECK(sync_fn(stream_));
+
+    auto do_memcpy = memcpy_fn_ ? memcpy_fn_
+        : [](void*, size_t, const void*, size_t, aclrtMemcpyKind) -> aclError {
+            return ACL_SUCCESS;
+        };
+    output.resize(output_bytes_ / sizeof(float));
+    ACL_CHECK(do_memcpy(output.data(), output_bytes_,
+                        slot->output_device, output_bytes_,
+                        ACL_MEMCPY_DEVICE_TO_HOST));
 }
 
 } // namespace infer

@@ -253,6 +253,115 @@ target_link_libraries(test_redis_publisher PRIVATE
 add_test(NAME test_redis_publisher COMMAND test_redis_publisher
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+# ── Ascend NPU backend tests (no real NPU required) ────────────────────────
+# All tests use initForTest() + injected stubs to avoid real ACL/DVPP hardware.
+if(BUILD_ASCEND_BACKEND)
+    # Feature 1: AscendBufferPool
+    add_executable(test_ascend_buffer_pool
+        test_ascend_buffer_pool.cpp
+        ${CMAKE_SOURCE_DIR}/src/infer/AscendBufferPool.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
+    )
+    target_include_directories(test_ascend_buffer_pool PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${OpenCV_INCLUDE_DIRS}
+    )
+    target_compile_definitions(test_ascend_buffer_pool PRIVATE BUILD_ASCEND_BACKEND)
+    target_link_libraries(test_ascend_buffer_pool PRIVATE
+        GTest::gtest_main
+        GTest::gmock
+        spdlog::spdlog
+        ${OpenCV_LIBS}
+        Threads::Threads
+        AscendCL::ascendcl
+    )
+    add_test(NAME test_ascend_buffer_pool COMMAND test_ascend_buffer_pool
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+    # Feature 2 + 3: async inference + AIPP (both in AscendBackend)
+    add_executable(test_ascend_async_infer
+        test_ascend_async_infer.cpp
+        ${CMAKE_SOURCE_DIR}/src/infer/AscendBackend.cpp
+        ${CMAKE_SOURCE_DIR}/src/infer/AscendBufferPool.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
+    )
+    target_include_directories(test_ascend_async_infer PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${OpenCV_INCLUDE_DIRS}
+    )
+    target_compile_definitions(test_ascend_async_infer PRIVATE BUILD_ASCEND_BACKEND)
+    target_link_libraries(test_ascend_async_infer PRIVATE
+        GTest::gtest_main
+        GTest::gmock
+        spdlog::spdlog
+        ${OpenCV_LIBS}
+        Threads::Threads
+        AscendCL::ascendcl
+        yaml-cpp
+        nlohmann_json::nlohmann_json
+    )
+    add_test(NAME test_ascend_async_infer COMMAND test_ascend_async_infer
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+    add_executable(test_ascend_aipp
+        test_ascend_aipp.cpp
+        ${CMAKE_SOURCE_DIR}/src/infer/AscendBackend.cpp
+        ${CMAKE_SOURCE_DIR}/src/infer/AscendBufferPool.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
+    )
+    target_include_directories(test_ascend_aipp PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${OpenCV_INCLUDE_DIRS}
+    )
+    target_compile_definitions(test_ascend_aipp PRIVATE BUILD_ASCEND_BACKEND)
+    target_link_libraries(test_ascend_aipp PRIVATE
+        GTest::gtest_main
+        GTest::gmock
+        spdlog::spdlog
+        ${OpenCV_LIBS}
+        Threads::Threads
+        AscendCL::ascendcl
+        yaml-cpp
+        nlohmann_json::nlohmann_json
+    )
+    add_test(NAME test_ascend_aipp COMMAND test_ascend_aipp
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+    # Feature 4: DVPPDecoder
+    add_executable(test_dvpp_decoder
+        test_dvpp_decoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/stream/DVPPDecoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
+    )
+    target_include_directories(test_dvpp_decoder PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${OpenCV_INCLUDE_DIRS}
+        ${FFMPEG_INCLUDE_DIRS}
+    )
+    target_link_directories(test_dvpp_decoder PRIVATE
+        ${FFMPEG_LIBRARY_DIRS}
+    )
+    target_compile_definitions(test_dvpp_decoder PRIVATE BUILD_ASCEND_BACKEND)
+    target_link_libraries(test_dvpp_decoder PRIVATE
+        GTest::gtest_main
+        GTest::gmock
+        spdlog::spdlog
+        ${OpenCV_LIBS}
+        Threads::Threads
+        AscendCL::ascendcl
+        $<$<TARGET_EXISTS:AscendCL::dvpp>:AscendCL::dvpp>
+        ${FFMPEG_LIBRARIES}
+        yaml-cpp
+        nlohmann_json::nlohmann_json
+    )
+    add_test(NAME test_dvpp_decoder COMMAND test_dvpp_decoder
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+endif() # BUILD_ASCEND_BACKEND
+
 # gRPC publisher (requires BUILD_GRPC_PUBLISHER=ON)
 if(BUILD_GRPC_PUBLISHER)
     add_executable(test_grpc_publisher test_grpc_publisher.cpp

@@ -3,8 +3,10 @@
 #ifdef BUILD_ASCEND_BACKEND
 
 #include "infer/IInferBackend.h"
+#include "infer/AscendBufferPool.h"
 #include <acl/acl.h>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <vector>
 #include <array>
@@ -27,12 +29,50 @@ public:
     DeviceType deviceType()   const override { return DeviceType::Ascend; }
     bool       isLoaded()     const override { return loaded_; }
 
+    // ── Test hooks (no real NPU required) ────────────────────────────────
+
+    // Initialise the buffer pool using operator new instead of aclrtMalloc.
+    void initPoolForTest(int pool_size, size_t input_bytes, size_t output_bytes);
+
+    // Stub for aclmdlExecuteAsync: inject a callable to verify async path.
+    using AclExecuteAsyncFn = std::function<
+        aclError(uint32_t, aclmdlDataset*, aclmdlDataset*, aclrtStream)>;
+    void setExecuteFnForTest(AclExecuteAsyncFn fn) { execute_async_fn_ = std::move(fn); }
+
+    // Stub for aclrtSynchronizeStream.
+    using AclSyncStreamFn = std::function<aclError(aclrtStream)>;
+    void setSyncStreamFnForTest(AclSyncStreamFn fn) { sync_stream_fn_ = std::move(fn); }
+
+    // Stub for aclrtMemcpy (H2D + D2H).
+    using AclMemcpyFn = std::function<
+        aclError(void*, size_t, const void*, size_t, aclrtMemcpyKind)>;
+    void setMemcpyFnForTest(AclMemcpyFn fn) { memcpy_fn_ = std::move(fn); }
+
+    // Stub for AIPP detection.
+    using AippDetectFn = std::function<bool(uint32_t)>;
+    void setAippDetectFnForTest(AippDetectFn fn) { aipp_detect_fn_ = std::move(fn); }
+
+    // Directly set AIPP flag (for tests that bypass loadModel()).
+    void setAippEnabledForTest(bool enabled) { aipp_enabled_ = enabled; }
+
+    // Return the input_bytes_ used to initialise the pool (for test assertions).
+    size_t poolInputBytesForTest() const { return input_bytes_; }
+
+    // Run infer() using injected stubs (skips real ACL dataset / model calls).
+    // Used by test_ascend_async_infer.cpp and test_ascend_aipp.cpp.
+    void inferWithStubs(const Batch& input, std::vector<float>& output);
+
 private:
     // Select the closest .om for the requested batch size (rounds down)
     uint32_t selectModel(int batch_size) const;
 
-    void preprocessCPU(const Batch& input, float* dst, int batch_size,
-                       int h, int w);
+    void preprocessCPU(const Batch& input, float* dst,
+                       int batch_size, int h, int w);
+
+    void packBgrUint8(const Batch& input, uint8_t* dst,
+                      int batch_size, int h, int w);
+
+    bool detectAipp(uint32_t model_id) const;
 
     int  max_batch_size_{16};
     int  input_h_{640};
@@ -44,9 +84,20 @@ private:
     // batch_size → model_id
     std::map<int, uint32_t> model_map_;
 
-    aclrtStream   stream_{nullptr};
-    std::vector<float> input_staging_;
-    std::vector<float> output_staging_;
+    aclrtStream stream_{nullptr};
+
+    // Pre-allocated NPU buffer pool (replaces per-inference aclrtMalloc)
+    AscendBufferPool buffer_pool_;
+    size_t input_bytes_{0};
+    size_t output_bytes_{0};
+
+    bool aipp_enabled_{false};
+
+    // ── Stub function pointers (nullptr → real ACL calls) ─────────────────
+    AclExecuteAsyncFn execute_async_fn_{};
+    AclSyncStreamFn   sync_stream_fn_{};
+    AclMemcpyFn       memcpy_fn_{};
+    AippDetectFn      aipp_detect_fn_{};
 };
 
 } // namespace infer

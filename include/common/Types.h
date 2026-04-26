@@ -78,11 +78,29 @@ struct GpuBuffer {
     int     cuda_device_id{0};              // CUDA device that owns this buffer
 };
 
+#ifdef BUILD_ASCEND_BACKEND
+// ── NPU buffer descriptor (DVPP output, YUV420SP / NV12 format) ──────────────
+// Analogous to GpuBuffer for CUDA. All pointers are device (HBM) pointers.
+// `frame_ref` holds a ref-counted handle that calls acldvppFree when destroyed,
+// returning the YUV surface to the DVPP output pool.
+struct AscendBuffer {
+    void* yuv_device{nullptr};           // YUV420SP in NPU device (HBM) memory
+    int   width{0};
+    int   height{0};
+    int   device_id{0};
+    std::shared_ptr<void> frame_ref;     // keeps DVPP buffer alive; deleter: acldvppFree
+};
+#endif // BUILD_ASCEND_BACKEND
+
 // ── A decoded frame ready for preprocessing ──────────────────────────────────
 struct Frame {
     cv::Mat    image;           // CPU path: BGR uint8, original resolution
     GpuBuffer  gpu_buf;         // GPU path: NVDEC NV12 output
     bool       is_gpu{false};
+#ifdef BUILD_ASCEND_BACKEND
+    AscendBuffer ascend_buf;    // NPU path: DVPP YUV420SP output
+    bool         is_ascend{false};
+#endif
     StreamMeta meta;
 };
 

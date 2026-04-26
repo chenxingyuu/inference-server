@@ -84,6 +84,8 @@ struct StreamConfig {
     int         read_timeout_ms{5000};           // av_read_frame timeout
     bool        use_hwdec{false};  // true → NVDEC hardware decode
     int         cuda_device_id{0}; // set programmatically by GpuDeviceAllocator; not from YAML
+    bool        use_ascend_dvpp{false};  // Ascend: true → DVPP NPU hardware decode
+    int         ascend_device_id{0};     // NPU device index for DVPP decoding
     TrackerType tracker{TrackerType::None};
     ByteTrackConfig byte_track{};
     SourceType  source_type{SourceType::RTSP};  // RTSP stream or local file

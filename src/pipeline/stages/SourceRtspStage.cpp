@@ -9,14 +9,23 @@ namespace infer {
 
 SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src,
                                  int sample_fps, SamplingMode sampling_mode, bool use_hwdec,
-                                 std::shared_ptr<GpuDeviceAllocator> gpu_alloc)
+                                 std::shared_ptr<GpuDeviceAllocator> gpu_alloc,
+                                 bool use_ascend_dvpp, int ascend_device_id)
     : id_(std::move(id))
     , source_(src)
     , sample_fps_(sample_fps)
     , sampling_mode_(sampling_mode)
     , use_hwdec_(use_hwdec)
     , gpu_alloc_(std::move(gpu_alloc))
-    , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps * 2))) {}
+    , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps * 2)))
+#ifdef BUILD_ASCEND_BACKEND
+    , use_ascend_dvpp_(use_ascend_dvpp)
+    , ascend_device_id_(ascend_device_id)
+#endif
+{
+    (void)use_ascend_dvpp;   // suppress unused-param warning when Ascend disabled
+    (void)ascend_device_id;
+}
 
 std::string SourceRtspStage::id() const { return id_; }
 
@@ -25,10 +34,6 @@ bool SourceRtspStage::isSource() const { return true; }
 void SourceRtspStage::start() {
     bool expected = false;
     if (!running_.compare_exchange_strong(expected, true)) return;
-
-    if (use_hwdec_ && gpu_alloc_) {
-        cuda_device_id_ = gpu_alloc_->acquire();
-    }
 
     StreamConfig cfg;
     cfg.id = source_.id;
@@ -41,9 +46,8 @@ void SourceRtspStage::start() {
     cfg.max_reconnect_attempts = source_.max_reconnect_attempts;
     cfg.open_timeout_ms = source_.open_timeout_ms;
     cfg.read_timeout_ms = source_.read_timeout_ms;
-    cfg.use_hwdec = use_hwdec_;
-    cfg.cuda_device_id = cuda_device_id_;
-    decoder_.start(cfg, [this](Frame frame) {
+
+    auto frame_cb = [this](Frame frame) {
         std::lock_guard<std::mutex> lock(mu_);
         if (queue_.size() >= max_queue_size_) {
             queue_.pop_front();
@@ -51,15 +55,40 @@ void SourceRtspStage::start() {
         }
         queue_.push_back(std::move(frame));
         cv_.notify_one();
-    });
+    };
+
+#ifdef BUILD_ASCEND_BACKEND
+    if (use_ascend_dvpp_) {
+        cfg.use_ascend_dvpp  = true;
+        cfg.ascend_device_id = ascend_device_id_;
+        dvpp_decoder_ = std::make_unique<DVPPDecoder>();
+        dvpp_decoder_->start(cfg, frame_cb);
+        return;
+    }
+#endif
+
+    if (use_hwdec_ && gpu_alloc_) {
+        cuda_device_id_ = gpu_alloc_->acquire();
+    }
+    cfg.use_hwdec      = use_hwdec_;
+    cfg.cuda_device_id = cuda_device_id_;
+    decoder_.start(cfg, frame_cb);
 }
 
 void SourceRtspStage::stop() {
     bool expected = true;
     if (!running_.compare_exchange_strong(expected, false)) return;
     cv_.notify_all();
-    decoder_.stop();
 
+#ifdef BUILD_ASCEND_BACKEND
+    if (dvpp_decoder_) {
+        dvpp_decoder_->stop();
+        dvpp_decoder_.reset();
+        return;
+    }
+#endif
+
+    decoder_.stop();
     if (use_hwdec_ && gpu_alloc_) {
         gpu_alloc_->release(cuda_device_id_);
     }
@@ -71,21 +100,20 @@ void SourceRtspStage::process(const EventEnvelope&, const EmitFn& emit) {
     {
         std::unique_lock<std::mutex> lock(mu_);
         if (queue_.empty()) {
-            cv_.wait_for(lock, std::chrono::milliseconds(2), [this] { return !queue_.empty() || !running_.load(); });
+            cv_.wait_for(lock, std::chrono::milliseconds(2),
+                         [this] { return !queue_.empty() || !running_.load(); });
         }
-        if (queue_.empty()) {
-            return;
-        }
+        if (queue_.empty()) return;
         frame = std::move(queue_.front());
         queue_.pop_front();
         source_queue_size = queue_.size();
     }
     EventEnvelope out;
-    out.event_id = frame.meta.stream_id + ":" + std::to_string(frame.meta.frame_seq);
-    out.stream_id = frame.meta.stream_id;
-    out.frame_seq = frame.meta.frame_seq;
+    out.event_id        = frame.meta.stream_id + ":" + std::to_string(frame.meta.frame_seq);
+    out.stream_id       = frame.meta.stream_id;
+    out.frame_seq       = frame.meta.frame_seq;
     out.source_queue_size = source_queue_size;
-    out.frame = std::make_shared<Frame>(std::move(frame));
+    out.frame           = std::make_shared<Frame>(std::move(frame));
     emit(out);
 }
 
