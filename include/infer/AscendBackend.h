@@ -10,6 +10,7 @@
 #include <map>
 #include <vector>
 #include <array>
+#include <mutex>
 
 namespace infer {
 
@@ -94,6 +95,7 @@ private:
 
     aclrtContext ctx_{nullptr};
     aclrtStream  stream_{nullptr};
+    std::mutex   infer_mu_;
 
     // Pre-allocated NPU buffer pool (replaces per-inference aclrtMalloc)
     AscendBufferPool buffer_pool_;

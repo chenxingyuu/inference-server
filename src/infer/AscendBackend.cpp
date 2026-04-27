@@ -158,6 +158,8 @@ bool AscendBackend::detectAipp(uint32_t model_id) const {
 
 void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
     if (!loaded_) throw std::runtime_error("AscendBackend: model not loaded");
+    std::lock_guard<std::mutex> lk(infer_mu_);
+    ACL_CHECK(aclrtSetCurrentContext(ctx_));
 
     const int bs = input.size();
     const size_t out_bytes =
@@ -235,22 +237,33 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
     } else
 #endif
     if (aipp_enabled_) {
-        // Path B: CPU BGR uint8, AIPP handles CHW conversion + normalisation
+        // Path B: CPU BGR uint8, AIPP handles CHW conversion + normalisation.
+        // slot->input_device is NPU HBM memory, so we must stage on host first.
         in_bytes = static_cast<size_t>(bs) * input_h_ * input_w_ * 3;
-        packBgrUint8(input, static_cast<uint8_t*>(slot->input_device),
-                     bs, input_h_, input_w_);
+        std::vector<uint8_t> host_input(in_bytes);
+        packBgrUint8(input, host_input.data(), bs, input_h_, input_w_);
+        ACL_CHECK(do_memcpy(slot->input_device, input_bytes_, host_input.data(), in_bytes,
+                            ACL_MEMCPY_HOST_TO_DEVICE));
         input_ptr = slot->input_device;
     } else {
-        // Path C: CPU float CHW, no AIPP
+        // Path C: CPU float CHW, no AIPP.
+        // Preprocess on host, then copy into device input buffer.
         in_bytes = static_cast<size_t>(bs) * 3 * input_h_ * input_w_ * sizeof(float);
-        preprocessCPU(input, static_cast<float*>(slot->input_device),
-                      bs, input_h_, input_w_);
+        std::vector<float> host_input(in_bytes / sizeof(float));
+        preprocessCPU(input, host_input.data(), bs, input_h_, input_w_);
+        ACL_CHECK(do_memcpy(slot->input_device, input_bytes_, host_input.data(), in_bytes,
+                            ACL_MEMCPY_HOST_TO_DEVICE));
         input_ptr = slot->input_device;
     }
 
     // ── Build ACL datasets and run async inference ────────────────────────
     aclDataBuffer* in_buf  = aclCreateDataBuffer(input_ptr, in_bytes);
     aclDataBuffer* out_buf = aclCreateDataBuffer(slot->output_device, out_bytes);
+    if (!in_buf || !out_buf) {
+        if (in_buf) aclDestroyDataBuffer(in_buf);
+        if (out_buf) aclDestroyDataBuffer(out_buf);
+        throw std::runtime_error("AscendBackend: aclCreateDataBuffer returned null");
+    }
     aclmdlDataset* in_set  = aclmdlCreateDataset();
     aclmdlDataset* out_set = aclmdlCreateDataset();
     aclmdlAddDatasetBuffer(in_set, in_buf);

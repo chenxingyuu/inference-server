@@ -157,6 +157,16 @@ void InferWorker::workerLoop() {
                 std::chrono::steady_clock::now() - decode_start).count();
             LOG_DEBUG("InferWorker[{}]: decode done bs={} decode_ms={:.1f}",
                       model_cfg_.id, batch.size(), decode_ms);
+            if (per_image.size() < static_cast<size_t>(batch.size())) {
+                LOG_ERROR("InferWorker[{}]: decode result size mismatch, batch_size={}, decoded={}",
+                          model_cfg_.id, batch.size(), per_image.size());
+                continue;
+            }
+            if (batch.metas.size() < static_cast<size_t>(batch.size())) {
+                LOG_ERROR("InferWorker[{}]: batch metadata size mismatch, batch_size={}, metas={}",
+                          model_cfg_.id, batch.size(), batch.metas.size());
+                continue;
+            }
 
             double infer_ts = nowEpoch();
             for (int i = 0; i < batch.size(); ++i) {
