@@ -560,8 +560,26 @@ tasks:
 
 ---
 
+## Phase 23 — DVPP CANN6 稳定性修复
+
+**完成**：2026-04-27
+
+**目标**：修复 DVPP 解码器在 CANN6 环境下的内存泄漏、发送失败后的资源回收缺失，以及 CANN6/CANN7 同步策略不一致问题。
+
+**修复**：
+- **回调死循环**（CRITICAL）：`start()` 将用户 callback 直接通过 `std::move` 传入 `decodeLoop`，不再创建中间 lambda；`decodeLoop` 在 `ctx_.cb` 中存储真实 callback，彻底消除 `onDecoded` → lambda → `ctx_.cb`（= lambda）的无限递归
+- **`initChannel` 部分初始化资源泄漏**（HIGH）：`decodeLoop` 在 `initChannel()` 返回 false 后立即调用 `destroyChannel()`，释放已分配的 `channel_desc_` / `dvpp_stream_`（`destroyChannel` 对 null 指针安全）
+- **CANN6 vs CANN7 同步**：CANN7 用 `aclrtSynchronizeStream(dvpp_stream_)`（精确到 vdec stream）；CANN6 `aclvdecSendFrame` 无 per-call stream，用 `aclrtSynchronizeDevice()`，在包被 unref 前保证 DMA 完成
+- **发送失败回收**：`aclvdecSendFrame` / `acldvppVdecProcess` 失败时正确 free `yuv_buf` 并 destroy `pic_desc` / `stream_desc`，防止 DVPP 不持有描述符时内存泄漏
+
+**状态**：✅ 完成
+
+---
+
 ## 待办
 
+- [x] Phase 23 DVPP CANN6 稳定性修复（内存释放 + 发送错误回收 + stream 同步）
+- [ ] 任务级自动降级（安全实现待完善）：`use_ascend_dvpp=true` 且模型无 AIPP 时自动回退 CPU 解码
 - [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
 - [ ] Phase 5 Ascend 310P 真机联调
 - [ ] CascadeRouter GPU 路径：从 secondary ModelConfig 读取实际 input_size（当前硬编码 112×112）

@@ -20,6 +20,8 @@ namespace {
     } \
 } while(0)
 
+constexpr aclError kAclRepeatInitCode = static_cast<aclError>(100002);
+
 // RAII guard that releases an AscendPooledBuffer on scope exit.
 struct SlotGuard {
     AscendBufferPool&   pool;
@@ -44,7 +46,16 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     input_w_        = cfg.input_shape.width;
     num_classes_    = cfg.num_classes;
 
-    ACL_CHECK(aclInit(nullptr));
+    const aclError init_rc = aclInit(nullptr);
+    if (init_rc == ACL_SUCCESS) {
+        acl_inited_by_self_ = true;
+    } else if (init_rc == kAclRepeatInitCode) {
+        acl_inited_by_self_ = false;
+        LOG_INFO("AscendBackend: aclInit already done in process, reusing ACL runtime");
+    } else {
+        throw std::runtime_error(std::string("[ACL] error ") + std::to_string(init_rc)
+                                 + " at " + __FILE__ + ":" + std::to_string(__LINE__));
+    }
     ACL_CHECK(aclrtSetDevice(device_id_));
     // CANN 6 does not auto-create a default context; explicit creation is
     // required for correct multi-threaded operation on all CANN versions.
@@ -99,7 +110,10 @@ void AscendBackend::unloadModel() {
         ctx_ = nullptr;
     }
     aclrtResetDevice(device_id_);
-    aclFinalize();
+    if (acl_inited_by_self_) {
+        aclFinalize();
+        acl_inited_by_self_ = false;
+    }
     loaded_ = false;
 }
 

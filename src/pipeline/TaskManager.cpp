@@ -7,6 +7,19 @@
 
 namespace infer {
 
+namespace {
+
+std::string findInferModelId(const PipelineConfig& pipeline) {
+    for (const auto& node : pipeline.nodes) {
+        if (node.type != "infer.engine") continue;
+        auto it = node.with.find("model_id");
+        if (it != node.with.end()) return it->second;
+    }
+    return {};
+}
+
+} // namespace
+
 TaskManager::TaskManager(const AppConfig& cfg,
                          IPublisher& publisher,
                          std::shared_ptr<FrameArchiver> frame_archiver)
@@ -46,6 +59,21 @@ void TaskManager::loadAll() {
         auto source = cfg_.findSource(task.source_id);
         auto pipeline_tpl = cfg_.findPipeline(task.pipeline_id);
         if (!source || !pipeline_tpl) continue;
+
+        bool use_ascend_dvpp = task.use_ascend_dvpp;
+        if (use_ascend_dvpp) {
+            const std::string infer_model_id = findInferModelId(*pipeline_tpl);
+            const auto* model_cfg = infer_model_id.empty() ? nullptr : cfg_.findModel(infer_model_id);
+            if (!model_cfg || model_cfg->backend != DeviceType::Ascend) {
+                LOG_WARN("TaskManager: task {} requested use_ascend_dvpp, but infer.engine model is missing or non-Ascend; fallback to CPU decode",
+                         task.id);
+                use_ascend_dvpp = false;
+            } else {
+                LOG_WARN("TaskManager: task {} requested use_ascend_dvpp; startup AIPP probe disabled to avoid ACL side effects, keeping configured decode mode",
+                         task.id);
+            }
+        }
+
         PipelineConfig runtime_cfg = *pipeline_tpl;
         runtime_cfg.id = task.id;
         auto executor = std::make_unique<GraphExecutor>(runtime_cfg);
@@ -57,7 +85,7 @@ void TaskManager::loadAll() {
             task.sample_fps,
             task.sampling_mode,
             task.use_hwdec,
-            task.use_ascend_dvpp,
+            use_ascend_dvpp,
             task.ascend_device_id,
             gpu_alloc};
         for (const auto& node : runtime_cfg.nodes) {

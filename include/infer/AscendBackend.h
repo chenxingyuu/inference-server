@@ -96,6 +96,7 @@ private:
     aclrtContext ctx_{nullptr};
     aclrtStream  stream_{nullptr};
     std::mutex   infer_mu_;
+    bool         acl_inited_by_self_{false};
 
     // Pre-allocated NPU buffer pool (replaces per-inference aclrtMalloc)
     AscendBufferPool buffer_pool_;
