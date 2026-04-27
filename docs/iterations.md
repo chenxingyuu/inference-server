@@ -529,6 +529,44 @@
 
 ---
 
+## Phase 22 — DVPP → AIPP 零拷贝管道
+
+**完成**：2026-04-27
+
+**目标**：打通 DVPP 硬件解码到 AIPP 预处理的端到端零拷贝路径，彻底消除 CPU 预处理（`cv::resize`、`packBgrUint8`）和 H2D memcpy。
+
+**背景**：Phase 21 已实现 `DVPPDecoder`（Frame.is_ascend=true），但 `Batch` 结构体没有 `ascend_frames` 字段，DVPP 输出的 HBM NV12 帧在 BatchScheduler 处被丢弃，AIPP 仍通过 `packBgrUint8`（CPU resize）喂数据。
+
+**新增**：
+- **`Batch.ascend_frames`**（`Types.h`）：`vector<AscendBuffer>` + `is_ascend` 标志，用于携带 HBM NV12 帧穿越 BatchScheduler 到 AscendBackend
+- **`BatchScheduler`**：检测 `Frame.is_ascend`，将 `ascend_buf` 移入 `batch.ascend_frames`；扩展混合帧类型检测（CPU / GPU / Ascend 不可混批）；flush 后正确清零 ascend 字段
+- **`InferEngineWorkerStage`**：图模式管道同步支持 Ascend 帧组批
+- **`AscendBackend::infer()` 三路分支**：
+  - **Path A（新）零拷贝**：`is_ascend && aipp_enabled_` → batch=1 时 DVPP device ptr 直传 ACL dataset（无任何拷贝）；batch>1 时 D2D memcpy 拼接到临时 HBM buffer（无 CPU 参与）
+  - **Path B（原）CPU BGR**：`packBgrUint8` → H2D → AIPP
+  - **Path C（原）CPU float**：`preprocessCPU` → H2D → NPU
+- **异常安全**：`TmpDevGuard` 通过 `void**` 引用持有 `tmp_device`，保证 D2D concat 途中任意异常均能正确 `aclrtFree`
+- **测试桩**：`setDevAllocFnForTest` / `setDevFreeFnForTest` 注入 device alloc/free，配合 `inferWithStubs()` 覆盖 ascend 路径
+
+**激活方式**：
+```yaml
+streams:
+  - use_ascend_dvpp: true     # DVPPDecoder → Frame.is_ascend=true
+# .om 须以 NV12 AIPP 输入编译（ATC --insert_op_conf=aipp_nv12.cfg）
+# AscendBackend 自动检测 aipp_enabled_，两者同时满足则走 Path A
+```
+
+**测试**（`test_ascend_dvpp_zerocopy.cpp`，12 个，无需真实 NPU）：
+- `Batch` 字段默认值与 device ptr 唯一性
+- batch=1：`dev_alloc` 和 D2D memcpy 均不调用（真零拷贝）
+- batch>N：`dev_alloc` 恰好调用一次，D2D memcpy 每帧一次
+- tmp buffer 在正常完成及 exec 异常时均被释放
+- CPU 路径（AIPP disabled / CPU batch）无任何 device alloc 调用
+
+**状态**：✅ 完成
+
+---
+
 ## 待办
 
 - [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
