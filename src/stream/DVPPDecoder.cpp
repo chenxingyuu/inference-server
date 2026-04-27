@@ -86,7 +86,7 @@ void DVPPDecoder::stop() {
 // ── DVPP channel management ────────────────────────────────────────────────
 
 bool DVPPDecoder::initChannel(int device_id) {
-    // Create DVPP vdec channel descriptor
+#if CANN_VERSION_MAJOR >= 7
     acldvppChannelDesc* desc = acldvppCreateChannelDesc();
     if (!desc) {
         LOG_ERROR("DVPPDecoder: acldvppCreateChannelDesc() returned null");
@@ -94,23 +94,39 @@ bool DVPPDecoder::initChannel(int device_id) {
     }
     channel_desc_ = desc;
 
-    // Create ACL stream for DVPP async operations
     aclError err = aclrtCreateStream(&dvpp_stream_);
     if (err != ACL_SUCCESS) {
         LOG_ERROR("DVPPDecoder: aclrtCreateStream failed ({})", static_cast<int>(err));
         return false;
     }
 
-    // Use injected stub if set (test path), otherwise call real DVPP
     aclError create_err;
     if (dvpp_api_.createChannel) {
         create_err = dvpp_api_.createChannel(&channel_desc_);
     } else {
         create_err = acldvppCreateChannel(channel_desc_);
     }
+#else
+    // CANN 6: aclvdec* API — callback registered on channel descriptor, not per-call
+    aclvdecChannelDesc* desc = aclvdecCreateChannelDesc();
+    if (!desc) {
+        LOG_ERROR("DVPPDecoder: aclvdecCreateChannelDesc() returned null");
+        return false;
+    }
+    aclvdecSetChannelDescChannelId(desc, static_cast<uint32_t>(device_id));
+    aclvdecSetChannelDescCallback(desc, &DVPPDecoder::onDecoded);
+    channel_desc_ = desc;
+
+    aclError create_err;
+    if (dvpp_api_.createChannel) {
+        create_err = dvpp_api_.createChannel(&channel_desc_);
+    } else {
+        create_err = aclvdecCreateChannel(channel_desc_);
+    }
+#endif
 
     if (create_err != ACL_SUCCESS) {
-        LOG_ERROR("DVPPDecoder: acldvppCreateChannel failed ({})",
+        LOG_ERROR("DVPPDecoder: vdec channel create failed ({})",
                   static_cast<int>(create_err));
         return false;
     }
@@ -125,13 +141,21 @@ void DVPPDecoder::destroyChannel() {
         if (dvpp_api_.destroyChannel) {
             err = dvpp_api_.destroyChannel(channel_desc_);
         } else {
+#if CANN_VERSION_MAJOR >= 7
             err = acldvppDestroyChannel(channel_desc_);
+#else
+            err = aclvdecDestroyChannel(channel_desc_);
+#endif
         }
         if (err != ACL_SUCCESS) {
-            LOG_WARN("DVPPDecoder: acldvppDestroyChannel failed ({})",
+            LOG_WARN("DVPPDecoder: vdec channel destroy failed ({})",
                      static_cast<int>(err));
         }
+#if CANN_VERSION_MAJOR >= 7
         acldvppDestroyChannelDesc(channel_desc_);
+#else
+        aclvdecDestroyChannelDesc(channel_desc_);
+#endif
         channel_desc_ = nullptr;
     }
     if (dvpp_stream_) {
@@ -270,16 +294,26 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
                 acldvppSetPicDescData(pic_desc, yuv_buf);
                 acldvppSetPicDescSize(pic_desc, yuv_size);
 
+#if CANN_VERSION_MAJOR >= 7
                 auto vdec = dvpp_api_.vdecProcess ? dvpp_api_.vdecProcess
-                    : [](acldvppChannelDesc* ch, acldvppStreamDesc* sd,
+                    : VdecProcessFn([](AclVdecChannelDesc* ch, acldvppStreamDesc* sd,
                          acldvppPicDesc* pd, aclrtStream s,
-                         aclDvppVdecCallback fn, void* ud) -> aclError {
+                         AclVdecCb fn, void* ud) -> aclError {
                         return acldvppVdecProcess(ch, sd, pd, s, fn, ud);
-                    };
-
-                // The callback takes ownership of pic_desc and frees it on completion
+                    });
                 vdec(channel_desc_, stream_desc, pic_desc, dvpp_stream_,
                      &DVPPDecoder::onDecoded, &ctx_);
+#else
+                // CANN 6: callback already registered on channel; pass userData per-send
+                auto vdec = dvpp_api_.vdecProcess ? dvpp_api_.vdecProcess
+                    : VdecProcessFn([](AclVdecChannelDesc* ch, acldvppStreamDesc* sd,
+                         acldvppPicDesc* pd, aclvdecFrameConfig* cfg, void* ud) -> aclError {
+                        return aclvdecSendFrame(ch, sd, pd, cfg, ud);
+                    });
+                aclvdecFrameConfig* frame_cfg = aclvdecCreateFrameConfig();
+                vdec(channel_desc_, stream_desc, pic_desc, frame_cfg, &ctx_);
+                aclvdecDestroyFrameConfig(frame_cfg);
+#endif
             }
             acldvppDestroyStreamDesc(stream_desc);
         }

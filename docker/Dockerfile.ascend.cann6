@@ -1,0 +1,77 @@
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+# Atlas 300I Pro + CANN 6.x (Ubuntu 20.04)
+# Override at build time: docker build --build-arg ASCEND_BASE_IMAGE=... -f docker/Dockerfile.ascend.cann6 .
+ARG ASCEND_BASE_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+FROM ${ASCEND_BASE_IMAGE} AS builder
+ARG APT_MIRROR=
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    if [ -n "${APT_MIRROR}" ]; then \
+    sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip ninja-build pkg-config git \
+    ccache \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev libavfilter-dev \
+    libopencv-dev \
+    libyaml-cpp-dev \
+    nlohmann-json3-dev \
+    libspdlog-dev \
+    libboost-dev \
+    librdkafka-dev \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    protobuf-compiler-grpc \
+    && pip3 install --no-cache-dir 'cmake>=3.24,<4' \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/usr/local/bin:${PATH}"
+
+# CANN 6 toolkit path (same layout as CANN 8)
+ENV ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
+
+WORKDIR /src
+COPY . .
+
+RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
+    cmake -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DBUILD_TRT_BACKEND=OFF \
+    -DBUILD_ASCEND_BACKEND=ON \
+    -DBUILD_ONNX_BACKEND=OFF \
+    -DBUILD_REDIS_PUBLISHER=ON \
+    -DBUILD_GRPC_PUBLISHER=ON \
+    && cmake --build build --parallel $(nproc)
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+ARG ASCEND_BASE_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+FROM ${ASCEND_BASE_IMAGE}
+ARG APT_MIRROR=
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    if [ -n "${APT_MIRROR}" ]; then \
+    sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    libssl1.1 \
+    libcurl4 \
+    libavcodec58 libavformat58 libavutil56 libswscale5 libavdevice58 libavfilter7 \
+    libopencv-core4.2 libopencv-imgproc4.2 \
+    libyaml-cpp0.6 \
+    librdkafka1 \
+    libspdlog1 \
+    libgrpc++1 \
+    libprotobuf17 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server
+
+VOLUME ["/models", "/config"]
+ENTRYPOINT ["/usr/local/bin/infer_server", "/config/config.yaml"]

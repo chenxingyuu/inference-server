@@ -13,6 +13,17 @@
 
 namespace infer {
 
+// CANN 6 and CANN 7+ have fundamentally different vdec APIs:
+//   CANN ≤ 6: aclvdecChannelDesc, callback set on descriptor, aclvdecSendFrame()
+//   CANN ≥ 7: acldvppChannelDesc, callback passed per-call, acldvppVdecProcess()
+#if CANN_VERSION_MAJOR >= 7
+using AclVdecCb          = aclDvppVdecCallback;
+using AclVdecChannelDesc = acldvppChannelDesc;
+#else
+using AclVdecCb          = aclvdecCallback;
+using AclVdecChannelDesc = aclvdecChannelDesc;
+#endif
+
 // DVPP hardware video decoder for Ascend 310P.
 //
 // Input:  H.264/H.265 RTSP bitstream (demuxed by FFmpeg avformat — no avcodec decode)
@@ -26,11 +37,18 @@ namespace infer {
 class DVPPDecoder : public IStreamDecoder {
 public:
     // ── Injectable DVPP API stubs (for unit tests without real NPU) ───────
-    using CreateChannelFn  = std::function<aclError(acldvppChannelDesc**)>;
-    using DestroyChannelFn = std::function<aclError(acldvppChannelDesc*)>;
+    using CreateChannelFn  = std::function<aclError(AclVdecChannelDesc**)>;
+    using DestroyChannelFn = std::function<aclError(AclVdecChannelDesc*)>;
+#if CANN_VERSION_MAJOR >= 7
     using VdecProcessFn    = std::function<
-        aclError(acldvppChannelDesc*, acldvppStreamDesc*,
-                 acldvppPicDesc*, aclrtStream, aclDvppVdecCallback, void*)>;
+        aclError(AclVdecChannelDesc*, acldvppStreamDesc*,
+                 acldvppPicDesc*, aclrtStream, AclVdecCb, void*)>;
+#else
+    // CANN 6: callback is registered on the channel descriptor; userData passed per-send.
+    using VdecProcessFn    = std::function<
+        aclError(AclVdecChannelDesc*, acldvppStreamDesc*,
+                 acldvppPicDesc*, aclvdecFrameConfig*, void*)>;
+#endif
 
     struct DvppApiStub {
         CreateChannelFn  createChannel;
@@ -76,7 +94,7 @@ private:
     std::atomic<bool>        stop_flag_{false};
     int                      device_id_{0};
     aclrtStream              dvpp_stream_{nullptr};
-    acldvppChannelDesc*      channel_desc_{nullptr};
+    AclVdecChannelDesc*      channel_desc_{nullptr};
 
     DvppApiStub              dvpp_api_{};  // zero-initialized → real ACL path
 
