@@ -7,6 +7,7 @@ Primary navigation for engineering and agent workflows.
 - `docs/ARCHITECTURE.md`: high-level system architecture and boundaries.
 - `docs/PRODUCT_RULES.md`: product invariants and behavior constraints.
 - `docs/QUALITY-GATES.md`: executable quality checks and completion criteria.
+- `AGENTS.md`: agent workflow and task delegation guidelines.
 
 ## Existing Guides
 

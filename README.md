@@ -18,7 +18,7 @@ RTSP(source) -> decode.ffmpeg -> (fan-out)
             -> preprocess.yolo -> infer.engine -> postprocess.yolo
             -> track.bytetrack (可选)
             -> join.byFrameId (可选)
-            -> sink.kafka
+            -> sink.kafka（publishers: 配置可同时扇出到 gRPC / Redis）
             -> sink.stream (可选，画框+RTSP/RTMP 推流)
             -> sink.ffplay (可选，画框+本机 ffplay 预览)
             -> ManagementServer (/healthz /metrics /tasks)
@@ -129,9 +129,29 @@ curl -X POST http://localhost:8080/tasks/task_cam_001/stop
 - `infer.engine`：推理 stage（引用 `models[].id`）；DAG 路径下由 `InferWorkerGroup` 执行，支持 `models[].instance_count` 与 `models[].device_ids`（每实例一个后端；`device_ids` 拼写须正确）。攒批策略与 `batch_size`、`max_queue_delay_us` 一致（与 `ModelManager` + `BatchScheduler` 的流池攒批路径不同）。
 - `track.bytetrack`：ByteTrack 追踪
 - `join.byFrameId`：归档信息回填到推理结果（按 frame id join）
-- `sink.kafka`：Kafka 输出
+- `sink.kafka`：结果输出；通过 `publishers:` 配置可同时扇出到 Kafka / gRPC / Redis（见下方配置示例）
 - `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`，需 `output_url`）
 - `sink.ffplay`：叠加检测框后通过管道喂给本机 `ffplay`（BGR rawvideo，需已安装 ffmpeg/ffplay）
+
+### 多路发布配置（publishers:）
+
+`sink.kafka` stage 通过 `buildPublisher()` 工厂自动扇出，多路启用时内部包装为 `MultiPublisher`，单路失败不影响其余路。
+
+```yaml
+publishers:
+  kafka:
+    enabled: true
+    # ... 原有 kafka: 根键配置迁移至此（旧格式自动 fallback，零迁移成本）
+  grpc:
+    enabled: false
+    port: 50051
+  redis:
+    enabled: false
+    addr: "localhost:6379"
+    stream_key: "infer:results"
+```
+
+订阅端示例见 `examples/grpc_subscriber/`（Python / Go）。构建时需加 `-DBUILD_GRPC_PUBLISHER=ON`（需 gRPC）或 `-DBUILD_REDIS_PUBLISHER=ON`（需 hiredis）。
 
 ### ONNX Runtime（CPU/MPS）注意事项
 
