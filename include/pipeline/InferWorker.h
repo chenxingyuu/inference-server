@@ -55,7 +55,8 @@ public:
     void enqueue(Batch batch);
 
     WorkerState state() const { return state_.load(); }
-    int cudaDeviceId() const { return model_cfg_.device_id; }
+    int cudaDeviceId()   const { return model_cfg_.device_id; }
+    int ascendDeviceId() const { return model_cfg_.device_id; }
 
     // Optional: set a cascade router for primary→secondary routing (Phase 7b-1).
     // Must be called before start(). Not thread-safe.

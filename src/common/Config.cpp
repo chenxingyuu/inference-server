@@ -325,6 +325,13 @@ AppConfig loadConfig(const std::string& yaml_path) {
         m.instance_count   = mn["instance_count"].as<int>(1);
         if (auto ids = mn["device_ids"]) {
             for (const auto& id : ids) m.device_ids.push_back(id.as<int>());
+            if (static_cast<int>(m.device_ids.size()) != m.instance_count) {
+                throw std::runtime_error(
+                    "model '" + m.id + "': device_ids has " +
+                    std::to_string(m.device_ids.size()) + " entries but instance_count=" +
+                    std::to_string(m.instance_count) +
+                    "; sizes must match");
+            }
         }
         m.max_queue_delay_us = mn["max_queue_delay_us"].as<int>(10000);
         if (auto pbs = mn["preferred_batch_sizes"]) {

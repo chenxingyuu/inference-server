@@ -10,6 +10,9 @@
 
 namespace infer {
 
+// Process-wide ACL refcount definition.
+std::atomic<int> AscendBackend::s_acl_refcount_{0};
+
 namespace {
 
 #define ACL_CHECK(call) do { \
@@ -46,15 +49,18 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     input_w_        = cfg.input_shape.width;
     num_classes_    = cfg.num_classes;
 
-    const aclError init_rc = aclInit(nullptr);
-    if (init_rc == ACL_SUCCESS) {
-        acl_inited_by_self_ = true;
-    } else if (init_rc == kAclRepeatInitCode) {
-        acl_inited_by_self_ = false;
-        LOG_INFO("AscendBackend: aclInit already done in process, reusing ACL runtime");
+    // Increment process-wide refcount; call aclInit only on the first backend.
+    if (s_acl_refcount_.fetch_add(1, std::memory_order_acq_rel) == 0) {
+        const aclError init_rc = aclInit(nullptr);
+        if (init_rc != ACL_SUCCESS && init_rc != kAclRepeatInitCode) {
+            s_acl_refcount_.fetch_sub(1, std::memory_order_release);
+            throw std::runtime_error(std::string("[ACL] aclInit error ") + std::to_string(init_rc)
+                                     + " at " + __FILE__ + ":" + std::to_string(__LINE__));
+        }
+        LOG_INFO("AscendBackend: aclInit succeeded (refcount=1)");
     } else {
-        throw std::runtime_error(std::string("[ACL] error ") + std::to_string(init_rc)
-                                 + " at " + __FILE__ + ":" + std::to_string(__LINE__));
+        LOG_INFO("AscendBackend: reusing ACL runtime (refcount={})",
+                 s_acl_refcount_.load(std::memory_order_relaxed));
     }
     ACL_CHECK(aclrtSetDevice(device_id_));
     // CANN 6 does not auto-create a default context; explicit creation is
@@ -89,7 +95,7 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     }
     output_bytes_ = static_cast<size_t>(max_bs) * (4 + num_classes_) * 8400 * sizeof(float);
 
-    buffer_pool_.init(device_id_, /*pool_size=*/4, input_bytes_, output_bytes_);
+    buffer_pool_.init(device_id_, ctx_, /*pool_size=*/4, input_bytes_, output_bytes_);
 
     loaded_ = true;
 }
@@ -109,10 +115,14 @@ void AscendBackend::unloadModel() {
         aclrtDestroyContext(ctx_);
         ctx_ = nullptr;
     }
-    aclrtResetDevice(device_id_);
-    if (acl_inited_by_self_) {
+    // aclrtResetDevice is intentionally omitted: it is a process-wide operation
+    // that destroys all ACL resources on the device, including those held by
+    // sibling AscendBackend instances on the same device_id.
+    //
+    // Decrement refcount; call aclFinalize only when the last backend stops.
+    if (s_acl_refcount_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
         aclFinalize();
-        acl_inited_by_self_ = false;
+        LOG_INFO("AscendBackend: aclFinalize called (last backend stopped)");
     }
     loaded_ = false;
 }

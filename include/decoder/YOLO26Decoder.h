@@ -23,7 +23,7 @@ public:
     YOLOVersion version() const override { return YOLOVersion::v26; }
 
 private:
-    int num_classes_;
+    [[maybe_unused]] int num_classes_;
 };
 
 } // namespace infer

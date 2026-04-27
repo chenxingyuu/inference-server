@@ -780,3 +780,75 @@ TEST(LoadConfig, FrameArchiveWorkerCountMustBePositive) {
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());
 }
+
+// ── device_ids validation ─────────────────────────────────────────────────
+
+static void writeMinimalYamlHeader(std::ostream& out) {
+    out << "sources:\n";
+    out << "  - id: cam_1\n";
+    out << "    url: rtsp://localhost/test\n";
+    out << "pipelines:\n";
+    out << "  - id: p1\n";
+    out << "    nodes:\n";
+    out << "      - id: cam_1\n";
+    out << "        type: source.rtsp\n";
+    out << "      - id: sink_1\n";
+    out << "        type: sink.kafka\n";
+    out << "    edges:\n";
+    out << "      - from: cam_1\n";
+    out << "        to: sink_1\n";
+    out << "tasks:\n";
+    out << "  - id: t1\n";
+    out << "    source_id: cam_1\n";
+    out << "    pipeline_id: p1\n";
+}
+
+TEST(LoadConfig, DeviceIdsSizeMismatchInstanceCountThrows) {
+    const std::string path = "data/test_device_ids_mismatch.yaml";
+    {
+        std::ofstream out(path);
+        writeMinimalYamlHeader(out);
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: ascend\n";
+        out << "    input_size: [640, 640]\n";
+        out << "    instance_count: 3\n";
+        out << "    device_ids: [0, 1]\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, DeviceIdsSizeMatchingInstanceCountOk) {
+    const std::string path = "data/test_device_ids_match.yaml";
+    {
+        std::ofstream out(path);
+        writeMinimalYamlHeader(out);
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: ascend\n";
+        out << "    input_size: [640, 640]\n";
+        out << "    instance_count: 2\n";
+        out << "    device_ids: [0, 1]\n";
+    }
+    EXPECT_NO_THROW(loadConfig(path));
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, EmptyDeviceIdsWithMultipleInstancesOk) {
+    const std::string path = "data/test_device_ids_empty.yaml";
+    {
+        std::ofstream out(path);
+        writeMinimalYamlHeader(out);
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "    instance_count: 4\n";
+    }
+    EXPECT_NO_THROW(loadConfig(path));
+    std::remove(path.c_str());
+}
