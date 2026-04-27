@@ -11,6 +11,7 @@
 #include <vector>
 #include <array>
 #include <mutex>
+#include <chrono>
 
 namespace infer {
 
@@ -44,10 +45,21 @@ public:
     using AclSyncStreamFn = std::function<aclError(aclrtStream)>;
     void setSyncStreamFnForTest(AclSyncStreamFn fn) { sync_stream_fn_ = std::move(fn); }
 
+    // Optional timed sync hook used to enforce infer timeout.
+    using AclSyncStreamWithTimeoutFn = std::function<aclError(aclrtStream, uint32_t)>;
+    void setSyncStreamWithTimeoutFnForTest(AclSyncStreamWithTimeoutFn fn) {
+        sync_stream_with_timeout_fn_ = std::move(fn);
+    }
+
     // Stub for aclrtMemcpy (H2D + D2H).
     using AclMemcpyFn = std::function<
         aclError(void*, size_t, const void*, size_t, aclrtMemcpyKind)>;
     void setMemcpyFnForTest(AclMemcpyFn fn) { memcpy_fn_ = std::move(fn); }
+
+    // Stub for aclrtMemcpyAsync (mainly D2H async copy).
+    using AclMemcpyAsyncFn = std::function<
+        aclError(void*, size_t, const void*, size_t, aclrtMemcpyKind, aclrtStream)>;
+    void setMemcpyAsyncFnForTest(AclMemcpyAsyncFn fn) { memcpy_async_fn_ = std::move(fn); }
 
     // Stub for AIPP detection.
     using AippDetectFn = std::function<bool(uint32_t)>;
@@ -58,6 +70,14 @@ public:
 
     // Return the input_bytes_ used to initialise the pool (for test assertions).
     size_t poolInputBytesForTest() const { return input_bytes_; }
+    void setInferTimeoutMsForTest(uint32_t timeout_ms) { infer_timeout_ms_ = timeout_ms; }
+    void setModelShapeForTest(int h, int w, int num_classes) {
+        input_h_ = h;
+        input_w_ = w;
+        num_classes_ = num_classes;
+        output_bytes_ = expectedOutputBytesForBatchForTest(max_batch_size_);
+    }
+    size_t expectedOutputBytesForBatchForTest(int batch_size) const;
 
     // Stub for device memory allocation (aclrtMalloc) — zero-copy multi-frame path.
     using AclDevAllocFn = std::function<aclError(void**, size_t)>;
@@ -113,10 +133,13 @@ private:
     // ── Stub function pointers (nullptr → real ACL calls) ─────────────────
     AclExecuteAsyncFn execute_async_fn_{};
     AclSyncStreamFn   sync_stream_fn_{};
+    AclSyncStreamWithTimeoutFn sync_stream_with_timeout_fn_{};
     AclMemcpyFn       memcpy_fn_{};
+    AclMemcpyAsyncFn  memcpy_async_fn_{};
     AippDetectFn      aipp_detect_fn_{};
     AclDevAllocFn     dev_alloc_fn_{};  // zero-copy: aclrtMalloc for tmp D2D buffer
     AclDevFreeFn      dev_free_fn_{};   // zero-copy: aclrtFree for tmp D2D buffer
+    uint32_t          infer_timeout_ms_{5000};
 };
 
 } // namespace infer

@@ -62,6 +62,8 @@ public:
     void setInferBatchSizeCurrent(const std::string& worker_id, uint32_t size);
     // device_id: e.g. "0" for GPU 0. ratio in [0, 1].
     void setGpuMemoryUsageRatio(double ratio, const std::string& device_id = "0");
+    // device_id: e.g. "0" for NPU 0. ratio in [0, 1].
+    void setNpuMemoryUsageRatio(double ratio, const std::string& device_id = "0");
 
     // ── Exposition ────────────────────────────────────────────────────────────
     // Returns the full Prometheus text format (OpenMetrics compatible).
@@ -159,6 +161,7 @@ private:
     LabeledGaugeUint   infer_worker_state_;
     LabeledGaugeUint   infer_batch_size_current_;
     LabeledGaugeDouble gpu_memory_usage_ratio_; // label_name="device", value in [0,1]
+    LabeledGaugeDouble npu_memory_usage_ratio_; // label_name="device", value in [0,1]
 
     // SinkFfplayStage
     LabeledHistogram sink_jitter_;

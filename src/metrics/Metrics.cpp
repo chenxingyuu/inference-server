@@ -197,6 +197,10 @@ void Metrics::setGpuMemoryUsageRatio(double ratio, const std::string& device_id)
     gpu_memory_usage_ratio_.set(device_id, ratio);
 }
 
+void Metrics::setNpuMemoryUsageRatio(double ratio, const std::string& device_id) {
+    npu_memory_usage_ratio_.set(device_id, ratio);
+}
+
 // ── SinkFfplayStage metrics ───────────────────────────────────────────────────
 
 void Metrics::recordSinkFfplayJitter(const std::string& stage_id, double ms) {
@@ -462,6 +466,12 @@ std::string Metrics::serialize() const {
         gpu_memory_usage_ratio_.snapshot(snap);
         out << serializeLabeledGaugeDouble("gpu_memory_usage_ratio",
             "GPU memory used / total (0-1)", "device", snap);
+    }
+    {
+        std::unordered_map<std::string, double> snap;
+        npu_memory_usage_ratio_.snapshot(snap);
+        out << serializeLabeledGaugeDouble("npu_memory_usage_ratio",
+            "NPU HBM memory used / total (0-1)", "device", snap);
     }
 
     // SinkFfplayStage metrics

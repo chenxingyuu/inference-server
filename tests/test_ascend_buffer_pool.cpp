@@ -1,6 +1,7 @@
 #ifdef BUILD_ASCEND_BACKEND
 
 #include "infer/AscendBufferPool.h"
+#include "metrics/Metrics.h"
 #include <gtest/gtest.h>
 #include <thread>
 #include <vector>
@@ -115,6 +116,14 @@ TEST(AscendBufferPool, ConcurrentAcquireRelease) {
     for (auto& th : threads) th.join();
 
     EXPECT_EQ(double_acquire.load(), 0);
+}
+
+TEST(AscendBufferPool, ExposesNpuMemoryUsageMetric) {
+    Metrics& m = Metrics::get();
+    m.setNpuMemoryUsageRatio(0.42, "0");
+    const std::string out = m.serialize();
+    EXPECT_NE(out.find("npu_memory_usage_ratio"), std::string::npos);
+    EXPECT_NE(out.find("npu_memory_usage_ratio{device=\"0\"}"), std::string::npos);
 }
 
 #else

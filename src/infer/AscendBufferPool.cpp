@@ -2,11 +2,13 @@
 
 #include "infer/AscendBufferPool.h"
 #include "common/Logger.h"
+#include "metrics/Metrics.h"
 
 #include <acl/acl.h>
 #include <stdexcept>
 #include <thread>
 #include <chrono>
+#include <string>
 
 #define ACL_POOL_CHECK(call) do { \
     aclError _err = (call); \
@@ -43,6 +45,8 @@ AscendBufferPool::AscendBufferPool(MemoryChecker checker)
             }
             const float used_ratio = static_cast<float>(total_bytes - free_bytes)
                                      / static_cast<float>(total_bytes);
+            Metrics::get().setNpuMemoryUsageRatio(static_cast<double>(used_ratio),
+                                                  std::to_string(device_id_));
             return used_ratio < kOomGuardRatio;
         };
     }

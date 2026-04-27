@@ -603,13 +603,38 @@ tasks:
 
 ---
 
+## Phase 25 — Ascend 可观测性与超时健壮性修复
+
+**完成**：2026-04-27
+
+**目标**：修复 Ascend 路径上 1 个 HIGH + 3 个 MEDIUM 级问题，补齐输出尺寸计算、HBM 指标可观测性、D2H 异步路径和推理超时防护。
+
+**修复**：
+- **`output_bytes_` 硬编码 8400**（HIGH）：`AscendBackend` 输出大小改为 `yoloAnchorCount(input_h, input_w)` 动态计算（与 TRT 路径一致），避免非 640×640 分辨率时输出 buffer 尺寸错误。
+- **AscendBufferPool HBM 指标缺失**（MEDIUM）：在 `aclrtGetMemInfo(ACL_HBM_MEM)` 采样点新增 `npu_memory_usage_ratio{device}` 指标上报，补齐 NPU 内存压力可观测性。
+- **D2H 同步 memcpy**（MEDIUM）：`AscendBackend::infer` 输出回传改为 `aclrtMemcpyAsync(..., stream_)` + stream 同步，减少额外同步点并对齐异步数据通路。
+- **无推理超时机制**（MEDIUM）：为 `infer` 增加超时控制（默认 5000ms），支持注入 timed-sync hook；超时时抛出异常而不是静默长期阻塞。
+
+**测试**：
+- `test_ascend_async_infer.cpp` 新增：
+  - 动态 anchor 输出字节计算测试
+  - D2H async memcpy 调用测试
+  - timed-sync 超时异常测试
+- `test_ascend_buffer_pool.cpp` 新增 `npu_memory_usage_ratio` 指标导出测试
+
+**本地验证**：
+- ✅ `test_sink_ffplay_metrics`
+- ✅ `test_infer_batch_size_metrics`
+- ✅ `test_queue_latency_metrics`
+- ⚠️ Ascend 专项测试在当前环境无法编译运行：缺少 `AscendCL`（`AscendCL_LIBRARY` / `AscendCL_INCLUDE_DIR`）
+
+**状态**：✅ 代码完成，待 135 真机镜像回归
+
+---
+
 ## 待办
 
-- [x] Phase 23 DVPP CANN6 稳定性修复（内存释放 + 发送错误回收 + stream 同步）
-- [x] Phase 24 Ascend 多卡并行 Bug 修复
-- [ ] 任务级自动降级（安全实现待完善）：`use_ascend_dvpp=true` 且模型无 AIPP 时自动回退 CPU 解码
 - [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
-- [ ] Phase 5 Ascend 310P 真机联调
 - [ ] CascadeRouter GPU 路径：从 secondary ModelConfig 读取实际 input_size（当前硬编码 112×112）
 - [ ] Grafana 预置 Dashboard JSON（延迟热力图 + 丢帧率）
 - [ ] 单元测试（Decoder NMS 逻辑、ClassifierDecoder argmax、ResultMerger 超时逻辑）

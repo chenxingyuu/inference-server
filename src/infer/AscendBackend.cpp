@@ -28,6 +28,12 @@ namespace {
 constexpr aclError kAclRepeatInitCode     = static_cast<aclError>(100002);
 constexpr aclError kAclRepeatInitCodeCann6 = static_cast<aclError>(507008);
 
+int yoloAnchorCount(int h, int w) {
+    return (h / 8) * (w / 8)
+         + (h / 16) * (w / 16)
+         + (h / 32) * (w / 32);
+}
+
 // RAII guard that releases an AscendPooledBuffer on scope exit.
 struct SlotGuard {
     AscendBufferPool&   pool;
@@ -96,7 +102,8 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
         // CPU preprocess path: CHW float input
         input_bytes_  = static_cast<size_t>(max_bs) * 3 * input_h_ * input_w_ * sizeof(float);
     }
-    output_bytes_ = static_cast<size_t>(max_bs) * (4 + num_classes_) * 8400 * sizeof(float);
+    const int anchors = yoloAnchorCount(input_h_, input_w_);
+    output_bytes_ = static_cast<size_t>(max_bs) * (4 + num_classes_) * anchors * sizeof(float);
 
     buffer_pool_.init(device_id_, ctx_, /*pool_size=*/4, input_bytes_, output_bytes_);
 
@@ -181,6 +188,13 @@ bool AscendBackend::detectAipp(uint32_t model_id) const {
     return aclmdlGetFirstAippInfo(model_id, 0, &aipp_info) == ACL_SUCCESS;
 }
 
+size_t AscendBackend::expectedOutputBytesForBatchForTest(int batch_size) const {
+    return static_cast<size_t>(batch_size)
+        * (4 + num_classes_)
+        * yoloAnchorCount(input_h_, input_w_)
+        * sizeof(float);
+}
+
 // ── infer() ────────────────────────────────────────────────────────────────
 
 void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
@@ -190,7 +204,7 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
 
     const int bs = input.size();
     const size_t out_bytes =
-        static_cast<size_t>(bs) * (4 + num_classes_) * 8400 * sizeof(float);
+        static_cast<size_t>(bs) * (4 + num_classes_) * yoloAnchorCount(input_h_, input_w_) * sizeof(float);
     const uint32_t model_id = selectModel(bs);
 
     // Acquire pre-allocated slot for the output buffer (exception-safe release).
@@ -315,13 +329,31 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
 
     auto sync_fn = sync_stream_fn_ ? sync_stream_fn_
         : [](aclrtStream s) -> aclError { return aclrtSynchronizeStream(s); };
-    ACL_CHECK(sync_fn(stream_));
+    auto timed_sync_fn = sync_stream_with_timeout_fn_ ? sync_stream_with_timeout_fn_
+        : [](aclrtStream s, uint32_t timeout_ms) -> aclError {
+            return aclrtSynchronizeStreamWithTimeout(s, timeout_ms);
+        };
+    if (infer_timeout_ms_ > 0) {
+        ACL_CHECK(timed_sync_fn(stream_, infer_timeout_ms_));
+    } else {
+        ACL_CHECK(sync_fn(stream_));
+    }
 
-    // D2H: copy NPU output back to host
+    // D2H: copy NPU output back to host (async + sync)
+    auto memcpy_async_fn = memcpy_async_fn_ ? memcpy_async_fn_
+        : [](void* dst, size_t dst_size, const void* src, size_t src_size,
+             aclrtMemcpyKind kind, aclrtStream stream) -> aclError {
+            return aclrtMemcpyAsync(dst, dst_size, src, src_size, kind, stream);
+        };
     output.resize(out_bytes / sizeof(float));
-    ACL_CHECK(do_memcpy(output.data(), out_bytes,
-                        slot->output_device, out_bytes,
-                        ACL_MEMCPY_DEVICE_TO_HOST));
+    ACL_CHECK(memcpy_async_fn(output.data(), out_bytes,
+                              slot->output_device, out_bytes,
+                              ACL_MEMCPY_DEVICE_TO_HOST, stream_));
+    if (infer_timeout_ms_ > 0) {
+        ACL_CHECK(timed_sync_fn(stream_, infer_timeout_ms_));
+    } else {
+        ACL_CHECK(sync_fn(stream_));
+    }
 }
 
 // ── Test entry point ────────────────────────────────────────────────────────
@@ -415,12 +447,26 @@ void AscendBackend::inferWithStubs(const Batch& input, std::vector<float>& outpu
 
     auto sync_fn = sync_stream_fn_ ? sync_stream_fn_
         : [](aclrtStream) -> aclError { return ACL_SUCCESS; };
-    ACL_CHECK(sync_fn(stream_));
+    if (infer_timeout_ms_ > 0 && sync_stream_with_timeout_fn_) {
+        ACL_CHECK(sync_stream_with_timeout_fn_(stream_, infer_timeout_ms_));
+    } else {
+        ACL_CHECK(sync_fn(stream_));
+    }
 
+    auto memcpy_async_fn = memcpy_async_fn_ ? memcpy_async_fn_
+        : [&do_memcpy](void* dst, size_t dst_size, const void* src, size_t src_size,
+                       aclrtMemcpyKind kind, aclrtStream) -> aclError {
+            return do_memcpy(dst, dst_size, src, src_size, kind);
+        };
     output.resize(output_bytes_ / sizeof(float));
-    ACL_CHECK(do_memcpy(output.data(), output_bytes_,
-                        slot->output_device, output_bytes_,
-                        ACL_MEMCPY_DEVICE_TO_HOST));
+    ACL_CHECK(memcpy_async_fn(output.data(), output_bytes_,
+                              slot->output_device, output_bytes_,
+                              ACL_MEMCPY_DEVICE_TO_HOST, stream_));
+    if (infer_timeout_ms_ > 0 && sync_stream_with_timeout_fn_) {
+        ACL_CHECK(sync_stream_with_timeout_fn_(stream_, infer_timeout_ms_));
+    } else {
+        ACL_CHECK(sync_fn(stream_));
+    }
 }
 
 } // namespace infer

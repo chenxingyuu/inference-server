@@ -130,6 +130,86 @@ TEST(AscendAsyncInfer, PoolSlotReleasedOnError) {
     EXPECT_NO_THROW(backend.inferWithStubs(batch, output));
 }
 
+TEST(AscendAsyncInfer, OutputBytesUsesDynamicAnchorCount) {
+    AscendBackend backend;
+    backend.setModelShapeForTest(/*h=*/1280, /*w=*/1280, /*num_classes=*/80);
+    const size_t bytes = backend.expectedOutputBytesForBatchForTest(/*batch_size=*/1);
+    const size_t legacy_8400 = static_cast<size_t>(84) * 8400 * sizeof(float);
+    EXPECT_GT(bytes, legacy_8400);
+}
+
+TEST(AscendAsyncInfer, UsesAsyncMemcpyForDeviceToHostCopy) {
+    std::atomic<int> async_memcpy_calls{0};
+    AscendBackend backend;
+    backend.initPoolForTest(2, 1024, 512);
+    backend.setExecuteFnForTest([](uint32_t, aclmdlDataset*, aclmdlDataset*, aclrtStream) {
+        return ACL_SUCCESS;
+    });
+    backend.setSyncStreamFnForTest([](aclrtStream) { return ACL_SUCCESS; });
+    backend.setMemcpyFnForTest([](void*, size_t, const void*, size_t, aclrtMemcpyKind) {
+        return ACL_SUCCESS;
+    });
+    backend.setMemcpyAsyncFnForTest([&async_memcpy_calls](
+        void*, size_t, const void*, size_t, aclrtMemcpyKind, aclrtStream) -> aclError {
+        async_memcpy_calls.fetch_add(1, std::memory_order_relaxed);
+        return ACL_SUCCESS;
+    });
+
+    Batch batch;
+    batch.frames.push_back(cv::Mat(640, 640, CV_8UC3, cv::Scalar(0)));
+    std::vector<float> output;
+    backend.inferWithStubs(batch, output);
+
+    EXPECT_EQ(async_memcpy_calls.load(std::memory_order_relaxed), 1);
+}
+
+TEST(AscendAsyncInfer, InferThrowsWhenTimedSyncFails) {
+    AscendBackend backend;
+    backend.initPoolForTest(1, 1024, 512);
+    backend.setInferTimeoutMsForTest(10);
+    backend.setExecuteFnForTest([](uint32_t, aclmdlDataset*, aclmdlDataset*, aclrtStream) {
+        return ACL_SUCCESS;
+    });
+    backend.setSyncStreamWithTimeoutFnForTest([](aclrtStream, uint32_t) -> aclError {
+        return ACL_ERROR_RT_TIMEOUT;
+    });
+    backend.setMemcpyFnForTest([](void*, size_t, const void*, size_t, aclrtMemcpyKind) {
+        return ACL_SUCCESS;
+    });
+
+    Batch batch;
+    batch.frames.push_back(cv::Mat(640, 640, CV_8UC3, cv::Scalar(0)));
+    std::vector<float> output;
+    EXPECT_THROW(backend.inferWithStubs(batch, output), std::runtime_error);
+}
+
+TEST(AscendAsyncInfer, TimesOutOnSecondSyncAfterAsyncCopy) {
+    std::atomic<int> sync_calls{0};
+    AscendBackend backend;
+    backend.initPoolForTest(1, 1024, 512);
+    backend.setInferTimeoutMsForTest(10);
+    backend.setExecuteFnForTest([](uint32_t, aclmdlDataset*, aclmdlDataset*, aclrtStream) {
+        return ACL_SUCCESS;
+    });
+    backend.setSyncStreamWithTimeoutFnForTest([&sync_calls](aclrtStream, uint32_t) -> aclError {
+        const int call_no = sync_calls.fetch_add(1, std::memory_order_relaxed);
+        if (call_no == 0) return ACL_SUCCESS;       // exec sync
+        return ACL_ERROR_RT_TIMEOUT;                // D2H sync
+    });
+    backend.setMemcpyFnForTest([](void*, size_t, const void*, size_t, aclrtMemcpyKind) {
+        return ACL_SUCCESS;
+    });
+    backend.setMemcpyAsyncFnForTest([](void*, size_t, const void*, size_t, aclrtMemcpyKind, aclrtStream) {
+        return ACL_SUCCESS;
+    });
+
+    Batch batch;
+    batch.frames.push_back(cv::Mat(640, 640, CV_8UC3, cv::Scalar(0)));
+    std::vector<float> output;
+    EXPECT_THROW(backend.inferWithStubs(batch, output), std::runtime_error);
+    EXPECT_EQ(sync_calls.load(std::memory_order_relaxed), 2);
+}
+
 #else
 int main() { return 0; }
 #endif
