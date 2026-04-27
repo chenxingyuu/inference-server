@@ -515,7 +515,7 @@
 - **`aclmdlExecuteAsync`**（`AscendBackend`）：将同步 `aclmdlExecute` 替换为异步 + `aclrtSynchronizeStream`，激活 `loadModel()` 中一直未使用的 `stream_`；RAII `SlotGuard` 确保异常路径也能释放 buffer slot；`AclExecuteAsyncFn` / `AclSyncStreamFn` 可注入 stub
 - **AIPP 自动检测**：`loadModel()` 时调用 `aclmdlGetFirstAippInfo` 探测 `.om` 是否含 AIPP 算子；AIPP 路径跳过 `preprocessCPU`，改用 `packBgrUint8()` 打包 HWC BGR uint8，输入 buffer 缩至 `H×W×3` 字节（vs float 路径的 `×4`）；`AippDetectFn` 可注入 stub
 - **`DVPPDecoder`**（`include/stream/DVPPDecoder.h` + `src/stream/DVPPDecoder.cpp`）：实现 `IStreamDecoder`，FFmpeg 仅做 demux，压缩包直送 DVPP 硬件解码；解码输出 YUV420SP 留在 NPU HBM（`Frame.ascend_buf`）；AIPP + DVPP 组合时 CPU 零拷贝：DVPP → AIPP in `.om` → 推理；`DvppApiStub` 可注入
-- **新配置项**：`StreamConfig.use_ascend_dvpp` / `StreamConfig.ascend_device_id`
+- **新配置项（任务级）**：`TaskConfig.use_ascend_dvpp` / `TaskConfig.ascend_device_id`
 - **新类型**：`Types.h` 新增 `AscendBuffer` 结构体 + `Frame.is_ascend` 标记位
 - **`SourceRtspStage`**：检测 `use_ascend_dvpp` 后在 `start()` / `stop()` 中创建/释放 `DVPPDecoder`
 

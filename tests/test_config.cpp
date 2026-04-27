@@ -168,9 +168,13 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cfg.tasks[0].pipeline_id, "pipe_01");
     EXPECT_EQ(cfg.tasks[0].sample_fps, 10);
     EXPECT_FALSE(cfg.tasks[0].use_hwdec);
+    EXPECT_TRUE(cfg.tasks[0].use_ascend_dvpp);
+    EXPECT_EQ(cfg.tasks[0].ascend_device_id, 2);
     const TaskConfig* t = cfg.findTask("task_pipe_01");
     ASSERT_NE(t, nullptr);
     EXPECT_EQ(t->pipeline_id, "pipe_01");
+    EXPECT_TRUE(t->use_ascend_dvpp);
+    EXPECT_EQ(t->ascend_device_id, 2);
     EXPECT_EQ(cfg.findTask("missing"), nullptr);
 
     // kafka (via legacy fallback into publishers.kafka)
@@ -477,6 +481,39 @@ TEST(LoadConfig, TaskSampleFpsBelowOneThrows) {
         out << "    source_id: cam_1\n";
         out << "    pipeline_id: p1\n";
         out << "    sample_fps: 0\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, TaskAscendDeviceIdNegativeThrows) {
+    const std::string path = "data/test_task_bad_ascend_device_id.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n";
+        out << "  - id: cam_1\n";
+        out << "    url: rtsp://localhost/test\n";
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: ascend\n";
+        out << "    input_size: [640, 640]\n";
+        out << "pipelines:\n";
+        out << "  - id: p1\n";
+        out << "    nodes:\n";
+        out << "      - id: cam_1\n";
+        out << "        type: source.rtsp\n";
+        out << "      - id: sink_1\n";
+        out << "        type: sink.kafka\n";
+        out << "    edges:\n";
+        out << "      - from: cam_1\n";
+        out << "        to: sink_1\n";
+        out << "tasks:\n";
+        out << "  - id: t1\n";
+        out << "    source_id: cam_1\n";
+        out << "    pipeline_id: p1\n";
+        out << "    use_ascend_dvpp: true\n";
+        out << "    ascend_device_id: -1\n";
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());

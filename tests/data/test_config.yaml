@@ -94,6 +94,8 @@ tasks:
     pipeline_id: pipe_01
     sample_fps: 10
     use_hwdec: false
+    use_ascend_dvpp: true
+    ascend_device_id: 2
 
 kafka:
   brokers: localhost:9092

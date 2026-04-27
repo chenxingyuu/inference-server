@@ -9,6 +9,9 @@ services:
       dockerfile: docker/Dockerfile.ascend.cann6
       args:
         ASCEND_BASE_IMAGE: ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+    ports:
+      - "50051:50051"
+      - "8080:8080"
     devices:
       - /dev/davinci0:/dev/davinci0
       - /dev/davinci1:/dev/davinci1

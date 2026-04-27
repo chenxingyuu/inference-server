@@ -159,6 +159,9 @@ void validateTasks(const AppConfig& cfg) {
         if (t.sample_fps < 1) {
             throw std::runtime_error("task.sample_fps must be >= 1 (task " + t.id + ")");
         }
+        if (t.ascend_device_id < 0) {
+            throw std::runtime_error("task.ascend_device_id must be >= 0 (task " + t.id + ")");
+        }
     }
 }
 
@@ -386,6 +389,8 @@ AppConfig loadConfig(const std::string& yaml_path) {
             t.sample_fps     = tn["sample_fps"].as<int>(5);
             t.sampling_mode  = parseSamplingMode(tn["sampling_mode"].as<std::string>("frame_count"));
             t.use_hwdec      = tn["use_hwdec"].as<bool>(false);
+            t.use_ascend_dvpp = tn["use_ascend_dvpp"].as<bool>(false);
+            t.ascend_device_id = tn["ascend_device_id"].as<int>(0);
             cfg.tasks.push_back(std::move(t));
         }
     }

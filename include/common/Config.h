@@ -131,6 +131,8 @@ struct TaskConfig {
     int          sample_fps{5};
     SamplingMode sampling_mode{SamplingMode::FrameCount};
     bool         use_hwdec{false};
+    bool         use_ascend_dvpp{false};  // Ascend: task-scoped DVPP decode switch
+    int          ascend_device_id{0};     // Ascend NPU device index for DVPP
 };
 
 struct KafkaConfig {

@@ -22,7 +22,7 @@ StageFactory::Context makeContext() {
     source.degraded_threshold = 5;
     source.max_reconnect_attempts = 5;
     static DummyPublisher publisher;
-    return StageFactory::Context{cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount, false};
+    return StageFactory::Context{cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount, false, true, 2, nullptr};
 }
 
 StageFactory::Context makeInferEngineContext() {
@@ -54,7 +54,7 @@ StageFactory::Context makeInferEngineContext() {
         m.input_shape.width = 640;
         cfg.models.push_back(m);
     }
-    return StageFactory::Context{cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount, false};
+    return StageFactory::Context{cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount, false, false, 0, nullptr};
 }
 
 } // namespace
@@ -126,6 +126,19 @@ TEST(StageFactory, CreatesSourceFileStageWithLoop) {
     cfg.id   = "vid_loop";
     cfg.type = "source.file";
     cfg.with["loop"] = "true";
+
+    auto ctx = makeContext();
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, ctx);
+        ASSERT_NE(stage, nullptr);
+        EXPECT_TRUE(stage->isSource());
+    });
+}
+
+TEST(StageFactory, CreatesSourceRtspStageWithTaskScopedDvppContext) {
+    StageConfig cfg;
+    cfg.id = "cam_01";
+    cfg.type = "source.rtsp";
 
     auto ctx = makeContext();
     EXPECT_NO_THROW({
