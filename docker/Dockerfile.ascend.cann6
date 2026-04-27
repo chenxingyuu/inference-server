@@ -63,7 +63,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libssl1.1 \
     libcurl4 \
     libavcodec58 libavformat58 libavutil56 libswscale5 libavdevice58 libavfilter7 \
-    libopencv-core4.2 libopencv-imgproc4.2 \
+    libopencv-core4.2 libopencv-imgproc4.2 libopencv-imgcodecs4.2 \
     libyaml-cpp0.6 \
     librdkafka1 \
     libspdlog1 \
