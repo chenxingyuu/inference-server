@@ -24,6 +24,8 @@ namespace {
 } while(0)
 
 constexpr aclError kAclRepeatInitCode = static_cast<aclError>(100002);
+// CANN 6 on 310P: runtime bootstrapped by shared-library loader before explicit aclInit — benign.
+constexpr aclError kAclCtxNullCode     = static_cast<aclError>(507008);
 
 // RAII guard that releases an AscendPooledBuffer on scope exit.
 struct SlotGuard {
@@ -52,7 +54,7 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     // Increment process-wide refcount; call aclInit only on the first backend.
     if (s_acl_refcount_.fetch_add(1, std::memory_order_acq_rel) == 0) {
         const aclError init_rc = aclInit(nullptr);
-        if (init_rc != ACL_SUCCESS && init_rc != kAclRepeatInitCode) {
+        if (init_rc != ACL_SUCCESS && init_rc != kAclRepeatInitCode && init_rc != kAclCtxNullCode) {
             s_acl_refcount_.fetch_sub(1, std::memory_order_release);
             throw std::runtime_error(std::string("[ACL] aclInit error ") + std::to_string(init_rc)
                                      + " at " + __FILE__ + ":" + std::to_string(__LINE__));
@@ -102,6 +104,8 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
 
 void AscendBackend::unloadModel() {
     if (!loaded_) return;
+    // Re-bind the load-time context on the calling thread so ACL cleanup calls succeed.
+    if (ctx_) aclrtSetCurrentContext(ctx_);
     buffer_pool_.reset();
     for (auto& [bs, id] : model_map_) {
         aclmdlUnload(id);
@@ -184,6 +188,7 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
     if (!loaded_) throw std::runtime_error("AscendBackend: model not loaded");
     std::lock_guard<std::mutex> lk(infer_mu_);
     ACL_CHECK(aclrtSetCurrentContext(ctx_));
+    aclrtStream active_stream = stream_;
 
     const int bs = input.size();
     const size_t out_bytes =
@@ -308,11 +313,11 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
         : [](uint32_t m, aclmdlDataset* i, aclmdlDataset* o, aclrtStream s) -> aclError {
             return aclmdlExecuteAsync(m, i, o, s);
         };
-    ACL_CHECK(exec_fn(model_id, in_set, out_set, stream_));
+    ACL_CHECK(exec_fn(model_id, in_set, out_set, active_stream));
 
     auto sync_fn = sync_stream_fn_ ? sync_stream_fn_
         : [](aclrtStream s) -> aclError { return aclrtSynchronizeStream(s); };
-    ACL_CHECK(sync_fn(stream_));
+    ACL_CHECK(sync_fn(active_stream));
 
     // D2H: copy NPU output back to host
     output.resize(out_bytes / sizeof(float));

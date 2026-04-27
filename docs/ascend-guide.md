@@ -318,6 +318,31 @@ aclrtCreateContext(&ctx_, device_id_);  // 必须在 CANN 6 下显式创建
 aclrtCreateStream(&stream_);
 ```
 
+### CANN 6 / 310P 已知行为差异
+
+**`aclInit` 进程级单例**
+
+CANN 6 在 310P 上调用 `aclInit(nullptr)` 可能返回以下非零值，均可视为成功：
+
+| 错误码 | 含义 |
+|--------|------|
+| `100002` (`ACL_ERROR_REPEAT_INITIALIZE`) | 同进程内二次调用 |
+| `507008` (`ACL_ERROR_RT_CONTEXT_NULL_PTR`) | CANN 共享库加载器已在 `main()` 前完成运行时初始化 |
+
+`AscendBackend` 使用 `s_acl_refcount_`（原子引用计数）确保进程内只调用一次，并静默接受上述两个错误码。
+
+**Context 跨线程问题**
+
+CANN 6 不允许在 `infer()` 线程上直接使用 `loadModel()` 线程创建的 context 或 stream。
+`infer()` 在每次调用前执行 `aclrtSetCurrentContext(ctx_)` 重新绑定上下文，并通过 `infer_mu_` 
+mutex 串行化对同一 stream 的访问，避免跨线程 stream 竞争触发 CANN 内部 `exit(0)`。
+
+```
+# 忽略此要求时的症状：无 ACL ERROR，进程静默退出
+InferWorker dequeued batch_size=1 ...
+infer-ascend-1 exited with code 0
+```
+
 ### Context 线程绑定规则（重要）
 
 Context 与创建它的线程**强绑定**，不能跨线程传递或使用。

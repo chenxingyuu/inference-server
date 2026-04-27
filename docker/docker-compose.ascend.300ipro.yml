@@ -9,6 +9,7 @@ services:
       dockerfile: docker/Dockerfile.ascend.cann6
       args:
         ASCEND_BASE_IMAGE: ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+    privileged: true
     ports:
       - "50051:50051"
       - "8080:8080"
@@ -21,14 +22,16 @@ services:
       - /dev/devmm_svm:/dev/devmm_svm
       - /dev/hisi_hdc:/dev/hisi_hdc
     volumes:
-      - ./models:/models:ro
-      - ./config:/config:ro
+      - ../models:/models:ro
+      - ../config:/config:ro
       - /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro
+    command: ["/config/config.npu.yaml"]
     environment:
       - ASCEND_DEVICE_ID=0
       - ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
       - LD_LIBRARY_PATH=/usr/local/Ascend/ascend-toolkit/latest/lib64:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:/usr/local/lib:/usr/lib
       - ASCEND_GLOBAL_LOG_LEVEL=2
+      - ASCEND_SLOG_PRINT_TO_STDOUT=1
     depends_on:
       kafka:
         condition: service_healthy
