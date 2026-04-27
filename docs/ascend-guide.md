@@ -18,9 +18,10 @@
 10. [内存模型](#10-内存模型)
 11. [.om 离线模型](#11-om-离线模型)
 12. [AIPP 预处理加速](#12-aipp-预处理加速)
-13. [常见错误速查](#13-常见错误速查)
-14. [日志与调试](#14-日志与调试)
-15. [本项目适配要点](#15-本项目适配要点)
+13. [DVPP → AIPP 零拷贝管道](#13-dvpp--aipp-零拷贝管道)
+14. [常见错误速查](#14-常见错误速查)
+15. [日志与调试](#15-日志与调试)
+16. [本项目适配要点](#16-本项目适配要点)
 
 ---
 
@@ -501,7 +502,131 @@ ATC 转换时加入 `--insert_op_conf=aipp.cfg` 即可。
 
 ---
 
-## 13. 常见错误速查
+## 13. DVPP → AIPP 零拷贝管道
+
+### 概述
+
+当同时启用 DVPP 硬件解码（`use_ascend_dvpp: true`）和 NV12 AIPP 模型时，推理服务器可以实现**端到端零 CPU 参与**的推理路径：
+
+```
+RTSP 码流
+  │
+  ▼  (FFmpeg 仅 demux，不解码)
+DVPP 硬件视频解码
+  │ YUV420SP (NV12) 在 HBM 设备内存
+  │  Frame.is_ascend = true
+  ▼
+BatchScheduler / InferEngineWorkerStage
+  │ 填入 Batch.ascend_frames（不走 CPU）
+  ▼
+AscendBackend::infer() — Path A
+  │
+  ├── batch=1：DVPP device ptr 直传 ACL dataset（无任何拷贝）
+  │
+  └── batch>1：D2D memcpy 拼接到临时 HBM buffer（仍在 NPU 侧）
+         │
+         ▼
+      AIPP（.om 内嵌）
+        NV12 → RGB → resize → 归一化 → NCHW
+         │（NPU 硬件执行，无 CPU 参与）
+         ▼
+      YOLO NPU 推理
+         │
+         ▼
+      Kafka 结果发布
+```
+
+### 与原有路径对比
+
+| 路径 | CPU 操作 | 拷贝方向 | 适用场景 |
+|------|----------|----------|---------|
+| **Path A 零拷贝** | 无 | 无（batch=1）/ D2D（batch>1） | DVPP + NV12 AIPP 模型 |
+| Path B CPU BGR | `cv::resize` + `packBgrUint8` | H2D | AIPP 模型 + FFmpeg 软解 |
+| Path C CPU float | `cv::resize` + CHW 归一化 | H2D | 无 AIPP 模型 |
+
+路径自动选择，无需代码改动：`is_ascend && aipp_enabled_` 同时为 true 时激活 Path A。
+
+### 模型编译（NV12 AIPP 配置）
+
+AIPP 配置文件 `aipp_nv12.cfg` 示例（1080p 输入，缩放至 640×640）：
+
+```
+aipp_op {
+    aipp_mode: static
+
+    input_format: YUV420SP_U8       # 接受 DVPP 输出的 NV12 格式
+
+    src_image_size_w: 1920          # 必须与 DVPP 输出分辨率完全一致
+    src_image_size_h: 1080
+
+    crop: false
+    resize: true
+    resize_output_w: 640
+    resize_output_h: 640
+
+    csc_switch: true                # YUV → RGB 色域转换
+    rbuv_swap_switch: false
+
+    mean_chn_0: 0
+    mean_chn_1: 0
+    mean_chn_2: 0
+    min_chn_0: 0.0
+    min_chn_1: 0.0
+    min_chn_2: 0.0
+    var_reci_chn_0: 0.00392157      # 1/255 归一化
+    var_reci_chn_1: 0.00392157
+    var_reci_chn_2: 0.00392157
+}
+```
+
+ATC 转换命令（批量编译 batch=1/4/8/16）：
+
+```bash
+for BS in 1 4 8 16; do
+    atc \
+      --model=yolo11n.onnx \
+      --framework=5 \
+      --output="yolo11n_nv12_bs${BS}" \
+      --input_shape="images:${BS},3,640,640" \
+      --input_format=NCHW \
+      --soc_version=Ascend310P3 \
+      --insert_op_conf=aipp_nv12.cfg \   # 嵌入 NV12 AIPP
+      --precision_mode=allow_fp32_to_fp16
+done
+```
+
+> **注意**：`src_image_size_w/h` 必须与摄像头实际输出分辨率完全匹配，AscendBackend 运行时不校验，不匹配会导致 NPU 内存越界。
+
+### 配置（config.yaml）
+
+```yaml
+streams:
+  - id: cam01
+    url: "rtsp://192.168.1.100/stream"
+    use_ascend_dvpp: true     # 启用 DVPP 硬件解码
+    ascend_device_id: 0       # 使用 NPU device 0
+
+models:
+  - id: yolo_nv12
+    type: yolov8
+    om_paths:
+      1:  models/yolo11n_nv12_bs1.om
+      4:  models/yolo11n_nv12_bs4.om
+      8:  models/yolo11n_nv12_bs8.om
+      16: models/yolo11n_nv12_bs16.om
+    # AscendBackend 自动检测 AIPP（aclmdlGetFirstAippInfo），无需额外配置
+```
+
+### 注意事项
+
+- batch=1 真零拷贝，适合高分辨率（1080p/4K）低延迟场景
+- batch>1 的 D2D 拼接使用动态 `aclrtMalloc`，未来版本将引入 pool 预分配
+- DVPP 与 AIPP 必须同时启用才能走 Path A；单独 DVPP（不含 AIPP）不支持零拷贝
+
+---
+
+## 14. 常见错误速查
+
 
 | 错误信息 | 原因 | 解决方法 |
 |---------|------|---------|
@@ -516,7 +641,7 @@ ATC 转换时加入 `--insert_op_conf=aipp.cfg` 即可。
 
 ---
 
-## 14. 日志与调试
+## 15. 日志与调试
 
 ### npu-smi 常用命令
 
@@ -568,7 +693,7 @@ msprof --output=/tmp/prof_output --application="./inference_server"
 
 ---
 
-## 15. 本项目适配要点
+## 16. 本项目适配要点
 
 ### 多卡并行
 

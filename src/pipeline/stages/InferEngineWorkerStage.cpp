@@ -126,11 +126,22 @@ void InferEngineWorkerStage::flushToWorkers(std::vector<PendingEmit> events) {
         if (!have_first) {
             batch.is_gpu = ev.frame->is_gpu;
             if (batch.is_gpu) batch.cuda_device_id = ev.frame->gpu_buf.cuda_device_id;
+#ifdef BUILD_ASCEND_BACKEND
+            batch.is_ascend = ev.frame->is_ascend;
+#endif
             have_first = true;
         }
         batch.metas.push_back(ev.frame->meta);
-        if (batch.is_gpu) batch.gpu_frames.push_back(ev.frame->gpu_buf);
-        else batch.frames.push_back(ev.frame->image);
+#ifdef BUILD_ASCEND_BACKEND
+        if (batch.is_ascend) {
+            batch.ascend_frames.push_back(ev.frame->ascend_buf);
+        } else
+#endif
+        if (batch.is_gpu) {
+            batch.gpu_frames.push_back(ev.frame->gpu_buf);
+        } else {
+            batch.frames.push_back(ev.frame->image);
+        }
     }
     if (batch.empty()) return;
 
