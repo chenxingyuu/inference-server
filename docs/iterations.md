@@ -550,20 +550,13 @@
 
 **激活方式**：
 ```yaml
-streams:
-  - use_ascend_dvpp: true     # DVPPDecoder → Frame.is_ascend=true
-# .om 须以 NV12 AIPP 输入编译（ATC --insert_op_conf=aipp_nv12.cfg）
-# AscendBackend 自动检测 aipp_enabled_，两者同时满足则走 Path A
+tasks:
+  - id: task_cam_001
+    ...
+    use_ascend_dvpp: true
+    ascend_device_id: 0
+    ...
 ```
-
-**测试**（`test_ascend_dvpp_zerocopy.cpp`，12 个，无需真实 NPU）：
-- `Batch` 字段默认值与 device ptr 唯一性
-- batch=1：`dev_alloc` 和 D2D memcpy 均不调用（真零拷贝）
-- batch>N：`dev_alloc` 恰好调用一次，D2D memcpy 每帧一次
-- tmp buffer 在正常完成及 exec 异常时均被释放
-- CPU 路径（AIPP disabled / CPU batch）无任何 device alloc 调用
-
-**状态**：✅ 完成
 
 ---
 
