@@ -23,7 +23,10 @@ namespace {
     } \
 } while(0)
 
-constexpr aclError kAclRepeatInitCode = static_cast<aclError>(100002);
+// 100002: ACL_ERROR_REPEAT_INITIALIZE (already inited in same process)
+// 507008: ACL_ERROR_RT_CONTEXT_NULL_PTR (CANN 6 emits this instead of 100002 on repeat aclInit)
+constexpr aclError kAclRepeatInitCode     = static_cast<aclError>(100002);
+constexpr aclError kAclRepeatInitCodeCann6 = static_cast<aclError>(507008);
 
 // RAII guard that releases an AscendPooledBuffer on scope exit.
 struct SlotGuard {
@@ -52,7 +55,7 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     // Increment process-wide refcount; call aclInit only on the first backend.
     if (s_acl_refcount_.fetch_add(1, std::memory_order_acq_rel) == 0) {
         const aclError init_rc = aclInit(nullptr);
-        if (init_rc != ACL_SUCCESS && init_rc != kAclRepeatInitCode) {
+        if (init_rc != ACL_SUCCESS && init_rc != kAclRepeatInitCode && init_rc != kAclRepeatInitCodeCann6) {
             s_acl_refcount_.fetch_sub(1, std::memory_order_release);
             throw std::runtime_error(std::string("[ACL] aclInit error ") + std::to_string(init_rc)
                                      + " at " + __FILE__ + ":" + std::to_string(__LINE__));
