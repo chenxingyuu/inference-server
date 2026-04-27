@@ -145,8 +145,14 @@ void InferEngineWorkerStage::flushToWorkers(std::vector<PendingEmit> events) {
     }
     if (batch.empty()) return;
 
-    const std::optional<int> dev = batch.is_gpu
-        ? std::optional<int>(batch.cuda_device_id) : std::nullopt;
+    std::optional<int> dev = std::nullopt;
+    if (batch.is_gpu) {
+        dev = batch.cuda_device_id;
+    }
+#ifdef BUILD_ASCEND_BACKEND
+    // Ascend device affinity is resolved inside InferWorkerGroup using
+    // ascend_frames[0].device_id — no extra parameter needed here.
+#endif
     group_->enqueue(std::move(batch), dev);
 }
 

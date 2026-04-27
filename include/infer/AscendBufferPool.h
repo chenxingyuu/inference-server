@@ -44,8 +44,11 @@ public:
     explicit AscendBufferPool(MemoryChecker checker = {});
     ~AscendBufferPool() { reset(); }
 
-    // Allocate pool_size slots on device_id. Must be called once before acquire().
-    void init(int device_id, int pool_size, size_t input_bytes, size_t output_bytes);
+    // Allocate pool_size slots. Must be called once before acquire().
+    // ctx must be the already-current ACL context for device_id; init() uses it
+    // for aclrtMalloc and stores it so reset() can rebind before aclrtFree.
+    void init(int device_id, aclrtContext ctx, int pool_size,
+              size_t input_bytes, size_t output_bytes);
 
     // Test hook: allocates with ::operator new instead of aclrtMalloc.
     // Enabled when BUILD_ASCEND_BACKEND is defined; no real NPU needed.
@@ -71,6 +74,7 @@ private:
     MemoryChecker                   memory_checker_;
     std::vector<AscendPooledBuffer> slots_;
     int                             device_id_{0};
+    aclrtContext                    ctx_{nullptr};       // bound before aclrtFree in reset()
     bool                            test_mode_{false};  // true → operator new path
 };
 

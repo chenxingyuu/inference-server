@@ -52,6 +52,25 @@ void InferWorkerGroup::enqueue(Batch batch, std::optional<int> restrict_cuda_dev
     const std::size_t n = workers_.size();
     const std::size_t start = round_robin_idx_.fetch_add(1, std::memory_order_relaxed) % n;
 
+#ifdef BUILD_ASCEND_BACKEND
+    // For Ascend batches, route strictly to the worker that owns the matching device.
+    // Cross-device HBM access is undefined in CANN; unlike CUDA, there is no safe
+    // fallback — drop the batch if no matching worker is RUNNING.
+    if (batch.is_ascend && !batch.ascend_frames.empty()) {
+        const int target = batch.ascend_frames[0].device_id;
+        for (std::size_t i = 0; i < n; ++i) {
+            auto& w = workers_[(start + i) % n];
+            if (w->state() == WorkerState::RUNNING && w->ascendDeviceId() == target) {
+                w->enqueue(std::move(batch));
+                return;
+            }
+        }
+        LOG_WARN("InferWorkerGroup: no RUNNING Ascend worker on device {}, dropping batch",
+                 target);
+        return;
+    }
+#endif
+
     // For GPU batches with a device restriction, prefer workers on the matching device.
     if (batch.is_gpu && restrict_cuda_device_id.has_value()) {
         const int target = *restrict_cuda_device_id;

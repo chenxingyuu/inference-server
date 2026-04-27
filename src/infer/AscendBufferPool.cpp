@@ -52,11 +52,14 @@ bool AscendBufferPool::isSafe() const {
     return memory_checker_ ? memory_checker_() : true;
 }
 
-void AscendBufferPool::init(int device_id, int pool_size,
+void AscendBufferPool::init(int device_id, aclrtContext ctx, int pool_size,
                              size_t input_bytes, size_t output_bytes) {
     device_id_  = device_id;
+    ctx_        = ctx;
     test_mode_  = false;
-    ACL_POOL_CHECK(aclrtSetDevice(device_id_));
+    // ctx is already current on this thread (set by AscendBackend::loadModel via
+    // aclrtCreateContext). Do NOT call aclrtSetDevice here — it switches away from
+    // the explicit context, causing aclrtMalloc to allocate under the wrong context.
 
     slots_.resize(pool_size);
     for (int i = 0; i < pool_size; ++i) {
@@ -86,6 +89,12 @@ void AscendBufferPool::initForTest(int pool_size,
 
 void AscendBufferPool::reset() {
     if (slots_.empty()) return;
+
+    // Bind our context before freeing so aclrtFree targets the correct device,
+    // regardless of which thread (or device) the caller is currently on.
+    if (!test_mode_ && ctx_) {
+        aclrtSetCurrentContext(ctx_);
+    }
 
     for (auto& s : slots_) {
         if (test_mode_) {
