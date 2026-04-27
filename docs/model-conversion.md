@@ -86,5 +86,11 @@ docker compose logs -f infer-trt | grep -E "WARN|ERROR|setInputShape"
 | YOLOv8s | yolov8s.pt | 8 |
 | YOLOv8m | yolov8m.pt | 4 |
 | YOLOv8l | yolov8l.pt | 4 |
+| YOLO11n | yolo11n.pt | 8 |
+| YOLO11s | yolo11s.pt | 8 |
+| YOLO11m | yolo11m.pt | 4 |
+| YOLO26（占位）| — | — |
 
 batch 越大显存占用越高，`optShapes` 建议设为实际平均吞吐量对应的 batch 大小。
+
+> **注意**：YOLO11 后处理格式与 YOLOv8 相同，导出与编译命令一致，将 `model=` 参数替换为对应 `.pt` 即可。YOLO26Decoder 当前为占位实现（返回空结果），格式确认后补全；转换流程与 v8/v11 相同。
