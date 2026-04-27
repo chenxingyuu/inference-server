@@ -84,7 +84,8 @@ private:
     // batch_size → model_id
     std::map<int, uint32_t> model_map_;
 
-    aclrtStream stream_{nullptr};
+    aclrtContext ctx_{nullptr};
+    aclrtStream  stream_{nullptr};
 
     // Pre-allocated NPU buffer pool (replaces per-inference aclrtMalloc)
     AscendBufferPool buffer_pool_;

@@ -177,8 +177,14 @@ bool FrameArchiver::uploadToMinio(const std::string& local_path, const std::stri
         if (!curl) return false;
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+#if LIBCURL_VERSION_NUM >= 0x074B00  // 7.75.0: CURLOPT_AWS_SIGV4 introduced
         curl_easy_setopt(curl, CURLOPT_AWS_SIGV4, ("aws:amz:" + cfg_.minio.region + ":s3").c_str());
         curl_easy_setopt(curl, CURLOPT_USERPWD, auth.c_str());
+#else
+        // libcurl < 7.75: SigV4 unavailable; upload proceeds unsigned.
+        // Configure MinIO with anonymous/policy-based access for this to succeed.
+        curl_easy_setopt(curl, CURLOPT_USERPWD, auth.c_str());
+#endif
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(cfg_.minio.connect_timeout_ms));
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(cfg_.minio.request_timeout_ms));
         curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(file_size));

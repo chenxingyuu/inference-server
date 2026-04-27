@@ -34,8 +34,8 @@ pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libavutil libswscale li
 # yaml-cpp
 find_package(yaml-cpp REQUIRED)
 
-# nlohmann/json
-find_package(nlohmann_json 3.9 REQUIRED)
+# nlohmann/json — 3.7 minimum; Ubuntu 20.04 ships 3.7.3 which is sufficient.
+find_package(nlohmann_json 3.7 REQUIRED)
 
 # spdlog
 find_package(spdlog REQUIRED)
@@ -360,6 +360,7 @@ target_link_libraries(infer_core PUBLIC
     $<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer>
     $<$<BOOL:${BUILD_TRT_BACKEND}>:CUDA::cudart>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:AscendCL::ascendcl>
+    $<$<AND:$<BOOL:${BUILD_ASCEND_BACKEND}>,$<TARGET_EXISTS:AscendCL::dvpp>>:AscendCL::dvpp>
     $<$<BOOL:${BUILD_ONNX_BACKEND}>:onnxruntime>
     $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:inference_proto>
     $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:gRPC::grpc++>
@@ -381,6 +382,9 @@ endif()
 target_compile_definitions(infer_core PUBLIC
     $<$<BOOL:${BUILD_TRT_BACKEND}>:BUILD_TRT_BACKEND>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:BUILD_ASCEND_BACKEND>
+    $<$<BOOL:${BUILD_ASCEND_BACKEND}>:ENABLE_DVPP_INTERFACE>
+    $<$<BOOL:${BUILD_ASCEND_BACKEND}>:CANN_VERSION_MAJOR=${CANN_VERSION_MAJOR}>
+    $<$<BOOL:${BUILD_ASCEND_BACKEND}>:CANN_VERSION_MINOR=${CANN_VERSION_MINOR}>
     $<$<BOOL:${BUILD_ONNX_BACKEND}>:BUILD_ONNX_BACKEND>
     $<$<BOOL:${BUILD_ONNX_BACKEND_COREML}>:BUILD_ONNX_BACKEND_COREML>
     $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:BUILD_GRPC_PUBLISHER>

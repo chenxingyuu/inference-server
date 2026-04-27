@@ -1,0 +1,79 @@
+services:
+  # ── Inference service (Atlas 300I Pro, CANN 6) ────────────────────────────────
+  # Atlas 300I Pro = 4 independent NPU devices (davinci0~3).
+  # Map each to a separate InferWorker via device_id in config.yaml.
+  infer-ascend:
+    image: registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend-cann6
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ascend.cann6
+      args:
+        ASCEND_BASE_IMAGE: ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+    devices:
+      - /dev/davinci0:/dev/davinci0
+      - /dev/davinci1:/dev/davinci1
+      - /dev/davinci2:/dev/davinci2
+      - /dev/davinci3:/dev/davinci3
+      - /dev/davinci_manager:/dev/davinci_manager
+      - /dev/devmm_svm:/dev/devmm_svm
+      - /dev/hisi_hdc:/dev/hisi_hdc
+    volumes:
+      - ./models:/models:ro
+      - ./config:/config:ro
+      - /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro
+    environment:
+      - ASCEND_DEVICE_ID=0
+      - ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
+      - LD_LIBRARY_PATH=/usr/local/Ascend/ascend-toolkit/latest/lib64:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:/usr/local/lib:/usr/lib
+      - ASCEND_GLOBAL_LOG_LEVEL=2
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # ── ZooKeeper ─────────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    restart: unless-stopped
+
+  # ── Kafka ─────────────────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    restart: unless-stopped
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:

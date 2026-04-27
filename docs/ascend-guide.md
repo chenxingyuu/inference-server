@@ -172,12 +172,13 @@ Ascend-cann-kernels-310p_8.0.RC3_linux.run       ← 算子包（运行时必需
 商用版:  CANN 8.0.0    →  驱动 24.1.0
 ```
 
-### 典型配套表（310P）
+### 典型配套表（310P / Atlas 300I Pro）
 
-| CANN 版本 | 驱动版本 | 固件版本 | 备注 |
-|----------|---------|---------|------|
-| 8.0.RC3 | 24.1.RC3 | 7.3.0.1.231 | 社区版 |
-| 8.5.1 | 25.0.x | 7.5.x | 社区版，本项目使用 |
+| CANN 版本 | 驱动版本 | 固件版本 | Docker 基础镜像 | 备注 |
+|----------|---------|---------|----------------|------|
+| 6.0.1 | 22.0.x | 6.x | `ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9` | CANN 6，Ubuntu 20.04 |
+| 8.0.RC3 | 24.1.RC3 | 7.3.0.1.231 | `ascendai/cann:8.0.RC3-310p-ubuntu22.04-py3.11` | 社区版 |
+| 8.5.1 | 25.0.x | 7.5.x | `ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11` | 社区版，默认 |
 
 > 最新配套关系以[昇腾官方文档](https://www.hiascend.com/document)为准。
 
@@ -217,12 +218,29 @@ ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11
 | `ascendai/mindie` | CANN + MindIE 大模型推理框架 | LLM 推理 |
 | `ascendai/mindspore` | CANN + MindSpore | 模型训练 |
 
+### Dockerfile 与 docker-compose 选择
+
+| 场景 | Dockerfile | compose |
+|------|-----------|---------|
+| CANN 8（默认） | `docker/Dockerfile.ascend` | `docker/docker-compose.ascend.yml` |
+| CANN 6 / Atlas 300I Pro | `docker/Dockerfile.ascend.cann6` | `docker/docker-compose.ascend.300ipro.yml` |
+
+构建 CANN 6 镜像：
+
+```bash
+docker build \
+  -f docker/Dockerfile.ascend.cann6 \
+  -t inference-server:ascend-cann6 \
+  .
+```
+
 ### docker-compose 设备挂载
+
+Atlas 300I Pro 单卡包含 **4 个独立 NPU 设备**，compose 文件需挂载 davinci0~3：
 
 ```yaml
 services:
   infer-ascend:
-    image: ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11
     devices:
       - /dev/davinci0           # NPU 计算设备
       - /dev/davinci1
@@ -286,6 +304,17 @@ aclrtDestroyStream(stream);
 aclrtDestroyContext(ctx);
 aclrtResetDevice(device_id);
 aclFinalize();
+```
+
+### Context 创建规则（CANN 6 必须显式创建）
+
+CANN 8 在 `aclrtSetDevice()` 时会自动创建一个默认 Context，CANN 6 **不保证**这一行为。
+本项目在 `AscendBackend::loadModel()` 中始终显式调用 `aclrtCreateContext()`，兼容两个版本。
+
+```cpp
+aclrtSetDevice(device_id_);
+aclrtCreateContext(&ctx_, device_id_);  // 必须在 CANN 6 下显式创建
+aclrtCreateStream(&stream_);
 ```
 
 ### Context 线程绑定规则（重要）

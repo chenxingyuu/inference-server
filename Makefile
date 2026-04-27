@@ -114,9 +114,9 @@ docker-build-gpu:
 
 docker-build-npu:
 	DOCKER_BUILDKIT=1 docker build \
-	  -t inference-server:ascend \
-	  -f docker/Dockerfile.ascend \
-	  --build-arg ASCEND_BASE_IMAGE=ascendai/cann:8.5.1-310p-ubuntu22.04-py3.11 \
+	  -t inference-server:ascend-cann6 \
+	  -f docker/Dockerfile.ascend.cann6 \
+	  --build-arg ASCEND_BASE_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9 \
 	  .
 
 up: up-cpu

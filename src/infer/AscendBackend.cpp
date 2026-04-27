@@ -46,6 +46,9 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
 
     ACL_CHECK(aclInit(nullptr));
     ACL_CHECK(aclrtSetDevice(device_id_));
+    // CANN 6 does not auto-create a default context; explicit creation is
+    // required for correct multi-threaded operation on all CANN versions.
+    ACL_CHECK(aclrtCreateContext(&ctx_, device_id_));
     ACL_CHECK(aclrtCreateStream(&stream_));
 
     for (auto& [bs, path] : cfg.om_paths) {
@@ -90,6 +93,10 @@ void AscendBackend::unloadModel() {
     if (stream_) {
         aclrtDestroyStream(stream_);
         stream_ = nullptr;
+    }
+    if (ctx_) {
+        aclrtDestroyContext(ctx_);
+        ctx_ = nullptr;
     }
     aclrtResetDevice(device_id_);
     aclFinalize();
