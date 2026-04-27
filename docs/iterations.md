@@ -576,9 +576,37 @@ tasks:
 
 ---
 
+## Phase 24 — Ascend 多卡并行 Bug 修复
+
+**完成**：2026-04-27
+
+**目标**：修复 `instance_count > 1` 时多卡并行路径下的 2 个 CRITICAL、2 个 HIGH 和 1 个 MEDIUM 级别 Bug，并在 135 服务器双卡上完成真机验证。
+
+**背景**：代码审查发现，`AscendBackend` 在多实例场景下存在多处进程级资源管理错误和设备路由缺失，单卡时无感知，双卡启动即 crash。
+
+**修复**：
+
+- **`aclrtResetDevice` 进程级炸弹**（CRITICAL）：从 `unloadModel` 中移除 `aclrtResetDevice`。该函数销毁同 device 上所有 ACL 资源，包括其他 `AscendBackend` 实例持有的 context/stream，停一个 worker 会静默杀死同设备上的 sibling。现在只析构自己的 `stream_` / `ctx_`。
+- **`aclFinalize` 竞态**（CRITICAL）：用进程级原子引用计数 `s_acl_refcount_` 替代 `acl_inited_by_self_` 标志。第一个 backend init 时才调用 `aclInit`，最后一个 backend 析构时才调用 `aclFinalize`，杜绝先停的 backend 把后续仍在运行的 backend 的 ACL runtime 干掉。
+- **Buffer pool 在错误 context 下分配 HBM**（HIGH）：`AscendBufferPool::init` 原来调 `aclrtSetDevice`，切走了 `aclrtCreateContext` 刚建好的 context，`aclrtMalloc` 把 HBM 分配到隐式默认 context 而非 worker 的 `ctx_`。现在 `init` 接收 `aclrtContext ctx` 参数并存储，不再调 `aclrtSetDevice`；`reset()` 前调 `aclrtSetCurrentContext(ctx_)` 保证 free 到正确设备。
+- **Ascend batch 无设备亲和路由**（HIGH）：`InferWorkerGroup::enqueue` 原来对 `is_ascend` batch 传 `nullopt`（无设备限制），DVPP 在 device 1 解码的 HBM 帧可能被分发到 device 0 的 worker，触发跨设备内存访问（CANN 未定义行为）。新增严格亲和路由：按 `ascend_frames[0].device_id` 找匹配 worker，找不到则丢帧（带警告），不回退到任意 worker。
+- **`device_ids` 与 `instance_count` 不一致**（MEDIUM）：`loadConfig` 新增校验，`device_ids` 非空时必须与 `instance_count` 数量相等，否则抛出 `std::runtime_error`，防止多余 instance 静默落到 `device_id=0` 触发双重 init/reset。
+
+**真机验证（192.168.3.135）**：
+- `instance_count: 2, device_ids: [0, 1]`（容器内编号，对应物理 `/dev/davinci0` + `/dev/davinci2`）
+- 两个 worker（thread 18 / thread 22）交替推理，`infer_ms ~6ms`，`latency_ms ~11ms`，`restart=0`
+- 首次尝试 `device_ids: [0, 2]` 报 `ACL_ERROR_RT_DEVICE_INVALID(107001)`，确认容器内设备 ID 从 0 连续编号，与宿主机 `/dev/davinciN` 序号无关
+
+**新增测试**：`test_config.cpp` 新增 3 个 `device_ids` 校验测试（不匹配抛异常、匹配正常、省略正常）。
+
+**状态**：✅ 完成，PR #25
+
+---
+
 ## 待办
 
 - [x] Phase 23 DVPP CANN6 稳定性修复（内存释放 + 发送错误回收 + stream 同步）
+- [x] Phase 24 Ascend 多卡并行 Bug 修复
 - [ ] 任务级自动降级（安全实现待完善）：`use_ascend_dvpp=true` 且模型无 AIPP 时自动回退 CPU 解码
 - [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
 - [ ] Phase 5 Ascend 310P 真机联调
