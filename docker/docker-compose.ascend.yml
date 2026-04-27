@@ -2,18 +2,21 @@ services:
   # ── Inference service (Ascend 310P) ────────────────────────────────────────
   infer-ascend:
     image: registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend
+    privileged: true
     devices:
       - /dev/davinci0:/dev/davinci0
+      - /dev/davinci2:/dev/davinci2
       - /dev/davinci_manager:/dev/davinci_manager
       - /dev/hisi_hdc:/dev/hisi_hdc
     volumes:
-      - ./models:/models:ro
-      - ./config:/config:ro
+      - ../models:/models:ro
+      - ../config:/config:ro
       - /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro
+    command: ["/app/infer_server", "/config/config.npu.yaml"]
     environment:
-      - ASCEND_DEVICE_ID=0
       - ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
       - LD_LIBRARY_PATH=/usr/local/Ascend/ascend-toolkit/latest/lib64:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:/usr/local/lib:/usr/lib
+      - ASCEND_SLOG_PRINT_TO_STDOUT=1
     depends_on:
       kafka:
         condition: service_healthy
