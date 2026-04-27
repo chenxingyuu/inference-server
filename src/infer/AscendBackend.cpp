@@ -159,44 +159,103 @@ bool AscendBackend::detectAipp(uint32_t model_id) const {
 void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
     if (!loaded_) throw std::runtime_error("AscendBackend: model not loaded");
 
-    const int bs          = input.size();
-    const size_t in_bytes = aipp_enabled_
-        ? static_cast<size_t>(bs) * input_h_ * input_w_ * 3
-        : static_cast<size_t>(bs) * 3 * input_h_ * input_w_ * sizeof(float);
-    const size_t out_bytes = static_cast<size_t>(bs) * (4 + num_classes_) * 8400 * sizeof(float);
+    const int bs = input.size();
+    const size_t out_bytes =
+        static_cast<size_t>(bs) * (4 + num_classes_) * 8400 * sizeof(float);
     const uint32_t model_id = selectModel(bs);
 
-    // Acquire pre-allocated slot; release on scope exit (exception-safe)
+    // Acquire pre-allocated slot for the output buffer (exception-safe release).
     AscendPooledBuffer* slot = buffer_pool_.acquire();
     if (!slot) throw std::runtime_error("AscendBackend: buffer pool timed out");
     SlotGuard guard{buffer_pool_, slot};
 
-    // Preprocess into slot->input_device (CPU → already HBM)
-    if (aipp_enabled_) {
-        packBgrUint8(input, static_cast<uint8_t*>(slot->input_device), bs, input_h_, input_w_);
-    } else {
-        preprocessCPU(input, static_cast<float*>(slot->input_device), bs, input_h_, input_w_);
-    }
-
-    // H2D copy (staging → HBM already done above since slot is HBM)
-    // Note: preprocessCPU/packBgrUint8 write to host-accessible HBM (ACL_MEM_MALLOC_HUGE_FIRST
-    // allocates in HBM, but on 310P all HBM is accessible from host via SDMA).
-    // An explicit H2D memcpy is still required to synchronise writes.
     auto do_memcpy = memcpy_fn_ ? memcpy_fn_
         : [](void* dst, size_t dst_size, const void* src, size_t src_size,
              aclrtMemcpyKind kind) -> aclError {
             return aclrtMemcpy(dst, dst_size, src, src_size, kind);
         };
 
-    // Build ACL datasets around pre-allocated slot buffers
-    aclDataBuffer* in_buf  = aclCreateDataBuffer(slot->input_device, in_bytes);
+    // ── Select input pointer and compute in_bytes ─────────────────────────
+    //
+    // Three paths (mutually exclusive, checked in priority order):
+    //
+    //  A. Zero-copy  — DVPP NV12 frames already in HBM + AIPP model
+    //       batch=1  → DVPP device ptr forwarded directly (no copy at all)
+    //       batch>1  → frames D2D-concatenated into a temporary device buffer
+    //
+    //  B. AIPP / CPU BGR  — CPU-side packBgrUint8 into pre-allocated slot
+    //
+    //  C. CPU float CHW   — CPU-side preprocessCPU into pre-allocated slot
+
+    void*  input_ptr  = slot->input_device;  // default: pre-allocated slot
+    size_t in_bytes   = 0;
+    void*  tmp_device = nullptr;             // non-null → freed by TmpDevGuard
+
+    // RAII guard for the temporary D2D concatenation buffer (path A, batch>1).
+    // Holds a reference to tmp_device so it sees the value set after alloc.
+    // Freed before the slot is released (correct destruction order on unwind).
+    struct TmpDevGuard {
+        void**       ptr_ref;
+        AclDevFreeFn free_fn;
+        ~TmpDevGuard() {
+            if (!*ptr_ref) return;
+            if (free_fn) { free_fn(*ptr_ref); } else { aclrtFree(*ptr_ref); }
+        }
+    } tmp_guard{&tmp_device, dev_free_fn_};
+
+#ifdef BUILD_ASCEND_BACKEND
+    if (aipp_enabled_ && input.is_ascend && !input.ascend_frames.empty()) {
+        // Path A: zero-copy DVPP → AIPP
+        const auto& f0 = input.ascend_frames[0];
+        const size_t frame_nv12 =
+            static_cast<size_t>(f0.width) * static_cast<size_t>(f0.height) * 3 / 2;
+        in_bytes = static_cast<size_t>(bs) * frame_nv12;
+
+        if (bs == 1) {
+            // True zero-copy: forward DVPP device ptr directly to ACL dataset.
+            input_ptr = f0.yuv_device;
+        } else {
+            // Multi-frame: D2D-concatenate into a fresh contiguous device buffer.
+            // TmpDevGuard is already live so any throw below is exception-safe.
+            auto alloc_fn = dev_alloc_fn_ ? dev_alloc_fn_
+                : [](void** ptr, size_t sz) -> aclError {
+                    return aclrtMalloc(ptr, sz, ACL_MEM_MALLOC_HUGE_FIRST);
+                };
+            ACL_CHECK(alloc_fn(&tmp_device, in_bytes));
+
+            for (int b = 0; b < bs; ++b) {
+                const auto& fb  = input.ascend_frames[b];
+                void*       dst = static_cast<char*>(tmp_device)
+                                  + static_cast<ptrdiff_t>(b) * frame_nv12;
+                ACL_CHECK(do_memcpy(dst, frame_nv12, fb.yuv_device, frame_nv12,
+                                    ACL_MEMCPY_DEVICE_TO_DEVICE));
+            }
+            input_ptr = tmp_device;
+        }
+    } else
+#endif
+    if (aipp_enabled_) {
+        // Path B: CPU BGR uint8, AIPP handles CHW conversion + normalisation
+        in_bytes = static_cast<size_t>(bs) * input_h_ * input_w_ * 3;
+        packBgrUint8(input, static_cast<uint8_t*>(slot->input_device),
+                     bs, input_h_, input_w_);
+        input_ptr = slot->input_device;
+    } else {
+        // Path C: CPU float CHW, no AIPP
+        in_bytes = static_cast<size_t>(bs) * 3 * input_h_ * input_w_ * sizeof(float);
+        preprocessCPU(input, static_cast<float*>(slot->input_device),
+                      bs, input_h_, input_w_);
+        input_ptr = slot->input_device;
+    }
+
+    // ── Build ACL datasets and run async inference ────────────────────────
+    aclDataBuffer* in_buf  = aclCreateDataBuffer(input_ptr, in_bytes);
     aclDataBuffer* out_buf = aclCreateDataBuffer(slot->output_device, out_bytes);
     aclmdlDataset* in_set  = aclmdlCreateDataset();
     aclmdlDataset* out_set = aclmdlCreateDataset();
     aclmdlAddDatasetBuffer(in_set, in_buf);
     aclmdlAddDatasetBuffer(out_set, out_buf);
 
-    // RAII dataset cleanup (runs before SlotGuard releases the slot)
     struct DatasetGuard {
         aclmdlDataset* in_s; aclmdlDataset* out_s;
         aclDataBuffer* in_b; aclDataBuffer* out_b;
@@ -208,19 +267,17 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
         }
     } ds_guard{in_set, out_set, in_buf, out_buf};
 
-    // Async execute
     auto exec_fn = execute_async_fn_ ? execute_async_fn_
         : [](uint32_t m, aclmdlDataset* i, aclmdlDataset* o, aclrtStream s) -> aclError {
             return aclmdlExecuteAsync(m, i, o, s);
         };
     ACL_CHECK(exec_fn(model_id, in_set, out_set, stream_));
 
-    // Synchronise stream: blocks host until NPU completes
     auto sync_fn = sync_stream_fn_ ? sync_stream_fn_
         : [](aclrtStream s) -> aclError { return aclrtSynchronizeStream(s); };
     ACL_CHECK(sync_fn(stream_));
 
-    // D2H copy output
+    // D2H: copy NPU output back to host
     output.resize(out_bytes / sizeof(float));
     ACL_CHECK(do_memcpy(output.data(), out_bytes,
                         slot->output_device, out_bytes,
@@ -238,20 +295,75 @@ void AscendBackend::initPoolForTest(int pool_size,
 
 void AscendBackend::inferWithStubs(const Batch& input, std::vector<float>& output) {
     // Simplified infer path used by tests: skips real ACL dataset calls.
-    // Exercises pool acquire/release + execute + sync call ordering.
-    if (input.frames.empty()) return;
+    // Exercises pool acquire/release + preprocess branch selection + exec/sync ordering.
+    //
+    // Supported paths (same branches as infer()):
+    //   A. Zero-copy DVPP  — input.is_ascend && aipp_enabled_
+    //   B. CPU BGR / AIPP  — aipp_enabled_, CPU frames
+    //   C. CPU float CHW   — no AIPP, CPU frames
+
+#ifdef BUILD_ASCEND_BACKEND
+    const bool ascend_path = aipp_enabled_ && input.is_ascend
+                             && !input.ascend_frames.empty();
+#else
+    const bool ascend_path = false;
+#endif
+    if (!ascend_path && input.frames.empty()) return;
 
     AscendPooledBuffer* slot = buffer_pool_.acquire();
     if (!slot) throw std::runtime_error("AscendBackend: buffer pool timed out");
     SlotGuard guard{buffer_pool_, slot};
 
-    // Preprocess (CPU) to verify AIPP branch selection
-    if (aipp_enabled_) {
-        const size_t frame_bytes = static_cast<size_t>(input_h_) * input_w_ * 3;
-        (void)frame_bytes; // no-op in stub mode, slot memory is operator-new heap
-    }
+    auto do_memcpy = memcpy_fn_ ? memcpy_fn_
+        : [](void*, size_t, const void*, size_t, aclrtMemcpyKind) -> aclError {
+            return ACL_SUCCESS;
+        };
 
-    // Fake dataset handles (nullptr is fine with stub execute fn)
+    // ── Path A: zero-copy DVPP ─────────────────────────────────────────────
+    void* tmp_device = nullptr;
+
+    // RAII cleanup for tmp buffer (path A, batch>1).
+    // References tmp_device so it sees the value set after alloc.
+    struct TmpDevGuard {
+        void**       ptr_ref;
+        AclDevFreeFn free_fn;
+        ~TmpDevGuard() {
+            if (!*ptr_ref) return;
+            if (free_fn) { free_fn(*ptr_ref); } else { ::operator delete(*ptr_ref); }
+        }
+    } tmp_guard{&tmp_device, dev_free_fn_};
+
+#ifdef BUILD_ASCEND_BACKEND
+    if (ascend_path) {
+        const int bs = static_cast<int>(input.ascend_frames.size());
+        const auto& f0 = input.ascend_frames[0];
+        const size_t frame_nv12 =
+            static_cast<size_t>(f0.width) * static_cast<size_t>(f0.height) * 3 / 2;
+
+        if (bs > 1) {
+            // Multi-frame: alloc tmp buffer + D2D memcpy per frame.
+            // TmpDevGuard is already live so any throw below is exception-safe.
+            const size_t total = static_cast<size_t>(bs) * frame_nv12;
+            auto alloc_fn = dev_alloc_fn_ ? dev_alloc_fn_
+                : [](void** ptr, size_t sz) -> aclError {
+                    *ptr = ::operator new(sz);
+                    return ACL_SUCCESS;
+                };
+            ACL_CHECK(alloc_fn(&tmp_device, total));
+
+            for (int b = 0; b < bs; ++b) {
+                const auto& fb  = input.ascend_frames[b];
+                void*       dst = static_cast<char*>(tmp_device)
+                                  + static_cast<ptrdiff_t>(b) * frame_nv12;
+                ACL_CHECK(do_memcpy(dst, frame_nv12, fb.yuv_device, frame_nv12,
+                                    ACL_MEMCPY_DEVICE_TO_DEVICE));
+            }
+        }
+        // batch=1: no copy, DVPP ptr used directly (no-op in stub mode)
+    }
+#endif
+
+    // ── Fake dataset handles (nullptr is fine with stub execute fn) ────────
     aclmdlDataset* in_set  = nullptr;
     aclmdlDataset* out_set = nullptr;
 
@@ -265,10 +377,6 @@ void AscendBackend::inferWithStubs(const Batch& input, std::vector<float>& outpu
         : [](aclrtStream) -> aclError { return ACL_SUCCESS; };
     ACL_CHECK(sync_fn(stream_));
 
-    auto do_memcpy = memcpy_fn_ ? memcpy_fn_
-        : [](void*, size_t, const void*, size_t, aclrtMemcpyKind) -> aclError {
-            return ACL_SUCCESS;
-        };
     output.resize(output_bytes_ / sizeof(float));
     ACL_CHECK(do_memcpy(output.data(), output_bytes_,
                         slot->output_device, output_bytes_,

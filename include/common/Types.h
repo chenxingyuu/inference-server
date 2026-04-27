@@ -112,6 +112,16 @@ struct Batch {
     bool                    is_gpu{false};
     int                     cuda_device_id{0}; // device that decoded this batch
 
+#ifdef BUILD_ASCEND_BACKEND
+    // NPU path: DVPP YUV420SP (NV12) frames in HBM device memory.
+    // Populated by BatchScheduler when Frame.is_ascend == true.
+    // AscendBackend uses these for the zero-copy DVPP → AIPP pipeline:
+    //   batch=1  → DVPP device ptr forwarded directly to AIPP (no copy)
+    //   batch>1  → frames D2D-concatenated into a contiguous device buffer
+    std::vector<AscendBuffer> ascend_frames;
+    bool                      is_ascend{false};
+#endif
+
     int  size()  const noexcept { return static_cast<int>(metas.size()); }
     bool empty() const noexcept { return metas.empty(); }
 };

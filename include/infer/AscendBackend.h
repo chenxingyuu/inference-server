@@ -58,8 +58,16 @@ public:
     // Return the input_bytes_ used to initialise the pool (for test assertions).
     size_t poolInputBytesForTest() const { return input_bytes_; }
 
+    // Stub for device memory allocation (aclrtMalloc) — zero-copy multi-frame path.
+    using AclDevAllocFn = std::function<aclError(void**, size_t)>;
+    void setDevAllocFnForTest(AclDevAllocFn fn) { dev_alloc_fn_ = std::move(fn); }
+
+    // Stub for device memory free (aclrtFree) — zero-copy multi-frame path.
+    using AclDevFreeFn = std::function<aclError(void*)>;
+    void setDevFreeFnForTest(AclDevFreeFn fn) { dev_free_fn_ = std::move(fn); }
+
     // Run infer() using injected stubs (skips real ACL dataset / model calls).
-    // Used by test_ascend_async_infer.cpp and test_ascend_aipp.cpp.
+    // Supports both CPU-frame batches and is_ascend batches (DVPP zero-copy path).
     void inferWithStubs(const Batch& input, std::vector<float>& output);
 
 private:
@@ -99,6 +107,8 @@ private:
     AclSyncStreamFn   sync_stream_fn_{};
     AclMemcpyFn       memcpy_fn_{};
     AippDetectFn      aipp_detect_fn_{};
+    AclDevAllocFn     dev_alloc_fn_{};  // zero-copy: aclrtMalloc for tmp D2D buffer
+    AclDevFreeFn      dev_free_fn_{};   // zero-copy: aclrtFree for tmp D2D buffer
 };
 
 } // namespace infer

@@ -55,6 +55,9 @@ void BatchScheduler::scheduleLoop() {
     batch.frames.reserve(max_bs);
     batch.gpu_frames.reserve(max_bs);
     batch.metas.reserve(max_bs);
+#ifdef BUILD_ASCEND_BACKEND
+    batch.ascend_frames.reserve(max_bs);
+#endif
 
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::microseconds(delay_us);
@@ -88,12 +91,30 @@ void BatchScheduler::scheduleLoop() {
 
                 // Enforce a homogeneous batch: once the type is set, reject
                 // frames of the opposite type to prevent OOB in the backend.
-                if (!batch.empty() && f.is_gpu != batch.is_gpu) {
-                    LOG_WARN("BatchScheduler[{}]: mixed GPU/CPU frames in one batch, "
-                             "dropping frame from stream {}", model_cfg_.id, sid);
-                    continue;
+#ifdef BUILD_ASCEND_BACKEND
+                const bool frame_is_ascend = f.is_ascend;
+#else
+                const bool frame_is_ascend = false;
+#endif
+                if (!batch.empty()) {
+                    const bool type_mismatch =
+#ifdef BUILD_ASCEND_BACKEND
+                        (frame_is_ascend != batch.is_ascend) ||
+#endif
+                        (!frame_is_ascend && f.is_gpu != batch.is_gpu);
+                    if (type_mismatch) {
+                        LOG_WARN("BatchScheduler[{}]: mixed frame types in one batch, "
+                                 "dropping frame from stream {}", model_cfg_.id, sid);
+                        continue;
+                    }
                 }
 
+#ifdef BUILD_ASCEND_BACKEND
+                if (frame_is_ascend) {
+                    batch.ascend_frames.push_back(std::move(f.ascend_buf));
+                    batch.is_ascend = true;
+                } else
+#endif
                 if (f.is_gpu) {
                     if (batch.gpu_frames.empty()) {
                         batch.cuda_device_id = f.gpu_buf.cuda_device_id;
@@ -136,6 +157,10 @@ void BatchScheduler::scheduleLoop() {
             batch.metas.clear();
             batch.is_gpu = false;
             batch.cuda_device_id = 0;
+#ifdef BUILD_ASCEND_BACKEND
+            batch.ascend_frames.clear();
+            batch.is_ascend = false;
+#endif
             deadline = std::chrono::steady_clock::now() +
                        std::chrono::microseconds(delay_us);
         } else if (batch.empty()) {

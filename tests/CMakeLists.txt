@@ -330,6 +330,32 @@ if(BUILD_ASCEND_BACKEND)
     add_test(NAME test_ascend_aipp COMMAND test_ascend_aipp
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+    # Feature 5: DVPP → AIPP zero-copy pipeline
+    add_executable(test_ascend_dvpp_zerocopy
+        test_ascend_dvpp_zerocopy.cpp
+        ${CMAKE_SOURCE_DIR}/src/infer/AscendBackend.cpp
+        ${CMAKE_SOURCE_DIR}/src/infer/AscendBufferPool.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
+    )
+    target_include_directories(test_ascend_dvpp_zerocopy PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${OpenCV_INCLUDE_DIRS}
+    )
+    target_compile_definitions(test_ascend_dvpp_zerocopy PRIVATE BUILD_ASCEND_BACKEND)
+    target_link_libraries(test_ascend_dvpp_zerocopy PRIVATE
+        GTest::gtest_main
+        GTest::gmock
+        spdlog::spdlog
+        ${OpenCV_LIBS}
+        Threads::Threads
+        AscendCL::ascendcl
+        yaml-cpp
+        nlohmann_json::nlohmann_json
+    )
+    add_test(NAME test_ascend_dvpp_zerocopy COMMAND test_ascend_dvpp_zerocopy
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
     # Feature 4: DVPPDecoder
     add_executable(test_dvpp_decoder
         test_dvpp_decoder.cpp
