@@ -73,19 +73,32 @@ public:
     void startForTest(FrameCallback cb);
 
     // Call initChannel() / destroyChannel() directly (uses injected dvpp_api_).
-    bool initChannelForTest(int device_id) { return initChannel(device_id); }
-    void destroyChannelForTest()            { destroyChannel(); }
+    bool initChannelForTest(int device_id, uint32_t aligned_w = 640,
+                            uint32_t aligned_h = 640, bool is_h265 = false) {
+        return initChannel(device_id, aligned_w, aligned_h, is_h265);
+    }
+    void destroyChannelForTest() { destroyChannel(); }
+
+    // Return the per-instance channel ID assigned at construction.
+    uint32_t channelIdForTest() const { return channel_id_; }
 
     // Expose the DVPP frame callback for direct unit-test invocation.
-    // In tests: call onDecoded(nullptr, fake_pic_desc, user_data) to verify
-    // that a Frame with is_ascend=true is constructed and forwarded.
     static void onDecoded(acldvppStreamDesc* input,
                           acldvppPicDesc*    output,
                           void*              user_data);
 
+    // Compute DVPP-aligned YUV420SP buffer size.
+    // DVPP requires: width stride aligned to 16, height stride aligned to 2.
+    static uint32_t alignedYuvSize(uint32_t w, uint32_t h) {
+        const uint32_t aw = (w + 15u) & ~15u;
+        const uint32_t ah = (h +  1u) & ~1u;
+        return aw * ah * 3u / 2u;
+    }
+
 private:
-    void decodeLoop(StreamConfig cfg, FrameCallback cb);
-    bool initChannel(int device_id);
+    void decodeLoop(StreamConfig cfg);
+    bool initChannel(int device_id, uint32_t aligned_w, uint32_t aligned_h,
+                     bool is_h265 = false);
     void destroyChannel();
 
     std::string              stream_id_;
@@ -96,15 +109,36 @@ private:
     aclrtStream              dvpp_stream_{nullptr};
     AclVdecChannelDesc*      channel_desc_{nullptr};
 
-    DvppApiStub              dvpp_api_{};  // zero-initialized → real ACL path
+    // Per-instance unique channel ID (avoids DVPP channel conflicts on multi-stream).
+    uint32_t                 channel_id_{0};
 
-    // Context passed to DVPP callback
+    // Stream geometry — set in decodeLoop after avformat_find_stream_info.
+    uint32_t                 codec_width_{0};
+    uint32_t                 codec_height_{0};
+    uint32_t                 aligned_width_{0};
+    uint32_t                 aligned_height_{0};
+
+    DvppApiStub              dvpp_api_{};
+
+    // Persistent per-instance context (cb + device_id); set in start(), read by decodeLoop.
     struct CallbackCtx {
         FrameCallback cb;
         int           device_id{0};
     };
     std::mutex               ctx_mu_;
     CallbackCtx              ctx_;
+
+    // Per-frame context heap-allocated for each aclvdecSendFrame call.
+    // Carries the bitstream device pointer so onDecoded can free it after DVPP
+    // has consumed the compressed data (async callback fires on DVPP worker thread).
+    struct FrameCtx {
+        FrameCallback  cb;
+        int            device_id{0};
+        void*          bitstream_dev{nullptr};
+    };
+
+    // Process-wide channel counter — each DVPPDecoder gets a unique channel ID.
+    static std::atomic<uint32_t> s_channel_counter_;
 
     static constexpr int kOutputPoolSize = 4;
 };
