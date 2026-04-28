@@ -184,19 +184,26 @@ void DVPPDecoder::destroyChannel() {
 //
 // CANN6: aclvdecSendFrame is ASYNCHRONOUS. The callback fires on a DVPP
 // internal thread when the hardware decode completes. Lifetime rules:
-//   - input bitstream (bitstream_dev): freed HERE in the callback via FrameCtx
-//   - output YUV buffer (yuv_buf): owned by frame_ref; freed when Frame is dropped
-//   - pic_desc: destroyed HERE in the frame_ref deleter
+//   - stream_desc (input): owned by DVPP until this callback; destroyed HERE.
+//   - bitstream_dev: device memory for compressed data; freed HERE via FrameCtx.
+//   - output YUV buffer (yuv_buf): owned by frame_ref; freed when Frame is dropped.
+//   - pic_desc (output): destroyed in the frame_ref deleter.
 //
 // user_data = heap-allocated FrameCtx* (deleted here after callback returns).
 
-void DVPPDecoder::onDecoded(acldvppStreamDesc* /*input*/,
+void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
                              acldvppPicDesc*    output,
                              void*              user_data) {
     if (!user_data) return;
     auto* fctx = static_cast<FrameCtx*>(user_data);
 
-    // Release input bitstream — DVPP has consumed it by the time the callback fires.
+    // Destroy the stream descriptor — DVPP passes it back here after decode completes.
+    // This MUST happen here, not immediately after aclvdecSendFrame (the call is async).
+    if (input) {
+        acldvppDestroyStreamDesc(input);
+    }
+
+    // Release the compressed bitstream device memory.
     if (fctx->bitstream_dev) {
         acldvppFree(fctx->bitstream_dev);
         fctx->bitstream_dev = nullptr;
@@ -384,6 +391,9 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         }
         acldvppSetStreamDescData(stream_desc, bitstream_dev);
         acldvppSetStreamDescSize(stream_desc, static_cast<uint32_t>(raw_pkt->size));
+        // EOS=0: explicitly mark each frame as not end-of-stream.
+        // Some CANN6 driver builds treat the default (unset) as EOS, causing stalls.
+        acldvppSetStreamDescEos(stream_desc, 0);
 
         acldvppPicDesc* pic_desc = acldvppCreatePicDesc();
         if (!pic_desc) {
@@ -450,20 +460,20 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         send_rc = vdec(channel_desc_, stream_desc, pic_desc, frame_cfg, fctx);
         aclvdecDestroyFrameConfig(frame_cfg);
 #endif
-        // Destroy the stream descriptor struct immediately — DVPP has its own
-        // reference to the data pointer set explicitly above.
-        acldvppDestroyStreamDesc(stream_desc);
-
         if (send_rc != ACL_SUCCESS) {
             LOG_ERROR("DVPPDecoder: sendFrame failed (rc={})",
                       static_cast<int>(send_rc));
+            // On failure DVPP will NOT invoke the callback, so we own all resources.
+            acldvppDestroyStreamDesc(stream_desc);
             acldvppFree(bitstream_dev);
             delete fctx;
             acldvppFree(yuv_buf);
             acldvppDestroyPicDesc(pic_desc);
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
-        // On success: bitstream_dev and yuv_buf/pic_desc owned by FrameCtx / onDecoded.
+        // On success: stream_desc is owned by DVPP until the callback fires.
+        //   onDecoded() destroys stream_desc via its `input` parameter.
+        //   bitstream_dev and yuv_buf/pic_desc are owned by FrameCtx / onDecoded.
     };
 
     // ── Packet decode loop ────────────────────────────────────────────────
