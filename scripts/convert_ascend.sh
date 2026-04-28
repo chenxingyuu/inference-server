@@ -17,6 +17,7 @@ for BS in 1 4 8 16; do
         --output="${OUT_DIR}/${NAME}_b${BS}" \
         --soc_version="${SOC}" \
         --input_shape="images:${BS},3,640,640" \
+        --insert_op_conf=aipp.cfg \
         --precision_mode=allow_mix_precision \
         --log=error
     echo "  → ${OUT_DIR}/${NAME}_b${BS}.om"

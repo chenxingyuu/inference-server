@@ -386,6 +386,33 @@ ONNX / Caffe / MindSpore 模型
         .om 文件（绑定芯片型号 + 固定 batch size）
 ```
 
+### YOLO 导出 ONNX（Ultralytics）
+
+ATC 的输入是 ONNX。用 **Ultralytics** 从 `.pt` 导出时，需同时满足 **动态 batch**（否则按多 batch 编译时 DFL/Reshape 易形状不一致）和 **较低 ONNX opset**（新版默认 opset 18+ 甚至 20，老版本 ATC 会报 `No parser is registered for Op [... ai.onnx::20::Conv]`）。
+
+在已安装 `ultralytics` 的环境执行（`batch` 取你计划编译的最大 batch，与 `scripts/convert_ascend.sh` 中 1/4/8/16 一致即可）：
+
+```bash
+yolo export \
+  model=yolov8n.pt \
+  format=onnx \
+  dynamic=True \
+  batch=16 \
+  imgsz=640 \
+  opset=12
+```
+
+| 参数 | 说明 |
+|------|------|
+| `dynamic=True` | 输入 batch 维动态，配合多个 `--input_shape` 分别 ATC |
+| `batch=16` | 导出时图展开的上限，与最大 `.om` batch 对齐 |
+| `opset=12` | 与常见 CANN 6 / 旧 ATC 兼容；若仍报无 parser，可试 `opset=11`；较新 CANN 可对照官方文档尝试更高 opset |
+| `imgsz=640` | 与 `convert_ascend.sh` 里 `640×640` 一致 |
+
+导出后默认输入名一般为 **`images`**（与仓库脚本、配置一致）。若自定义过导出，用 Netron 打开 ONNX 核对输入名再改 `convert_ascend.sh` 的 `--input_shape` 前缀。
+
+接着在本机或已 `source .../set_env.sh` 的转换机上执行 `scripts/convert_ascend.sh <onnx> <name>` 生成各 batch 的 `.om`。
+
 ### ATC 转换命令
 
 ```bash
@@ -638,6 +665,8 @@ models:
 | `input format mismatch` | 运行时数据格式与 ATC 编译时不一致 | 重新用正确 `--input_format` 编译 |
 | `DVPP_ERROR_*` | 视频硬解码器错误 | 检查 DVPP 初始化流程 |
 | `out of memory` | NPU 显存不足 | 减小 batch size 或减少并发模型数 |
+| `No parser is registered for Op [... ai.onnx::20::*]` | ONNX opset 过新，ATC 未注册该域 | 重导时指定 `opset=12` 或 `11`（或升级 CANN） |
+| `dfl/Reshape` / `Shape size` 与元素个数 4× 等比例不符 | 静态 batch ONNX 与多 batch ATC 不匹配 | `dynamic=True` 重导 ONNX |
 
 ---
 
