@@ -89,17 +89,18 @@ TEST(DVPPDecoder, CallbackBuildsAscendFrame) {
     std::atomic<bool> frame_received{false};
     bool is_ascend_set = false;
 
-    struct TestCtx {
-        FrameCallback cb;
-        int           device_id{0};
-    } ctx;
-    ctx.device_id = 0;
-    ctx.cb = [&frame_received, &is_ascend_set](Frame f) {
+    // onDecoded() expects a heap-allocated FrameCtx* and deletes it before returning.
+    // Passing a stack struct would cause delete-of-stack UB.
+    auto* fctx = new DVPPDecoder::FrameCtx{};
+    fctx->device_id = 0;
+    fctx->bitstream_dev = nullptr;
+    fctx->cb = [&frame_received, &is_ascend_set](Frame f) {
         frame_received.store(true);
         is_ascend_set = f.is_ascend;
     };
 
-    DVPPDecoder::onDecoded(nullptr, nullptr, &ctx);
+    DVPPDecoder::onDecoded(nullptr, nullptr, fctx);
+    // fctx is deleted by onDecoded — do not access it after this point.
 
     EXPECT_TRUE(frame_received.load());
     EXPECT_TRUE(is_ascend_set);

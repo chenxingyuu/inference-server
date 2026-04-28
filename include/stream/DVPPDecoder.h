@@ -95,6 +95,16 @@ public:
         return aw * ah * 3u / 2u;
     }
 
+    // Per-frame context heap-allocated for each aclvdecSendFrame call.
+    // Carries the bitstream device pointer so onDecoded can free it after DVPP
+    // has consumed the compressed data (async callback fires on DVPP worker thread).
+    // Exposed in public so unit tests can heap-allocate and pass to onDecoded().
+    struct FrameCtx {
+        FrameCallback  cb;
+        int            device_id{0};
+        void*          bitstream_dev{nullptr};
+    };
+
 private:
     void decodeLoop(StreamConfig cfg);
     bool initChannel(int device_id, uint32_t aligned_w, uint32_t aligned_h,
@@ -127,15 +137,6 @@ private:
     };
     std::mutex               ctx_mu_;
     CallbackCtx              ctx_;
-
-    // Per-frame context heap-allocated for each aclvdecSendFrame call.
-    // Carries the bitstream device pointer so onDecoded can free it after DVPP
-    // has consumed the compressed data (async callback fires on DVPP worker thread).
-    struct FrameCtx {
-        FrameCallback  cb;
-        int            device_id{0};
-        void*          bitstream_dev{nullptr};
-    };
 
     // Process-wide channel counter — each DVPPDecoder gets a unique channel ID.
     static std::atomic<uint32_t> s_channel_counter_;
