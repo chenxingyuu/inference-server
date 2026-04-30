@@ -16,7 +16,11 @@
 
 *.log
 
-models
+# Weight blobs under models/; keep README + repository_demo tracked.
+/models/*
+!/models/README.md
+!/models/repository_demo/
+!/models/repository_demo/**/*
 
 build
 cmake-build-debug

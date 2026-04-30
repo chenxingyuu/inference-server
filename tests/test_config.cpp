@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <fstream>
 #include <cstdio>
+#include <filesystem>
 
 using namespace infer;
 
@@ -850,5 +851,147 @@ TEST(LoadConfig, EmptyDeviceIdsWithMultipleInstancesOk) {
         out << "    instance_count: 4\n";
     }
     EXPECT_NO_THROW(loadConfig(path));
+    std::remove(path.c_str());
+}
+
+// ── model_repository (filesystem registry) ────────────────────────────────
+
+namespace fs = std::filesystem;
+
+TEST(ModelRepository, ScanResolvesSingleOnnx) {
+    const fs::path base =
+        fs::temp_directory_path() / ("infer_repo_scan_" + std::to_string(static_cast<long long>(::getpid())));
+    fs::create_directories(base / "repo_m" / "1");
+    {
+        std::ofstream m(base / "repo_m" / "1" / "model.onnx");
+        m.put('x');
+    }
+    {
+        std::ofstream cfg(base / "repo_m" / "config.yaml");
+        cfg << "backend: cpu\n";
+        cfg << "version: yolov8\n";
+        cfg << "input_size: [640, 640]\n";
+    }
+    std::vector<ModelConfig> out = scanModelRepository(base.generic_string());
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].id, "repo_m");
+    EXPECT_EQ(out[0].backend, DeviceType::CPU);
+    ASSERT_FALSE(out[0].onnx_path.empty());
+    EXPECT_NE(out[0].onnx_path.find(std::string("/1/")), std::string::npos);
+    fs::remove_all(base);
+}
+
+TEST(ModelRepository, ActiveVersionSelectsOlder) {
+    const fs::path base =
+        fs::temp_directory_path() / ("infer_repo_ver_" + std::to_string(static_cast<long long>(::getpid())));
+    fs::create_directories(base / "ver_m" / "1");
+    fs::create_directories(base / "ver_m" / "2");
+    {
+        std::ofstream a(base / "ver_m" / "1" / "v1.onnx");
+        a.put('a');
+    }
+    {
+        std::ofstream b(base / "ver_m" / "2" / "v2.onnx");
+        b.put('b');
+    }
+    {
+        std::ofstream cfg(base / "ver_m" / "config.yaml");
+        cfg << "backend: cpu\n";
+        cfg << "version: yolov8\n";
+        cfg << "input_size: [640, 640]\n";
+        cfg << "active_version: 1\n";
+        cfg << "weight_file: v1.onnx\n";
+    }
+    std::vector<ModelConfig> out = scanModelRepository(base.generic_string());
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_NE(out[0].onnx_path.find("/1/"), std::string::npos);
+    EXPECT_NE(out[0].onnx_path.find("v1.onnx"), std::string::npos);
+    fs::remove_all(base);
+}
+
+TEST(ModelRepository, LoadConfigMergesRepositoryModels) {
+    const fs::path base =
+        fs::temp_directory_path() / ("infer_repo_merge_" + std::to_string(static_cast<long long>(::getpid())));
+    fs::create_directories(base / "repo_only" / "1");
+    {
+        std::ofstream m(base / "repo_only" / "1" / "w.onnx");
+        m.put('z');
+    }
+    {
+        std::ofstream cfg(base / "repo_only" / "config.yaml");
+        cfg << "backend: cpu\n";
+        cfg << "version: yolov8\n";
+        cfg << "input_size: [640, 640]\n";
+    }
+    const std::string path = "data/test_model_repo_merge.yaml";
+    {
+        std::ofstream out(path);
+        out << "server:\n";
+        out << "  model_repository: \"" << base.generic_string() << "\"\n";
+        writeMinimalYamlHeader(out);
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+    }
+    AppConfig cfg = loadConfig(path);
+    ASSERT_EQ(cfg.models.size(), 2u);
+    ASSERT_NE(cfg.findModel("m1"), nullptr);
+    const ModelConfig* rm = cfg.findModel("repo_only");
+    ASSERT_NE(rm, nullptr);
+    EXPECT_EQ(rm->backend, DeviceType::CPU);
+    EXPECT_FALSE(rm->onnx_path.empty());
+    std::remove(path.c_str());
+    fs::remove_all(base);
+}
+
+TEST(ModelRepository, DuplicateIdBetweenRootAndRepoThrows) {
+    const fs::path base =
+        fs::temp_directory_path() / ("infer_repo_dup_" + std::to_string(static_cast<long long>(::getpid())));
+    fs::create_directories(base / "m1" / "1");
+    {
+        std::ofstream m(base / "m1" / "1" / "x.onnx");
+        m.put('q');
+    }
+    {
+        std::ofstream cfg(base / "m1" / "config.yaml");
+        cfg << "backend: cpu\n";
+        cfg << "version: yolov8\n";
+        cfg << "input_size: [640, 640]\n";
+    }
+    const std::string path = "data/test_model_repo_dup.yaml";
+    {
+        std::ofstream out(path);
+        out << "server:\n";
+        out << "  model_repository: \"" << base.generic_string() << "\"\n";
+        writeMinimalYamlHeader(out);
+        out << "models:\n";
+        out << "  - id: m1\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+    fs::remove_all(base);
+}
+
+TEST(LoadConfig, CascadeUnknownSecondaryThrows) {
+    const std::string path = "data/test_cascade_unknown.yaml";
+    {
+        std::ofstream out(path);
+        writeMinimalYamlHeader(out);
+        out << "models:\n";
+        out << "  - id: primary_m\n";
+        out << "    version: yolov8\n";
+        out << "    backend: tensorrt\n";
+        out << "    input_size: [640, 640]\n";
+        out << "    cascade:\n";
+        out << "      - model_id: does_not_exist\n";
+        out << "        crop_expand: 0.0\n";
+        out << "        attribute_key: \"x\"\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());
 }

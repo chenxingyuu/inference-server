@@ -7,6 +7,10 @@
 #include <queue>
 #include <regex>
 #include <cmath>
+#include <filesystem>
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
 
 namespace infer {
 
@@ -33,16 +37,30 @@ void validateSources(const AppConfig& cfg) {
     }
 }
 
-void validateModels(const AppConfig& cfg) {
+const std::regex& modelIdPattern() {
     static const std::regex kModelIdPattern("^[A-Za-z0-9_-]+$");
+    return kModelIdPattern;
+}
+
+void validateModels(const AppConfig& cfg) {
     std::unordered_set<std::string> model_ids;
     for (const auto& model : cfg.models) {
         if (model.id.empty()) throw std::runtime_error("model.id must not be empty");
-        if (!std::regex_match(model.id, kModelIdPattern)) {
+        if (!std::regex_match(model.id, modelIdPattern())) {
             throw std::runtime_error("model.id contains illegal characters: " + model.id);
         }
         if (!model_ids.insert(model.id).second) {
             throw std::runtime_error("duplicate model id: " + model.id);
+        }
+    }
+}
+
+void validateCascadeModelRefs(const AppConfig& cfg) {
+    for (const auto& model : cfg.models) {
+        for (const auto& cc : model.cascade) {
+            if (!cfg.findModel(cc.model_id)) {
+                throw std::runtime_error("cascade references unknown model_id: " + cc.model_id + " (from model " + model.id + ")");
+            }
         }
     }
 }
@@ -167,12 +185,308 @@ void validateTasks(const AppConfig& cfg) {
 
 void validateAppConfig(const AppConfig& cfg) {
     validateModels(cfg);
+    validateCascadeModelRefs(cfg);
     validateSources(cfg);
     validatePipelineGraphs(cfg);
     validateTasks(cfg);
 }
 
 } // namespace
+
+YOLOVersion parseYOLOVersion(const std::string& s);
+DeviceType  parseDeviceType(const std::string& s);
+
+namespace {
+
+namespace fs = std::filesystem;
+
+std::string pathGeneric(const fs::path& p) { return p.lexically_normal().generic_string(); }
+
+void resolveRelativeWeightPaths(ModelConfig& m, const fs::path& version_dir) {
+    auto resolve = [&](std::string& p) {
+        if (p.empty()) return;
+        fs::path fp(p);
+        if (fp.is_absolute()) return;
+        p = pathGeneric(version_dir / fp);
+    };
+    resolve(m.engine_path);
+    resolve(m.onnx_path);
+    for (auto& kv : m.om_paths) resolve(kv.second);
+}
+
+void collectExtensionMatches(const fs::path& dir, const char* ext, std::vector<fs::path>& out) {
+    if (!fs::exists(dir) || !fs::is_directory(dir)) return;
+    for (const auto& ent : fs::directory_iterator(dir)) {
+        if (!ent.is_regular_file()) continue;
+        if (ent.path().extension() == ext) out.push_back(ent.path());
+    }
+}
+
+void applyWeightFile(ModelConfig& m, const fs::path& version_dir, const std::string& weight_file) {
+    if (weight_file.empty()) return;
+    const fs::path wf = version_dir / weight_file;
+    if (!fs::is_regular_file(wf)) {
+        throw std::runtime_error("model_repository model " + m.id + ": weight_file not found: " + pathGeneric(wf));
+    }
+    const std::string ext = wf.extension().string();
+    if (ext == ".onnx" || ext == ".ONNX") {
+        if (m.backend != DeviceType::CPU && m.backend != DeviceType::MPS) {
+            throw std::runtime_error("model_repository model " + m.id + ": weight_file .onnx requires backend cpu or mps");
+        }
+        m.onnx_path = pathGeneric(wf);
+        return;
+    }
+    if (ext == ".engine" || ext == ".ENGINE") {
+        if (m.backend != DeviceType::CUDA) {
+            throw std::runtime_error("model_repository model " + m.id + ": weight_file .engine requires tensorrt/cuda backend");
+        }
+        m.engine_path = pathGeneric(wf);
+        return;
+    }
+    if (ext == ".om" || ext == ".OM") {
+        if (m.backend != DeviceType::Ascend) {
+            throw std::runtime_error("model_repository model " + m.id + ": weight_file .om requires ascend backend");
+        }
+        m.om_paths[m.batch_size] = pathGeneric(wf);
+        return;
+    }
+    throw std::runtime_error("model_repository model " + m.id + ": weight_file has unsupported extension: " + ext);
+}
+
+void autoDetectWeights(ModelConfig& m, const fs::path& version_dir, const std::string& weight_file) {
+    applyWeightFile(m, version_dir, weight_file);
+    if (!weight_file.empty()) return;
+
+    if (m.backend == DeviceType::CUDA) {
+        if (!m.engine_path.empty() || !m.onnx_path.empty()) return;
+        std::vector<fs::path> engines;
+        collectExtensionMatches(version_dir, ".engine", engines);
+        if (engines.empty()) {
+            throw std::runtime_error("model_repository model " + m.id + ": no TensorRT .engine in version dir " + pathGeneric(version_dir));
+        }
+        if (engines.size() > 1) {
+            throw std::runtime_error("model_repository model " + m.id + ": multiple .engine files in " + pathGeneric(version_dir)
+                                     + "; set engine_path in config.yaml or use weight_file");
+        }
+        m.engine_path = pathGeneric(engines[0]);
+        return;
+    }
+    if (m.backend == DeviceType::CPU || m.backend == DeviceType::MPS) {
+        if (!m.onnx_path.empty()) return;
+        std::vector<fs::path> onnxes;
+        collectExtensionMatches(version_dir, ".onnx", onnxes);
+        if (onnxes.empty()) {
+            throw std::runtime_error("model_repository model " + m.id + ": no .onnx in version dir " + pathGeneric(version_dir));
+        }
+        if (onnxes.size() > 1) {
+            throw std::runtime_error("model_repository model " + m.id + ": multiple .onnx files in " + pathGeneric(version_dir)
+                                     + "; set onnx_path in config.yaml or use weight_file");
+        }
+        m.onnx_path = pathGeneric(onnxes[0]);
+        return;
+    }
+    if (m.backend == DeviceType::Ascend) {
+        if (!m.om_paths.empty()) return;
+        std::vector<fs::path> oms;
+        collectExtensionMatches(version_dir, ".om", oms);
+        if (oms.empty()) {
+            throw std::runtime_error("model_repository model " + m.id + ": no om_paths in config and no .om in " + pathGeneric(version_dir));
+        }
+        if (oms.size() > 1) {
+            throw std::runtime_error("model_repository model " + m.id + ": multiple .om files in " + pathGeneric(version_dir)
+                                     + "; set om_paths in config.yaml or use weight_file");
+        }
+        m.om_paths[m.batch_size] = pathGeneric(oms[0]);
+        return;
+    }
+    throw std::runtime_error("model_repository model " + m.id + ": unsupported backend for auto weight detection");
+}
+
+void validateRepoModelWeights(const ModelConfig& m) {
+    if (m.backend == DeviceType::CUDA) {
+        if (m.engine_path.empty()) throw std::runtime_error("model_repository model " + m.id + ": engine_path is empty after scan");
+        return;
+    }
+    if (m.backend == DeviceType::CPU || m.backend == DeviceType::MPS) {
+        if (m.onnx_path.empty()) throw std::runtime_error("model_repository model " + m.id + ": onnx_path is empty after scan");
+        return;
+    }
+    if (m.backend == DeviceType::Ascend) {
+        if (m.om_paths.empty()) throw std::runtime_error("model_repository model " + m.id + ": om_paths is empty after scan");
+        return;
+    }
+    throw std::runtime_error("model_repository model " + m.id + ": unsupported backend");
+}
+
+} // namespace
+
+ModelConfig parseModelConfigNode(const YAML::Node& mn) {
+    ModelConfig m;
+    m.id          = mn["id"].as<std::string>();
+    m.version     = parseYOLOVersion(mn["version"].as<std::string>("yolov8"));
+    m.backend     = parseDeviceType(mn["backend"].as<std::string>("tensorrt"));
+    m.engine_path = mn["engine_path"].as<std::string>("");
+    m.onnx_path   = mn["onnx_path"].as<std::string>("");
+    m.batch_size  = mn["batch_size"].as<int>(16);
+    m.conf_thresh = mn["conf_thresh"].as<float>(0.4f);
+    m.nms_thresh  = mn["nms_thresh"].as<float>(0.45f);
+    m.device_id   = mn["device_id"].as<int>(0);
+    m.num_classes = mn["num_classes"].as<int>(80);
+    auto& is      = m.input_shape;
+    is.height     = mn["input_size"][0].as<int>(640);
+    is.width      = mn["input_size"][1].as<int>(640);
+    is.channels   = 3;
+    is.batch      = m.batch_size;
+    if (auto op = mn["om_paths"]) {
+        for (const auto& kv : op) {
+            try {
+                m.om_paths[kv.first.as<int>()] = kv.second.as<std::string>();
+            } catch (const YAML::Exception& e) {
+                throw std::runtime_error("om_paths keys must be integers: " + std::string(e.what()));
+            }
+        }
+    }
+    if (auto cn = mn["class_names"]) {
+        for (const auto& n : cn) m.class_names.push_back(n.as<std::string>());
+    }
+    if (auto cas = mn["cascade"]) {
+        for (const auto& cn : cas) {
+            CascadeConfig cc;
+            cc.model_id      = cn["model_id"].as<std::string>();
+            cc.crop_expand   = cn["crop_expand"].as<float>(0.0f);
+            cc.attribute_key = cn["attribute_key"].as<std::string>("");
+            if (auto tc = cn["trigger_classes"]) {
+                for (const auto& c : tc) cc.trigger_classes.push_back(c.as<int>());
+            }
+            m.cascade.push_back(std::move(cc));
+        }
+    }
+    if (mn["model_type"].as<std::string>("detector") == "classifier") {
+        m.model_type = ModelType::Classifier;
+    }
+    m.buffer_pool_size = mn["buffer_pool_size"].as<int>(4);
+    m.instance_count   = mn["instance_count"].as<int>(1);
+    if (auto ids = mn["device_ids"]) {
+        for (const auto& id : ids) m.device_ids.push_back(id.as<int>());
+        if (static_cast<int>(m.device_ids.size()) != m.instance_count) {
+            throw std::runtime_error(
+                "model '" + m.id + "': device_ids has " +
+                std::to_string(m.device_ids.size()) + " entries but instance_count=" +
+                std::to_string(m.instance_count) +
+                "; sizes must match");
+        }
+    }
+    m.max_queue_delay_us = mn["max_queue_delay_us"].as<int>(10000);
+    if (auto pbs = mn["preferred_batch_sizes"]) {
+        for (const auto& s : pbs) m.preferred_batch_sizes.push_back(s.as<int>());
+    }
+    return m;
+}
+
+std::vector<ModelConfig> scanModelRepository(const std::string& root) {
+    if (root.empty()) return {};
+    const std::filesystem::path repo_root(root);
+    if (!std::filesystem::exists(repo_root) || !std::filesystem::is_directory(repo_root)) {
+        throw std::runtime_error("model_repository is not a directory: " + root);
+    }
+
+    std::vector<std::filesystem::path> model_dirs;
+    for (const auto& ent : std::filesystem::directory_iterator(repo_root)) {
+        if (!ent.is_directory()) continue;
+        const std::string name = ent.path().filename().string();
+        if (name.empty() || name.front() == '.') continue;
+        if (!std::regex_match(name, modelIdPattern())) continue;
+        const std::filesystem::path cfg_path = ent.path() / "config.yaml";
+        if (!std::filesystem::is_regular_file(cfg_path)) continue;
+        model_dirs.push_back(ent.path());
+    }
+    std::sort(model_dirs.begin(), model_dirs.end(), [](const std::filesystem::path& a, const std::filesystem::path& b) {
+        return a.filename().string() < b.filename().string();
+    });
+
+    std::vector<ModelConfig> out;
+    out.reserve(model_dirs.size());
+    for (const std::filesystem::path& model_dir : model_dirs) {
+        const std::string model_id = model_dir.filename().string();
+        YAML::Node mn;
+        try {
+            mn = YAML::LoadFile((model_dir / "config.yaml").generic_string());
+        } catch (const YAML::Exception& e) {
+            throw std::runtime_error("model_repository model " + model_id + ": " + std::string(e.what()));
+        }
+        if (!mn.IsMap()) {
+            throw std::runtime_error("model_repository model " + model_id + ": config.yaml must be a mapping");
+        }
+        if (mn["id"]) {
+            const std::string yaml_id = mn["id"].as<std::string>();
+            if (!yaml_id.empty() && yaml_id != model_id) {
+                throw std::runtime_error("model_repository model " + model_id + ": id in config.yaml must match directory name (got id=" + yaml_id + ")");
+            }
+        }
+        if (!mn["id"] || !mn["id"].IsDefined() || mn["id"].as<std::string>("").empty()) {
+            mn["id"] = YAML::Node(model_id);
+        }
+
+        int         active_version = -1;
+        std::string weight_file;
+        if (mn["active_version"]) active_version = mn["active_version"].as<int>();
+        if (mn["weight_file"]) weight_file = mn["weight_file"].as<std::string>("");
+
+        std::vector<unsigned long> versions;
+        for (const auto& ent : std::filesystem::directory_iterator(model_dir)) {
+            if (!ent.is_directory()) continue;
+            const std::string vname = ent.path().filename().string();
+            if (vname.empty() || vname.front() == '.') continue;
+            bool all_digit = !vname.empty();
+            for (char c : vname) {
+                if (!std::isdigit(static_cast<unsigned char>(c))) {
+                    all_digit = false;
+                    break;
+                }
+            }
+            if (!all_digit) continue;
+            try {
+                const unsigned long v = std::stoul(vname);
+                if (v == 0) continue;
+                versions.push_back(v);
+            } catch (const std::exception&) {
+                continue;
+            }
+        }
+        if (versions.empty()) {
+            throw std::runtime_error("model_repository model " + model_id + ": no numeric version subdirectories");
+        }
+        std::sort(versions.begin(), versions.end());
+        versions.erase(std::unique(versions.begin(), versions.end()), versions.end());
+
+        unsigned long chosen = 0;
+        if (active_version >= 0) {
+            const auto want = static_cast<unsigned long>(active_version);
+            if (std::find(versions.begin(), versions.end(), want) == versions.end()) {
+                throw std::runtime_error("model_repository model " + model_id + ": active_version " + std::to_string(active_version)
+                                         + " not found among version directories");
+            }
+            chosen = want;
+        } else {
+            chosen = *std::max_element(versions.begin(), versions.end());
+        }
+
+        const std::filesystem::path version_dir = model_dir / std::to_string(chosen);
+        if (!std::filesystem::is_directory(version_dir)) {
+            throw std::runtime_error("model_repository model " + model_id + ": missing version directory " + std::to_string(chosen));
+        }
+
+        ModelConfig m = parseModelConfigNode(mn);
+        if (m.id != model_id) {
+            throw std::runtime_error("model_repository model " + model_id + ": internal id mismatch");
+        }
+        resolveRelativeWeightPaths(m, version_dir);
+        autoDetectWeights(m, version_dir, weight_file);
+        validateRepoModelWeights(m);
+        out.push_back(std::move(m));
+    }
+    return out;
+}
 
 YOLOVersion parseYOLOVersion(const std::string& s) {
     if (s == "yolov5" || s == "v5") return YOLOVersion::v5;
@@ -276,68 +590,15 @@ AppConfig loadConfig(const std::string& yaml_path) {
         cfg.server.management_port     = sn["management_port"].as<int>(8080);
         cfg.server.ffmpeg_log_level    = sn["ffmpeg_log_level"].as<std::string>("warning");
         cfg.server.log_level           = sn["log_level"].as<std::string>("info");
+        cfg.server.model_repository    = sn["model_repository"].as<std::string>("");
     }
-    for (const auto& mn : root["models"]) {
-        ModelConfig m;
-        m.id          = mn["id"].as<std::string>();
-        m.version     = parseYOLOVersion(mn["version"].as<std::string>("yolov8"));
-        m.backend     = parseDeviceType(mn["backend"].as<std::string>("tensorrt"));
-        m.engine_path = mn["engine_path"].as<std::string>("");
-        m.onnx_path   = mn["onnx_path"].as<std::string>("");
-        m.batch_size  = mn["batch_size"].as<int>(16);
-        m.conf_thresh = mn["conf_thresh"].as<float>(0.4f);
-        m.nms_thresh  = mn["nms_thresh"].as<float>(0.45f);
-        m.device_id   = mn["device_id"].as<int>(0);
-        m.num_classes = mn["num_classes"].as<int>(80);
-        auto& is      = m.input_shape;
-        is.height     = mn["input_size"][0].as<int>(640);
-        is.width      = mn["input_size"][1].as<int>(640);
-        is.channels   = 3;
-        is.batch      = m.batch_size;
-        if (auto op = mn["om_paths"]) {
-            for (const auto& kv : op) {
-                try {
-                    m.om_paths[kv.first.as<int>()] = kv.second.as<std::string>();
-                } catch (const YAML::Exception& e) {
-                    throw std::runtime_error("om_paths keys must be integers: " + std::string(e.what()));
-                }
-            }
+    if (root["models"]) {
+        if (!root["models"].IsSequence()) {
+            throw std::runtime_error("models must be a YAML sequence");
         }
-        if (auto cn = mn["class_names"]) {
-            for (const auto& n : cn) m.class_names.push_back(n.as<std::string>());
+        for (const auto& mn : root["models"]) {
+            cfg.models.push_back(parseModelConfigNode(mn));
         }
-        if (auto cas = mn["cascade"]) {
-            for (const auto& cn : cas) {
-                CascadeConfig cc;
-                cc.model_id      = cn["model_id"].as<std::string>();
-                cc.crop_expand   = cn["crop_expand"].as<float>(0.0f);
-                cc.attribute_key = cn["attribute_key"].as<std::string>("");
-                if (auto tc = cn["trigger_classes"]) {
-                    for (const auto& c : tc) cc.trigger_classes.push_back(c.as<int>());
-                }
-                m.cascade.push_back(std::move(cc));
-            }
-        }
-        if (mn["model_type"].as<std::string>("detector") == "classifier") {
-            m.model_type = ModelType::Classifier;
-        }
-        m.buffer_pool_size = mn["buffer_pool_size"].as<int>(4);
-        m.instance_count   = mn["instance_count"].as<int>(1);
-        if (auto ids = mn["device_ids"]) {
-            for (const auto& id : ids) m.device_ids.push_back(id.as<int>());
-            if (static_cast<int>(m.device_ids.size()) != m.instance_count) {
-                throw std::runtime_error(
-                    "model '" + m.id + "': device_ids has " +
-                    std::to_string(m.device_ids.size()) + " entries but instance_count=" +
-                    std::to_string(m.instance_count) +
-                    "; sizes must match");
-            }
-        }
-        m.max_queue_delay_us = mn["max_queue_delay_us"].as<int>(10000);
-        if (auto pbs = mn["preferred_batch_sizes"]) {
-            for (const auto& s : pbs) m.preferred_batch_sizes.push_back(s.as<int>());
-        }
-        cfg.models.push_back(std::move(m));
     }
     for (const auto& sn : root["sources"]) {
         if (sn["sample_fps"]) {
@@ -457,6 +718,21 @@ AppConfig loadConfig(const std::string& yaml_path) {
             cfg.frame_archive.minio.connect_timeout_ms = mn["connect_timeout_ms"].as<int>(1500);
             cfg.frame_archive.minio.request_timeout_ms = mn["request_timeout_ms"].as<int>(3000);
             cfg.frame_archive.minio.max_retries        = mn["max_retries"].as<int>(2);
+        }
+    }
+    if (const char* env_repo = std::getenv("INFER_MODEL_REPOSITORY")) {
+        if (env_repo[0] != '\0') cfg.server.model_repository = env_repo;
+    }
+    if (!cfg.server.model_repository.empty()) {
+        std::vector<ModelConfig> repo_models = scanModelRepository(cfg.server.model_repository);
+        std::unordered_set<std::string> seen;
+        for (const auto& m : cfg.models) seen.insert(m.id);
+        for (auto& rm : repo_models) {
+            if (seen.count(rm.id)) {
+                throw std::runtime_error("duplicate model id between root config models and model_repository: " + rm.id);
+            }
+            seen.insert(rm.id);
+            cfg.models.push_back(std::move(rm));
         }
     }
     validateAppConfig(cfg);

@@ -27,7 +27,28 @@ RTSP(source) -> decode.ffmpeg -> (fan-out)
 运行时关键点：
 
 - Pipeline 可编排（DAG）：用 `sources` + `pipelines`（图模板）+ `tasks`（`source_id` + `pipeline_id`）声明拓扑与运行实例，支持分支并行与汇合。
-- 模型配置仍集中在 `models`，由 `infer.engine` stage 引用（`with.model_id`）。
+- 模型清单由根配置里的 `models:` 与可选的 **model repository**（`server.model_repository`）在启动时合并；`infer.engine` 通过 `with.model_id` 引用合并后的 `models[].id`。
+
+### Model repository（可选，类 Triton 目录布局）
+
+当 `server.model_repository` 非空（或环境变量 `INFER_MODEL_REPOSITORY` 非空，**环境变量覆盖 YAML**）时，服务在 `loadConfig` 阶段扫描该目录，并把发现的模型 **追加** 到 `AppConfig::models`。与根配置 `models:` 出现 **相同 `id` 会报错**。
+
+目录约定：
+
+```text
+<repository>/
+  <model_id>/
+    config.yaml          # 与根配置里单条 models[] 同字段（不含顶层 models 键）
+    <version>/           # 仅正整数字符串目录名，例如 1、2
+      *.onnx | *.engine | *.om | ...
+```
+
+- **`<model_id>`** 必须匹配 `^[A-Za-z0-9_-]+$`，且与 `config.yaml` 里的 `id`（若填写）一致。
+- **`active_version`**（可选，整数）：选用该版本子目录；未设置则取 **最大** 版本号。
+- **`weight_file`**（可选，字符串）：所选版本目录内的主权重文件名；未设置则按后端自动探测：TensorRT 取唯一 `.engine`，ONNX 取唯一 `.onnx`，Ascend 在 `om_paths` 未配置时取唯一 `.om`（多文件歧义则报错）。
+- `engine_path` / `onnx_path` / `om_paths` 若为相对路径，则相对于 **所选版本目录** 解析。
+
+**限制**：合并发生在进程启动、`TaskManager::loadAll()` 构建 DAG **之前**；DAG 内的 `InferEngineWorkerStage` 在创建时 **拷贝** `ModelConfig`，因此仅改磁盘上的仓库 **不会** 自动更新已运行任务中的权重；需重启进程或重建任务图（与 Triton 在线切版本不同，除非后续做动态注册表）。
 
 ## 依赖
 

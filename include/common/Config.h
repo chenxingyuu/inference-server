@@ -15,6 +15,9 @@ struct ServerConfig {
     int management_port{8080};          // HTTP management server port
     std::string ffmpeg_log_level{"warning"};  // FFmpeg log threshold (quiet/fatal/error/warning/info/debug/trace)
     std::string log_level{"info"};            // spdlog level (trace/debug/info/warn/error/critical/off)
+    // Triton-style model repository root (<root>/<model_id>/config.yaml + version subdirs). Empty disables scan.
+    // If set, non-empty env INFER_MODEL_REPOSITORY overrides this value after YAML parse.
+    std::string model_repository;
 };
 
 // Model type: detector outputs bounding boxes; classifier outputs class probabilities.
@@ -214,6 +217,10 @@ struct AppConfig {
     const PipelineConfig* findPipeline(const std::string& id) const;
     const TaskConfig* findTask(const std::string& id) const;
 };
+
+// Scan `<root>/<model_id>/config.yaml` and numeric `<root>/<model_id>/<version>/` dirs; merge at load time only.
+// Optional per-model YAML keys: active_version (int), weight_file (string, file inside selected version dir).
+std::vector<ModelConfig> scanModelRepository(const std::string& root);
 
 // Parse config.yaml → AppConfig. Throws std::runtime_error on invalid config.
 AppConfig loadConfig(const std::string& yaml_path);

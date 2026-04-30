@@ -20,6 +20,14 @@ Two sampling modes are available via `tasks[].sampling_mode`:
 8. Publish via `buildPublisher()` factory (see **Publishers** section below).
 9. Background heartbeat emission (`HeartbeatPublisher`) and management endpoints (`ManagementServer`).
 
+## Model registry (YAML + optional repository)
+
+- Root `config.yaml` may declare models under `models:` as today.
+- If `server.model_repository` is set (non-empty), or `INFER_MODEL_REPOSITORY` is set in the environment (the **env var overrides** the YAML value after parse), `loadConfig()` scans that directory and **appends** discovered models into `AppConfig::models` before validation.
+- Layout per model: `<repo>/<model_id>/config.yaml` plus numeric version directories `<repo>/<model_id>/<n>/` holding weights. Optional keys in the per-model `config.yaml`: `active_version` (int), `weight_file` (string). Relative `engine_path` / `onnx_path` / `om_paths` values resolve against the selected version directory.
+- Duplicate `id` between root `models:` and repository models is a **hard error**. `cascade[].model_id` references must resolve after this merge (`validateCascadeModelRefs`).
+- **Hot-swap caveat**: DAG stages snapshot `ModelConfig` at graph build time (`StageFactory` → `InferEngineWorkerStage`); changing files on disk does not update an already-built graph without a process restart or explicit rebuild of executors.
+
 ## Publishers
 
 Result publishing is configurable via the `publishers:` YAML block. All publishers implement `IPublisher` and are wired by `buildPublisher()` in `main.cpp`.
