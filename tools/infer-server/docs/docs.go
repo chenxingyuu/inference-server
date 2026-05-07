@@ -67,6 +67,11 @@ const docTemplate = `{
         },
         "/models": {
             "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -84,6 +89,12 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "engine unreachable",
                         "schema": {
@@ -93,6 +104,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "consumes": [
                     "application/json"
                 ],
@@ -127,6 +143,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "engine unreachable",
                         "schema": {
@@ -138,6 +160,11 @@ const docTemplate = `{
         },
         "/models/{id}": {
             "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -159,6 +186,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/infer-server.OkResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     },
                     "404": {
@@ -184,6 +217,11 @@ const docTemplate = `{
         },
         "/pipelines": {
             "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -201,6 +239,12 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "engine unreachable",
                         "schema": {
@@ -210,6 +254,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "consumes": [
                     "application/json"
                 ],
@@ -244,6 +293,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "engine unreachable",
                         "schema": {
@@ -255,6 +310,11 @@ const docTemplate = `{
         },
         "/pipelines/{id}": {
             "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -276,6 +336,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/infer-server.OkResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     },
                     "404": {
@@ -301,6 +367,11 @@ const docTemplate = `{
         },
         "/sources": {
             "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -318,6 +389,12 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "engine unreachable",
                         "schema": {
@@ -327,6 +404,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "consumes": [
                     "application/json"
                 ],
@@ -361,6 +443,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "engine unreachable",
                         "schema": {
@@ -372,6 +460,11 @@ const docTemplate = `{
         },
         "/sources/{id}": {
             "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -393,6 +486,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/infer-server.OkResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     },
                     "404": {
@@ -418,6 +517,11 @@ const docTemplate = `{
         },
         "/tasks": {
             "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -435,6 +539,12 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "engine unreachable",
                         "schema": {
@@ -444,6 +554,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "description": "Creates a task binding a source to a pipeline. Starts in stopped state; use POST /tasks/{id}/start to activate.",
                 "consumes": [
                     "application/json"
@@ -479,6 +594,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "engine unreachable",
                         "schema": {
@@ -490,6 +611,11 @@ const docTemplate = `{
         },
         "/tasks/{id}": {
             "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -513,6 +639,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/infer-server.OkResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -530,6 +662,11 @@ const docTemplate = `{
         },
         "/tasks/{id}/{action}": {
             "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -564,6 +701,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/infer-server.OkResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -588,6 +731,17 @@ const docTemplate = `{
                 "to"
             ],
             "properties": {
+                "capacity": {
+                    "type": "integer"
+                },
+                "drop_policy": {
+                    "type": "string",
+                    "enum": [
+                        "block",
+                        "drop_oldest",
+                        "drop_newest"
+                    ]
+                },
                 "from": {
                     "type": "string"
                 },
@@ -671,6 +825,18 @@ const docTemplate = `{
                 "batch_size": {
                     "type": "integer"
                 },
+                "class_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "conf_thresh": {
+                    "type": "number"
+                },
+                "device_id": {
+                    "type": "integer"
+                },
                 "engine_path": {
                     "type": "string"
                 },
@@ -680,8 +846,42 @@ const docTemplate = `{
                 "input_shape": {
                     "$ref": "#/definitions/infer-server.InputShape"
                 },
+                "instance_count": {
+                    "type": "integer"
+                },
+                "max_queue_delay_us": {
+                    "type": "integer"
+                },
+                "model_type": {
+                    "type": "string",
+                    "enum": [
+                        "detector",
+                        "classifier"
+                    ]
+                },
+                "nms_thresh": {
+                    "type": "number"
+                },
+                "num_classes": {
+                    "type": "integer"
+                },
                 "onnx_path": {
                     "type": "string"
+                },
+                "preferred_batch_sizes": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "version": {
+                    "type": "string",
+                    "enum": [
+                        "v5",
+                        "v8",
+                        "v11",
+                        "v26"
+                    ]
                 }
             }
         },
@@ -722,11 +922,36 @@ const docTemplate = `{
                 }
             }
         },
+        "infer-server.PipelineEdgeInfo": {
+            "type": "object",
+            "properties": {
+                "capacity": {
+                    "type": "integer"
+                },
+                "drop_policy": {
+                    "type": "string",
+                    "enum": [
+                        "block",
+                        "drop_oldest",
+                        "drop_newest"
+                    ]
+                },
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
         "infer-server.PipelineInfo": {
             "type": "object",
             "properties": {
-                "edge_count": {
-                    "type": "integer"
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/infer-server.PipelineEdgeInfo"
+                    }
                 },
                 "id": {
                     "type": "string"
@@ -734,6 +959,23 @@ const docTemplate = `{
                 "nodes": {
                     "type": "array",
                     "items": {
+                        "$ref": "#/definitions/infer-server.PipelineNodeInfo"
+                    }
+                }
+            }
+        },
+        "infer-server.PipelineNodeInfo": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "with": {
+                    "type": "object",
+                    "additionalProperties": {
                         "type": "string"
                     }
                 }
@@ -756,6 +998,12 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "max_reconnect_delay_ms": {
+                    "type": "integer"
+                },
+                "open_timeout_ms": {
+                    "type": "integer"
+                },
+                "read_timeout_ms": {
                     "type": "integer"
                 },
                 "reconnect_delay_ms": {
@@ -819,6 +1067,9 @@ const docTemplate = `{
                 "source_id"
             ],
             "properties": {
+                "ascend_device_id": {
+                    "type": "integer"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -828,8 +1079,21 @@ const docTemplate = `{
                 "sample_fps": {
                     "type": "number"
                 },
+                "sampling_mode": {
+                    "type": "string",
+                    "enum": [
+                        "frame_count",
+                        "time_based"
+                    ]
+                },
                 "source_id": {
                     "type": "string"
+                },
+                "use_ascend_dvpp": {
+                    "type": "boolean"
+                },
+                "use_hwdec": {
+                    "type": "boolean"
                 }
             }
         },
@@ -848,6 +1112,14 @@ const docTemplate = `{
                 }
             }
         }
+    },
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "description": "Type \"Bearer\" followed by a space and your API key.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
     }
 }`
 
@@ -858,7 +1130,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "infer-server Management API",
-	Description:      "HTTP management API. All write operations are forwarded to the C++ engine via Unix domain socket.",
+	Description:      "HTTP management API. All write operations are forwarded to the C++ engine via Unix domain socket.\n\nProtected endpoints require the header: Authorization: Bearer <INFER_API_KEY>",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

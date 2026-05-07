@@ -16,13 +16,30 @@ type SourceCreate struct {
 	MaxReconnectDelayMs  int    `json:"max_reconnect_delay_ms,omitempty"`
 	DegradedThreshold    int    `json:"degraded_threshold,omitempty"`
 	MaxReconnectAttempts int    `json:"max_reconnect_attempts,omitempty"`
+	OpenTimeoutMs        int    `json:"open_timeout_ms,omitempty"`
+	ReadTimeoutMs        int    `json:"read_timeout_ms,omitempty"`
+}
+
+// PipelineEdgeInfo describes a single edge in a pipeline.
+type PipelineEdgeInfo struct {
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Capacity   int    `json:"capacity"`
+	DropPolicy string `json:"drop_policy" enums:"block,drop_oldest,drop_newest"`
+}
+
+// PipelineNodeInfo describes a single node in a pipeline.
+type PipelineNodeInfo struct {
+	ID   string            `json:"id"`
+	Type string            `json:"type"`
+	With map[string]string `json:"with,omitempty"`
 }
 
 // PipelineInfo describes a registered pipeline.
 type PipelineInfo struct {
-	ID        string   `json:"id"`
-	Nodes     []string `json:"nodes"`
-	EdgeCount int      `json:"edge_count"`
+	ID    string             `json:"id"`
+	Nodes []PipelineNodeInfo `json:"nodes"`
+	Edges []PipelineEdgeInfo `json:"edges"`
 }
 
 // StageConfig is a single node in a pipeline.
@@ -34,8 +51,10 @@ type StageConfig struct {
 
 // EdgeConfig connects two nodes in a pipeline.
 type EdgeConfig struct {
-	From string `json:"from" binding:"required"`
-	To   string `json:"to"   binding:"required"`
+	From       string `json:"from"                  binding:"required"`
+	To         string `json:"to"                    binding:"required"`
+	Capacity   int    `json:"capacity,omitempty"`
+	DropPolicy string `json:"drop_policy,omitempty" enums:"block,drop_oldest,drop_newest"`
 }
 
 // PipelineCreate is the request body for POST /pipelines.
@@ -64,12 +83,22 @@ type InputShape struct {
 
 // ModelLoad is the request body for POST /models.
 type ModelLoad struct {
-	ID         string     `json:"id"                       binding:"required"`
-	Backend    string     `json:"backend,omitempty"        enums:"cpu,trt,ascend"`
-	OnnxPath   string     `json:"onnx_path,omitempty"`
-	EnginePath string     `json:"engine_path,omitempty"`
-	BatchSize  int        `json:"batch_size,omitempty"`
-	InputShape InputShape `json:"input_shape,omitempty"`
+	ID                  string     `json:"id"                              binding:"required"`
+	Backend             string     `json:"backend,omitempty"               enums:"cpu,trt,ascend"`
+	Version             string     `json:"version,omitempty"               enums:"v5,v8,v11,v26"`
+	ModelType           string     `json:"model_type,omitempty"            enums:"detector,classifier"`
+	OnnxPath            string     `json:"onnx_path,omitempty"`
+	EnginePath          string     `json:"engine_path,omitempty"`
+	BatchSize           int        `json:"batch_size,omitempty"`
+	InputShape          InputShape `json:"input_shape,omitempty"`
+	ConfThresh          float64    `json:"conf_thresh,omitempty"`
+	NmsThresh           float64    `json:"nms_thresh,omitempty"`
+	DeviceID            int        `json:"device_id,omitempty"`
+	NumClasses          int        `json:"num_classes,omitempty"`
+	ClassNames          []string   `json:"class_names,omitempty"`
+	InstanceCount       int        `json:"instance_count,omitempty"`
+	PreferredBatchSizes []int      `json:"preferred_batch_sizes,omitempty"`
+	MaxQueueDelayUs     int        `json:"max_queue_delay_us,omitempty"`
 }
 
 // TaskInfo describes a task's current state.
@@ -80,10 +109,14 @@ type TaskInfo struct {
 
 // TaskCreate is the request body for POST /tasks.
 type TaskCreate struct {
-	ID         string  `json:"id"          binding:"required"`
-	SourceID   string  `json:"source_id"   binding:"required"`
-	PipelineID string  `json:"pipeline_id" binding:"required"`
-	SampleFPS  float64 `json:"sample_fps,omitempty"`
+	ID              string  `json:"id"                         binding:"required"`
+	SourceID        string  `json:"source_id"                  binding:"required"`
+	PipelineID      string  `json:"pipeline_id"                binding:"required"`
+	SampleFPS       float64 `json:"sample_fps,omitempty"`
+	SamplingMode    string  `json:"sampling_mode,omitempty"    enums:"frame_count,time_based"`
+	UseHwdec        bool    `json:"use_hwdec,omitempty"`
+	UseAscendDvpp   bool    `json:"use_ascend_dvpp,omitempty"`
+	AscendDeviceID  int     `json:"ascend_device_id,omitempty"`
 }
 
 // OkResponse is returned on successful write operations.

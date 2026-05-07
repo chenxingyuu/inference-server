@@ -15,10 +15,23 @@ struct SourceInfo {
     int         reconnect_count{0};
 };
 
+struct PipelineNodeInfo {
+    std::string                          id;
+    std::string                          type;
+    std::map<std::string, std::string>   with;
+};
+
+struct PipelineEdgeInfo {
+    std::string from;
+    std::string to;
+    int         capacity{256};
+    std::string drop_policy;  // "block" | "drop_oldest" | "drop_newest"
+};
+
 struct PipelineInfo {
-    std::string              id;
-    std::vector<std::string> nodes;
-    int                      edge_count{0};
+    std::string                   id;
+    std::vector<PipelineNodeInfo> nodes;
+    std::vector<PipelineEdgeInfo> edges;
 };
 
 struct ModelInfo {

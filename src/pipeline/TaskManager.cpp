@@ -211,8 +211,25 @@ std::vector<PipelineInfo> TaskManager::listPipelines() const {
     for (const auto& p : cfg_.pipelines) {
         PipelineInfo info;
         info.id = p.id;
-        info.edge_count = static_cast<int>(p.edges.size());
-        for (const auto& node : p.nodes) info.nodes.push_back(node.id);
+        for (const auto& node : p.nodes) {
+            PipelineNodeInfo ni;
+            ni.id   = node.id;
+            ni.type = node.type;
+            ni.with = node.with;
+            info.nodes.push_back(std::move(ni));
+        }
+        for (const auto& e : p.edges) {
+            PipelineEdgeInfo ei;
+            ei.from        = e.from;
+            ei.to          = e.to;
+            ei.capacity    = e.capacity;
+            switch (e.drop_policy) {
+                case EdgeDropPolicy::DropOldest: ei.drop_policy = "drop_oldest"; break;
+                case EdgeDropPolicy::DropNewest: ei.drop_policy = "drop_newest"; break;
+                default:                         ei.drop_policy = "block";       break;
+            }
+            info.edges.push_back(std::move(ei));
+        }
         out.push_back(std::move(info));
     }
     return out;

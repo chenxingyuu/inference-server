@@ -3,7 +3,14 @@
 //	@title			infer-server Management API
 //	@version		1.0
 //	@description	HTTP management API. All write operations are forwarded to the C++ engine via Unix domain socket.
+//	@description
+//	@description	Protected endpoints require the header: Authorization: Bearer <INFER_API_KEY>
 //	@BasePath		/
+//
+//	@securityDefinitions.apikey	ApiKeyAuth
+//	@in							header
+//	@name						Authorization
+//	@description				Type "Bearer" followed by a space and your API key.
 package main
 
 import (
@@ -13,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -24,6 +32,7 @@ import (
 var (
 	socketPath = envOr("INFER_SOCKET", "/var/run/infer.sock")
 	listenAddr = envOr("INFER_SERVER_ADDR", ":8080")
+	apiKey     = os.Getenv("INFER_API_KEY")
 )
 
 func envOr(key, def string) string {
@@ -31,6 +40,21 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func authMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bearer := c.GetHeader("Authorization")
+		if !strings.HasPrefix(bearer, "Bearer ") || strings.TrimPrefix(bearer, "Bearer ") != apiKey {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, ErrorResponse{
+				Status:  "error",
+				Code:    "unauthorized",
+				Message: "missing or invalid API key",
+			})
+			return
+		}
+		c.Next()
+	}
 }
 
 func call(cmd map[string]any) (map[string]any, error) {
@@ -103,7 +127,9 @@ func handleMetrics(c *gin.Context) {
 //	@Summary	List sources
 //	@Tags		sources
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Success	200	{array}		SourceInfo
+//	@Failure	401	{object}	ErrorResponse
 //	@Failure	503	{string}	string	"engine unreachable"
 //	@Router		/sources [get]
 func handleListSources(c *gin.Context) {
@@ -121,9 +147,11 @@ func handleListSources(c *gin.Context) {
 //	@Tags		sources
 //	@Accept		json
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Param		body	body		SourceCreate	true	"Source definition"
 //	@Success	201		{object}	OkResponse
 //	@Failure	400		{object}	ErrorResponse
+//	@Failure	401		{object}	ErrorResponse
 //	@Failure	503		{string}	string	"engine unreachable"
 //	@Router		/sources [post]
 func handleAddSource(c *gin.Context) {
@@ -135,8 +163,10 @@ func handleAddSource(c *gin.Context) {
 //	@Summary	Remove a source
 //	@Tags		sources
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Param		id	path		string	true	"Source ID"
 //	@Success	200	{object}	OkResponse
+//	@Failure	401	{object}	ErrorResponse
 //	@Failure	404	{object}	ErrorResponse
 //	@Failure	409	{object}	ErrorResponse	"source is in use by a task"
 //	@Failure	503	{string}	string			"engine unreachable"
@@ -150,7 +180,9 @@ func handleRemoveSource(c *gin.Context) {
 //	@Summary	List pipelines
 //	@Tags		pipelines
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Success	200	{array}		PipelineInfo
+//	@Failure	401	{object}	ErrorResponse
 //	@Failure	503	{string}	string	"engine unreachable"
 //	@Router		/pipelines [get]
 func handleListPipelines(c *gin.Context) {
@@ -168,9 +200,11 @@ func handleListPipelines(c *gin.Context) {
 //	@Tags		pipelines
 //	@Accept		json
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Param		body	body		PipelineCreate	true	"Pipeline definition"
 //	@Success	201		{object}	OkResponse
 //	@Failure	400		{object}	ErrorResponse
+//	@Failure	401		{object}	ErrorResponse
 //	@Failure	503		{string}	string	"engine unreachable"
 //	@Router		/pipelines [post]
 func handleAddPipeline(c *gin.Context) {
@@ -182,8 +216,10 @@ func handleAddPipeline(c *gin.Context) {
 //	@Summary	Remove a pipeline
 //	@Tags		pipelines
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Param		id	path		string	true	"Pipeline ID"
 //	@Success	200	{object}	OkResponse
+//	@Failure	401	{object}	ErrorResponse
 //	@Failure	404	{object}	ErrorResponse
 //	@Failure	409	{object}	ErrorResponse	"pipeline is in use by a task"
 //	@Failure	503	{string}	string			"engine unreachable"
@@ -197,7 +233,9 @@ func handleRemovePipeline(c *gin.Context) {
 //	@Summary	List loaded models
 //	@Tags		models
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Success	200	{array}		ModelInfo
+//	@Failure	401	{object}	ErrorResponse
 //	@Failure	503	{string}	string	"engine unreachable"
 //	@Router		/models [get]
 func handleListModels(c *gin.Context) {
@@ -215,9 +253,11 @@ func handleListModels(c *gin.Context) {
 //	@Tags		models
 //	@Accept		json
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Param		body	body		ModelLoad	true	"Model definition"
 //	@Success	201		{object}	OkResponse
 //	@Failure	400		{object}	ErrorResponse
+//	@Failure	401		{object}	ErrorResponse
 //	@Failure	503		{string}	string	"engine unreachable"
 //	@Router		/models [post]
 func handleLoadModel(c *gin.Context) {
@@ -229,8 +269,10 @@ func handleLoadModel(c *gin.Context) {
 //	@Summary	Unload a model
 //	@Tags		models
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Param		id	path		string	true	"Model ID"
 //	@Success	200	{object}	OkResponse
+//	@Failure	401	{object}	ErrorResponse
 //	@Failure	404	{object}	ErrorResponse
 //	@Failure	409	{object}	ErrorResponse	"model is in use by a running task"
 //	@Failure	503	{string}	string			"engine unreachable"
@@ -244,7 +286,9 @@ func handleUnloadModel(c *gin.Context) {
 //	@Summary	List tasks
 //	@Tags		tasks
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Success	200	{array}		TaskInfo
+//	@Failure	401	{object}	ErrorResponse
 //	@Failure	503	{string}	string	"engine unreachable"
 //	@Router		/tasks [get]
 func handleListTasks(c *gin.Context) {
@@ -263,9 +307,11 @@ func handleListTasks(c *gin.Context) {
 //	@Tags			tasks
 //	@Accept			json
 //	@Produce		json
+//	@Security		ApiKeyAuth
 //	@Param			body	body		TaskCreate	true	"Task definition"
 //	@Success		201		{object}	OkResponse
 //	@Failure		400		{object}	ErrorResponse
+//	@Failure		401		{object}	ErrorResponse
 //	@Failure		503		{string}	string	"engine unreachable"
 //	@Router			/tasks [post]
 func handleAddTask(c *gin.Context) {
@@ -277,8 +323,10 @@ func handleAddTask(c *gin.Context) {
 //	@Summary	Remove a task
 //	@Tags		tasks
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Param		id	path		string	true	"Task ID"
 //	@Success	200	{object}	OkResponse
+//	@Failure	401	{object}	ErrorResponse
 //	@Failure	404	{object}	ErrorResponse
 //	@Failure	503	{string}	string	"engine unreachable"
 //	@Router		/tasks/{id} [delete]
@@ -291,9 +339,11 @@ func handleRemoveTask(c *gin.Context) {
 //	@Summary	Start or stop a task
 //	@Tags		tasks
 //	@Produce	json
+//	@Security	ApiKeyAuth
 //	@Param		id		path		string	true	"Task ID"
 //	@Param		action	path		string	true	"Action"	Enums(start, stop)
 //	@Success	200		{object}	OkResponse
+//	@Failure	401		{object}	ErrorResponse
 //	@Failure	404		{object}	ErrorResponse
 //	@Failure	503		{string}	string	"engine unreachable"
 //	@Router		/tasks/{id}/{action} [post]
@@ -354,29 +404,39 @@ func callDelete(c *gin.Context, cmd string) {
 }
 
 func main() {
+	if apiKey == "" {
+		fmt.Fprintln(os.Stderr, "WARNING: INFER_API_KEY not set; management endpoints are unprotected")
+	}
+
 	r := gin.Default()
 
+	// Public: health probe, metrics scrape, API docs.
 	r.GET("/healthz", handleHealthz)
 	r.GET("/metrics", handleMetrics)
-
-	r.GET("/sources", handleListSources)
-	r.POST("/sources", handleAddSource)
-	r.DELETE("/sources/:id", handleRemoveSource)
-
-	r.GET("/pipelines", handleListPipelines)
-	r.POST("/pipelines", handleAddPipeline)
-	r.DELETE("/pipelines/:id", handleRemovePipeline)
-
-	r.GET("/models", handleListModels)
-	r.POST("/models", handleLoadModel)
-	r.DELETE("/models/:id", handleUnloadModel)
-
-	r.GET("/tasks", handleListTasks)
-	r.POST("/tasks", handleAddTask)
-	r.DELETE("/tasks/:id", handleRemoveTask)
-	r.POST("/tasks/:id/:action", handleTaskAction)
-
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// Protected management endpoints.
+	api := r.Group("/")
+	if apiKey != "" {
+		api.Use(authMiddleware())
+	}
+
+	api.GET("/sources", handleListSources)
+	api.POST("/sources", handleAddSource)
+	api.DELETE("/sources/:id", handleRemoveSource)
+
+	api.GET("/pipelines", handleListPipelines)
+	api.POST("/pipelines", handleAddPipeline)
+	api.DELETE("/pipelines/:id", handleRemovePipeline)
+
+	api.GET("/models", handleListModels)
+	api.POST("/models", handleLoadModel)
+	api.DELETE("/models/:id", handleUnloadModel)
+
+	api.GET("/tasks", handleListTasks)
+	api.POST("/tasks", handleAddTask)
+	api.DELETE("/tasks/:id", handleRemoveTask)
+	api.POST("/tasks/:id/:action", handleTaskAction)
 
 	fmt.Printf("infer-server listening on %s (socket: %s)\n", listenAddr, socketPath)
 	if err := r.Run(listenAddr); err != nil {

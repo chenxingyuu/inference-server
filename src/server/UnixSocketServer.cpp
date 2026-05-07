@@ -164,7 +164,14 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
     if (cmd == "list_pipelines") {
         json arr = json::array();
         for (const auto& p : task_manager_.listPipelines()) {
-            arr.push_back({{"id", p.id}, {"nodes", p.nodes}, {"edge_count", p.edge_count}});
+            json nodes = json::array();
+            for (const auto& n : p.nodes)
+                nodes.push_back({{"id", n.id}, {"type", n.type}, {"with", n.with}});
+            json edges = json::array();
+            for (const auto& e : p.edges)
+                edges.push_back({{"from", e.from}, {"to", e.to},
+                                  {"capacity", e.capacity}, {"drop_policy", e.drop_policy}});
+            arr.push_back({{"id", p.id}, {"nodes", nodes}, {"edges", edges}});
         }
         return json({{"status", "ok"}, {"data", arr}}).dump();
     }

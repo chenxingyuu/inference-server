@@ -2,6 +2,14 @@ basePath: /
 definitions:
   infer-server.EdgeConfig:
     properties:
+      capacity:
+        type: integer
+      drop_policy:
+        enum:
+        - block
+        - drop_oldest
+        - drop_newest
+        type: string
       from:
         type: string
       to:
@@ -60,13 +68,45 @@ definitions:
         type: string
       batch_size:
         type: integer
+      class_names:
+        items:
+          type: string
+        type: array
+      conf_thresh:
+        type: number
+      device_id:
+        type: integer
       engine_path:
         type: string
       id:
         type: string
       input_shape:
         $ref: '#/definitions/infer-server.InputShape'
+      instance_count:
+        type: integer
+      max_queue_delay_us:
+        type: integer
+      model_type:
+        enum:
+        - detector
+        - classifier
+        type: string
+      nms_thresh:
+        type: number
+      num_classes:
+        type: integer
       onnx_path:
+        type: string
+      preferred_batch_sizes:
+        items:
+          type: integer
+        type: array
+      version:
+        enum:
+        - v5
+        - v8
+        - v11
+        - v26
         type: string
     required:
     - id
@@ -96,16 +136,44 @@ definitions:
     - id
     - nodes
     type: object
+  infer-server.PipelineEdgeInfo:
+    properties:
+      capacity:
+        type: integer
+      drop_policy:
+        enum:
+        - block
+        - drop_oldest
+        - drop_newest
+        type: string
+      from:
+        type: string
+      to:
+        type: string
+    type: object
   infer-server.PipelineInfo:
     properties:
-      edge_count:
-        type: integer
+      edges:
+        items:
+          $ref: '#/definitions/infer-server.PipelineEdgeInfo'
+        type: array
       id:
         type: string
       nodes:
         items:
-          type: string
+          $ref: '#/definitions/infer-server.PipelineNodeInfo'
         type: array
+    type: object
+  infer-server.PipelineNodeInfo:
+    properties:
+      id:
+        type: string
+      type:
+        type: string
+      with:
+        additionalProperties:
+          type: string
+        type: object
     type: object
   infer-server.SourceCreate:
     properties:
@@ -116,6 +184,10 @@ definitions:
       max_reconnect_attempts:
         type: integer
       max_reconnect_delay_ms:
+        type: integer
+      open_timeout_ms:
+        type: integer
+      read_timeout_ms:
         type: integer
       reconnect_delay_ms:
         type: integer
@@ -158,14 +230,25 @@ definitions:
     type: object
   infer-server.TaskCreate:
     properties:
+      ascend_device_id:
+        type: integer
       id:
         type: string
       pipeline_id:
         type: string
       sample_fps:
         type: number
+      sampling_mode:
+        enum:
+        - frame_count
+        - time_based
+        type: string
       source_id:
         type: string
+      use_ascend_dvpp:
+        type: boolean
+      use_hwdec:
+        type: boolean
     required:
     - id
     - pipeline_id
@@ -183,8 +266,10 @@ definitions:
     type: object
 info:
   contact: {}
-  description: HTTP management API. All write operations are forwarded to the C++
-    engine via Unix domain socket.
+  description: |-
+    HTTP management API. All write operations are forwarded to the C++ engine via Unix domain socket.
+
+    Protected endpoints require the header: Authorization: Bearer <INFER_API_KEY>
   title: infer-server Management API
   version: "1.0"
 paths:
@@ -231,10 +316,16 @@ paths:
             items:
               $ref: '#/definitions/infer-server.ModelInfo'
             type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: List loaded models
       tags:
       - models
@@ -259,10 +350,16 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: Load a model
       tags:
       - models
@@ -281,6 +378,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/infer-server.OkResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -293,6 +394,8 @@ paths:
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: Unload a model
       tags:
       - models
@@ -307,10 +410,16 @@ paths:
             items:
               $ref: '#/definitions/infer-server.PipelineInfo'
             type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: List pipelines
       tags:
       - pipelines
@@ -335,10 +444,16 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: Add a pipeline
       tags:
       - pipelines
@@ -357,6 +472,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/infer-server.OkResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -369,6 +488,8 @@ paths:
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: Remove a pipeline
       tags:
       - pipelines
@@ -383,10 +504,16 @@ paths:
             items:
               $ref: '#/definitions/infer-server.SourceInfo'
             type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: List sources
       tags:
       - sources
@@ -411,10 +538,16 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: Add a source
       tags:
       - sources
@@ -433,6 +566,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/infer-server.OkResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -445,6 +582,8 @@ paths:
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: Remove a source
       tags:
       - sources
@@ -459,10 +598,16 @@ paths:
             items:
               $ref: '#/definitions/infer-server.TaskInfo'
             type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: List tasks
       tags:
       - tasks
@@ -489,10 +634,16 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: Add a task
       tags:
       - tasks
@@ -511,6 +662,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/infer-server.OkResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -519,6 +674,8 @@ paths:
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: Remove a task
       tags:
       - tasks
@@ -545,6 +702,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/infer-server.OkResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -553,7 +714,15 @@ paths:
           description: engine unreachable
           schema:
             type: string
+      security:
+      - ApiKeyAuth: []
       summary: Start or stop a task
       tags:
       - tasks
+securityDefinitions:
+  ApiKeyAuth:
+    description: Type "Bearer" followed by a space and your API key.
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
