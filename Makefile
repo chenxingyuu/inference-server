@@ -1,7 +1,7 @@
 .PHONY: help \
 	configure-cpu configure-gpu configure-npu configure-tests \
 	build build-cpu build-gpu build-npu build-tests \
-	build-go \
+	build-go swagger \
 	run run-cpu run-gpu run-npu \
 	test validate clean \
 	docker-build-cpu docker-build-gpu docker-build-npu docker-build-infer-server \
@@ -12,7 +12,9 @@ BUILD_DIR ?= build
 BUILD_TYPE ?= Release
 CONFIG ?= config/config.cpu.yaml
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-GO ?= go
+GO   ?= $(shell which go 2>/dev/null || ls $(HOME)/sdk/go*/bin/go 2>/dev/null | sort -V | tail -1)
+SWAG ?= $(shell which swag 2>/dev/null || echo $(HOME)/go/bin/swag)
+GODIR := $(dir $(GO))
 
 INFER_BIN := ./$(BUILD_DIR)/infer_server
 
@@ -104,7 +106,10 @@ validate:
 clean:
 	rm -rf $(BUILD_DIR)
 
-build-go:
+swagger:
+	cd tools && PATH="$(GODIR):$$PATH" $(SWAG) init -g infer-server/main.go -o infer-server/docs --parseDependency
+
+build-go: swagger
 	cd tools && $(GO) build -o bin/infer-ctl ./infer-ctl/
 	cd tools && $(GO) build -o bin/infer-server ./infer-server/
 

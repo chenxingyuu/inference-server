@@ -1,0 +1,560 @@
+basePath: /
+definitions:
+  infer-server.EdgeConfig:
+    properties:
+      from:
+        type: string
+      to:
+        type: string
+    required:
+    - from
+    - to
+    type: object
+  infer-server.ErrorResponse:
+    properties:
+      code:
+        example: in_use
+        type: string
+      message:
+        example: 'source in use by a task: cam0'
+        type: string
+      status:
+        example: error
+        type: string
+    type: object
+  infer-server.InputShape:
+    properties:
+      c:
+        example: 3
+        type: integer
+      h:
+        example: 640
+        type: integer
+      w:
+        example: 640
+        type: integer
+    type: object
+  infer-server.ModelInfo:
+    properties:
+      backend:
+        type: string
+      batch_size:
+        type: integer
+      id:
+        type: string
+      input_shape:
+        example: 3x640x640
+        type: string
+      instance_count:
+        type: integer
+      version:
+        type: string
+    type: object
+  infer-server.ModelLoad:
+    properties:
+      backend:
+        enum:
+        - cpu
+        - trt
+        - ascend
+        type: string
+      batch_size:
+        type: integer
+      engine_path:
+        type: string
+      id:
+        type: string
+      input_shape:
+        $ref: '#/definitions/infer-server.InputShape'
+      onnx_path:
+        type: string
+    required:
+    - id
+    type: object
+  infer-server.OkResponse:
+    properties:
+      id:
+        example: cam0
+        type: string
+      status:
+        example: ok
+        type: string
+    type: object
+  infer-server.PipelineCreate:
+    properties:
+      edges:
+        items:
+          $ref: '#/definitions/infer-server.EdgeConfig'
+        type: array
+      id:
+        type: string
+      nodes:
+        items:
+          $ref: '#/definitions/infer-server.StageConfig'
+        type: array
+    required:
+    - id
+    - nodes
+    type: object
+  infer-server.PipelineInfo:
+    properties:
+      edge_count:
+        type: integer
+      id:
+        type: string
+      nodes:
+        items:
+          type: string
+        type: array
+    type: object
+  infer-server.SourceCreate:
+    properties:
+      degraded_threshold:
+        type: integer
+      id:
+        type: string
+      max_reconnect_attempts:
+        type: integer
+      max_reconnect_delay_ms:
+        type: integer
+      reconnect_delay_ms:
+        type: integer
+      url:
+        type: string
+    required:
+    - id
+    - url
+    type: object
+  infer-server.SourceInfo:
+    properties:
+      id:
+        type: string
+      reconnect_count:
+        type: integer
+      state:
+        enum:
+        - CONNECTING
+        - STREAMING
+        - RECONNECTING
+        - DEGRADED
+        - STOPPED
+        type: string
+      url:
+        type: string
+    type: object
+  infer-server.StageConfig:
+    properties:
+      id:
+        type: string
+      type:
+        type: string
+      with:
+        additionalProperties:
+          type: string
+        type: object
+    required:
+    - id
+    - type
+    type: object
+  infer-server.TaskCreate:
+    properties:
+      id:
+        type: string
+      pipeline_id:
+        type: string
+      sample_fps:
+        type: number
+      source_id:
+        type: string
+    required:
+    - id
+    - pipeline_id
+    - source_id
+    type: object
+  infer-server.TaskInfo:
+    properties:
+      id:
+        type: string
+      state:
+        enum:
+        - running
+        - stopped
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: HTTP management API. All write operations are forwarded to the C++
+    engine via Unix domain socket.
+  title: infer-server Management API
+  version: "1.0"
+paths:
+  /healthz:
+    get:
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Health check
+      tags:
+      - health
+  /metrics:
+    get:
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: Prometheus text format
+          schema:
+            type: string
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Prometheus metrics
+      tags:
+      - health
+  /models:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/infer-server.ModelInfo'
+            type: array
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: List loaded models
+      tags:
+      - models
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Model definition
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/infer-server.ModelLoad'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Load a model
+      tags:
+      - models
+  /models/{id}:
+    delete:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "409":
+          description: model is in use by a running task
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Unload a model
+      tags:
+      - models
+  /pipelines:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/infer-server.PipelineInfo'
+            type: array
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: List pipelines
+      tags:
+      - pipelines
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pipeline definition
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/infer-server.PipelineCreate'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Add a pipeline
+      tags:
+      - pipelines
+  /pipelines/{id}:
+    delete:
+      parameters:
+      - description: Pipeline ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "409":
+          description: pipeline is in use by a task
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Remove a pipeline
+      tags:
+      - pipelines
+  /sources:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/infer-server.SourceInfo'
+            type: array
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: List sources
+      tags:
+      - sources
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Source definition
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/infer-server.SourceCreate'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Add a source
+      tags:
+      - sources
+  /sources/{id}:
+    delete:
+      parameters:
+      - description: Source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "409":
+          description: source is in use by a task
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Remove a source
+      tags:
+      - sources
+  /tasks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/infer-server.TaskInfo'
+            type: array
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: List tasks
+      tags:
+      - tasks
+    post:
+      consumes:
+      - application/json
+      description: Creates a task binding a source to a pipeline. Starts in stopped
+        state; use POST /tasks/{id}/start to activate.
+      parameters:
+      - description: Task definition
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/infer-server.TaskCreate'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Add a task
+      tags:
+      - tasks
+  /tasks/{id}:
+    delete:
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Remove a task
+      tags:
+      - tasks
+  /tasks/{id}/{action}:
+    post:
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Action
+        enum:
+        - start
+        - stop
+        in: path
+        name: action
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      summary: Start or stop a task
+      tags:
+      - tasks
+swagger: "2.0"
