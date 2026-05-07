@@ -1,9 +1,10 @@
 .PHONY: help \
 	configure-cpu configure-gpu configure-npu configure-tests \
 	build build-cpu build-gpu build-npu build-tests \
+	build-go \
 	run run-cpu run-gpu run-npu \
 	test validate clean \
-	docker-build-cpu docker-build-gpu docker-build-npu \
+	docker-build-cpu docker-build-gpu docker-build-npu docker-build-infer-server \
 	up up-cpu up-gpu up-npu \
 	down down-cpu down-gpu down-npu
 
@@ -11,6 +12,7 @@ BUILD_DIR ?= build
 BUILD_TYPE ?= Release
 CONFIG ?= config/config.cpu.yaml
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+GO ?= go
 
 INFER_BIN := ./$(BUILD_DIR)/infer_server
 
@@ -21,6 +23,7 @@ help:
 	@echo "  make build-gpu          # TensorRT build"
 	@echo "  make build-npu          # Ascend build"
 	@echo "  make build-tests        # build with tests enabled"
+	@echo "  make build-go           # build Go tools (infer-ctl, infer-server) to tools/bin/"
 	@echo "  make run                # default: run with $(CONFIG)"
 	@echo "  make run CONFIG=...     # override config path"
 	@echo "  make test               # run ctest"
@@ -28,7 +31,7 @@ help:
 	@echo "  make clean              # remove build dir (recommended before backend switch)"
 	@echo "  make up|up-cpu|up-gpu|up-npu"
 	@echo "  make down|down-cpu|down-gpu|down-npu"
-	@echo "  make docker-build-cpu|docker-build-gpu|docker-build-npu"
+	@echo "  make docker-build-cpu|docker-build-gpu|docker-build-npu|docker-build-infer-server"
 
 configure-cpu:
 	cmake -B $(BUILD_DIR) \
@@ -100,6 +103,13 @@ validate:
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+build-go:
+	cd tools && $(GO) build -o bin/infer-ctl ./infer-ctl/
+	cd tools && $(GO) build -o bin/infer-server ./infer-server/
+
+docker-build-infer-server:
+	DOCKER_BUILDKIT=1 docker build -t infer-server:latest -f docker/Dockerfile.infer-server .
 
 docker-build-cpu:
 	DOCKER_BUILDKIT=1 docker build -t inference-server:cpu -f docker/Dockerfile.cpu .
