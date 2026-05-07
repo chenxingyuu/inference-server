@@ -3,7 +3,6 @@
 //	@title			infer-server Management API
 //	@version		1.0
 //	@description	HTTP management API. All write operations are forwarded to the C++ engine via Unix domain socket.
-//	@host			localhost:8080
 //	@BasePath		/
 package main
 
