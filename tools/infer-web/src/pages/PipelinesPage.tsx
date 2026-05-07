@@ -4,7 +4,10 @@ import { Modal } from '../components/ui/Modal'
 import { Field, Input, Select } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
 import { useT } from '../lib/i18n'
+import { NODE_TYPE_DEFS, NODE_CATEGORIES, getNodeTypeDef } from '../lib/nodeTypes'
 import type { PipelineCreate, StageConfig, EdgeConfig, DropPolicy } from '../types'
+
+const CUSTOM = '__custom__'
 
 const blankNode = (): StageConfig => ({ id: '', type: '' })
 const blankEdge = (): EdgeConfig => ({ from: '', to: '', capacity: 32, drop_policy: 'drop_oldest' })
@@ -23,6 +26,11 @@ function NodeRow({
   const [pairs, setPairs] = useState<WithPair[]>(
     () => Object.entries(node.with ?? {}).map(([k, v]) => ({ k, v }))
   )
+  const [customType, setCustomType] = useState(() =>
+    getNodeTypeDef(node.type) ? '' : node.type
+  )
+
+  const selectValue = getNodeTypeDef(node.type) ? node.type : (node.type ? CUSTOM : '')
 
   const pairsToWith = (ps: WithPair[]) => {
     const record: Record<string, string> = {}
@@ -33,6 +41,19 @@ function NodeRow({
   const handlePairsChange = (ps: WithPair[]) => {
     setPairs(ps)
     onChange({ ...node, with: pairsToWith(ps) })
+  }
+
+  const handleTypeSelect = (val: string) => {
+    if (val === CUSTOM) {
+      setCustomType('')
+      onChange({ ...node, type: '' })
+      return
+    }
+    const def = getNodeTypeDef(val)!
+    const newPairs = def.withTemplate.map((p) => ({ ...p }))
+    const autoId = node.id || val.replaceAll('.', '_')
+    setPairs(newPairs)
+    onChange({ ...node, id: autoId, type: val, with: pairsToWith(newPairs) })
   }
 
   const updatePair = (i: number, patch: Partial<WithPair>) =>
@@ -48,16 +69,42 @@ function NodeRow({
           placeholder="node-id"
           value={node.id}
           onChange={(e) => onChange({ ...node, id: e.target.value })}
-          className="flex-1"
+          className="w-28 flex-none"
         />
-        <Input
-          placeholder="type (e.g. infer.engine)"
-          value={node.type}
-          onChange={(e) => onChange({ ...node, type: e.target.value })}
+        <Select
+          value={selectValue}
+          onChange={(e) => handleTypeSelect(e.target.value)}
           className="flex-1"
-        />
+        >
+          <option value="" disabled>— {t('pipelines.col.type')} —</option>
+          {NODE_CATEGORIES.map((cat) => {
+            const items = NODE_TYPE_DEFS.filter((d) => d.category === cat)
+            return (
+              <optgroup key={cat} label={cat}>
+                {items.map((d) => (
+                  <option key={d.type} value={d.type}>{d.type}</option>
+                ))}
+              </optgroup>
+            )
+          })}
+          <option value={CUSTOM}>{t('pipelines.col.type_custom')}</option>
+        </Select>
         <button onClick={onRemove} className="btn-icon text-danger/50 hover:text-danger mt-0.5">×</button>
       </div>
+
+      {selectValue === CUSTOM && (
+        <div className="pl-7">
+          <Input
+            placeholder="custom.type"
+            value={customType}
+            onChange={(e) => {
+              setCustomType(e.target.value)
+              onChange({ ...node, type: e.target.value })
+            }}
+            className="w-full text-[11px]"
+          />
+        </div>
+      )}
 
       {pairs.map((p, i) => (
         <div key={i} className="flex gap-2 items-start pl-7">
@@ -93,27 +140,32 @@ function NodeRow({
 }
 
 function EdgeRow({
-  edge, onChange, onRemove,
+  edge, nodeIds, onChange, onRemove,
 }: {
   edge: EdgeConfig
+  nodeIds: string[]
   onChange: (e: EdgeConfig) => void
   onRemove: () => void
 }) {
   return (
     <div className="flex gap-2 items-start">
-      <Input
-        placeholder="from"
+      <Select
         value={edge.from}
         onChange={(e) => onChange({ ...edge, from: e.target.value })}
         className="flex-1"
-      />
+      >
+        <option value="" disabled>from</option>
+        {nodeIds.map((id) => <option key={id} value={id}>{id}</option>)}
+      </Select>
       <span className="text-ink-muted mt-2 flex-none">→</span>
-      <Input
-        placeholder="to"
+      <Select
         value={edge.to}
         onChange={(e) => onChange({ ...edge, to: e.target.value })}
         className="flex-1"
-      />
+      >
+        <option value="" disabled>to</option>
+        {nodeIds.map((id) => <option key={id} value={id}>{id}</option>)}
+      </Select>
       <Input
         type="number"
         placeholder="cap"
@@ -341,6 +393,7 @@ export function PipelinesPage() {
                   <EdgeRow
                     key={i}
                     edge={e}
+                    nodeIds={nodes.map((n) => n.id).filter(Boolean)}
                     onChange={(v) => updateEdge(i, v)}
                     onRemove={() => setEdges((es) => es.filter((_, j) => j !== i))}
                   />

@@ -35,7 +35,7 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg' }: Pr
             ×
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="p-5 max-h-[calc(100vh-8rem)] overflow-y-auto">{children}</div>
       </div>
     </div>
   )
