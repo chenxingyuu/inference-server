@@ -105,7 +105,7 @@ bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
 
     PipelineConfig runtime_cfg = *pipeline_tpl;
     runtime_cfg.id = task.id;
-    auto executor = std::make_unique<GraphExecutor>(runtime_cfg);
+    auto executor = std::make_shared<GraphExecutor>(runtime_cfg);
     StageFactory::Context ctx{
         cfg_,
         *source,
@@ -129,41 +129,67 @@ bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
 }
 
 void TaskManager::startAll() {
-    std::lock_guard<std::mutex> lock(mu_);
-    for (auto& [_, entry] : entries_) {
-        if (entry.state == State::Running) continue;
-        entry.executor->start();
-        entry.state = State::Running;
+    std::vector<std::shared_ptr<GraphExecutor>> to_start;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        to_start.reserve(entries_.size());
+        for (auto& [_, entry] : entries_) {
+            if (entry.state == State::Running) continue;
+            entry.state = State::Running;
+            to_start.push_back(entry.executor);
+        }
+    }
+    for (const auto& executor : to_start) {
+        executor->start();
     }
 }
 
 void TaskManager::stopAll() {
-    std::lock_guard<std::mutex> lock(mu_);
-    for (auto& [_, entry] : entries_) {
-        if (entry.state == State::Stopped) continue;
-        entry.executor->stop();
-        entry.state = State::Stopped;
+    std::vector<std::shared_ptr<GraphExecutor>> to_stop;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        to_stop.reserve(entries_.size());
+        for (auto& [_, entry] : entries_) {
+            if (entry.state == State::Stopped) continue;
+            entry.state = State::Stopped;
+            to_stop.push_back(entry.executor);
+        }
+    }
+    for (const auto& executor : to_stop) {
+        executor->stop();
     }
 }
 
 bool TaskManager::start(const std::string& task_id) {
-    std::lock_guard<std::mutex> lock(mu_);
-    auto it = entries_.find(task_id);
-    if (it == entries_.end()) return false;
-    if (it->second.state == State::Stopped) {
-        it->second.executor->start();
-        it->second.state = State::Running;
+    std::shared_ptr<GraphExecutor> executor;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        auto it = entries_.find(task_id);
+        if (it == entries_.end()) return false;
+        if (it->second.state == State::Stopped) {
+            it->second.state = State::Running;
+            executor = it->second.executor;
+        }
+    }
+    if (executor) {
+        executor->start();
     }
     return true;
 }
 
 bool TaskManager::stop(const std::string& task_id) {
-    std::lock_guard<std::mutex> lock(mu_);
-    auto it = entries_.find(task_id);
-    if (it == entries_.end()) return false;
-    if (it->second.state == State::Running) {
-        it->second.executor->stop();
-        it->second.state = State::Stopped;
+    std::shared_ptr<GraphExecutor> executor;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        auto it = entries_.find(task_id);
+        if (it == entries_.end()) return false;
+        if (it->second.state == State::Running) {
+            it->second.state = State::Stopped;
+            executor = it->second.executor;
+        }
+    }
+    if (executor) {
+        executor->stop();
     }
     return true;
 }

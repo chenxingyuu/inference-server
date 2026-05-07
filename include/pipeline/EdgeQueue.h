@@ -15,6 +15,7 @@ public:
     bool push(const EventEnvelope& event);
     bool pop(EventEnvelope& event, int wait_ms);
     void stop();
+    void reopen();
     std::size_t size() const;
 
 private:

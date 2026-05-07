@@ -1,4 +1,5 @@
 #include "stream/FFmpegDecoder.h"
+#include "stream/StopAwareSleep.h"
 #include "stream/StreamHealthRegistry.h"
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
@@ -437,7 +438,9 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
                                            cfg.max_reconnect_delay_ms, failures);
             LOG_WARN("[{}] open failed (attempt {}), retry in {}ms",
                      cfg.id, failures, delay);
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+            if (waitForOrStop(stop_flag_, std::chrono::milliseconds(delay))) {
+                break;
+            }
             continue;
         }
 
@@ -503,7 +506,9 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
             int64_t delay = backoffDelayMs(cfg.reconnect_delay_ms,
                                            cfg.max_reconnect_delay_ms, failures);
             LOG_WARN("[{}] stream dropped, reconnecting in {}ms", cfg.id, delay);
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+            if (waitForOrStop(stop_flag_, std::chrono::milliseconds(delay))) {
+                break;
+            }
         }
     }
 

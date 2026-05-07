@@ -52,6 +52,7 @@ std::string GraphExecutor::graphText() const {
 
 void GraphExecutor::start() {
     if (running_.exchange(true)) return;
+    for (auto& [_, q] : edges_) q->reopen();
     for (auto& entry : stages_) {
         const auto id = entry.first;
         auto& stage = entry.second;

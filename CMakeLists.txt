@@ -108,6 +108,7 @@ set(STREAM_SOURCES
     src/stream/StreamPool.cpp
     src/stream/StreamHealthRegistry.cpp
     src/stream/GpuDeviceAllocator.cpp
+    src/stream/StopAwareSleep.cpp
 )
 
 set(INFER_SOURCES

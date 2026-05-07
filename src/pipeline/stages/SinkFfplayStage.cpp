@@ -44,6 +44,11 @@ void SinkFfplayStage::onGraphExecutorDraining() noexcept {
 void SinkFfplayStage::stop() {
     bool expected = true;
     if (!running_.compare_exchange_strong(expected, false)) return;
+    suppress_output_reopen_.store(true, std::memory_order_relaxed);
+    const pid_t pid = ffplay_pid_.load(std::memory_order_relaxed);
+    if (pid > 0) {
+        ::kill(pid, SIGTERM);
+    }
     cv_.notify_all();
     if (worker_.joinable()) {
         worker_.join(); // runWorker() closes ffplay_pipe_ on exit — safe to clear queue after join
@@ -162,25 +167,27 @@ bool SinkFfplayStage::ensureFfplayOpened(const cv::Mat& frame) {
         const_cast<char*>("-"),
         nullptr
     };
-    const int spawn_rc = posix_spawnp(&ffplay_pid_, "ffplay", &actions, nullptr, argv, environ);
+    pid_t child_pid = -1;
+    const int spawn_rc = posix_spawnp(&child_pid, "ffplay", &actions, nullptr, argv, environ);
     posix_spawn_file_actions_destroy(&actions);
     close(pipe_fd[0]);
     if (spawn_rc != 0) {
         close(pipe_fd[1]);
-        ffplay_pid_ = -1;
+        ffplay_pid_.store(-1, std::memory_order_relaxed);
         LOG_WARN("SinkFfplayStage[{}]: failed to launch ffplay (attempt={}): rc={}",
                  id_, reconnect_attempts_.load(std::memory_order_relaxed), spawn_rc);
         onFfplayFailure();
         return false;
     }
+    ffplay_pid_.store(child_pid, std::memory_order_relaxed);
     ffplay_pipe_ = fdopen(pipe_fd[1], "w");
     if (ffplay_pipe_ == nullptr) {
         close(pipe_fd[1]);
-        if (ffplay_pid_ > 0) {
-            ::kill(ffplay_pid_, SIGTERM);
+        if (child_pid > 0) {
+            ::kill(child_pid, SIGTERM);
             int status = 0;
-            (void)::waitpid(ffplay_pid_, &status, 0);
-            ffplay_pid_ = -1;
+            (void)::waitpid(child_pid, &status, 0);
+            ffplay_pid_.store(-1, std::memory_order_relaxed);
         }
         LOG_WARN("SinkFfplayStage[{}]: failed to launch ffplay (attempt={})",
                  id_, reconnect_attempts_.load(std::memory_order_relaxed));
@@ -222,10 +229,25 @@ void SinkFfplayStage::closeFfplay() {
             LOG_WARN("SinkFfplayStage[{}]: ffplay exited with status {}", id_, rc);
         }
     }
-    if (ffplay_pid_ > 0) {
+    const pid_t pid = ffplay_pid_.load(std::memory_order_relaxed);
+    if (pid > 0) {
         int status = 0;
-        (void)::waitpid(ffplay_pid_, &status, 0);
-        ffplay_pid_ = -1;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+        while (std::chrono::steady_clock::now() < deadline) {
+            const pid_t rc = ::waitpid(pid, &status, WNOHANG);
+            if (rc == pid) {
+                ffplay_pid_.store(-1, std::memory_order_relaxed);
+                return;
+            }
+            if (rc < 0) {
+                ffplay_pid_.store(-1, std::memory_order_relaxed);
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        ::kill(pid, SIGKILL);
+        (void)::waitpid(pid, &status, 0);
+        ffplay_pid_.store(-1, std::memory_order_relaxed);
     }
 }
 

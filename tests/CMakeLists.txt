@@ -30,6 +30,7 @@ add_library(infer_testable STATIC
     ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/ReconnectPolicy.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/GpuDeviceAllocator.cpp
+    ${CMAKE_SOURCE_DIR}/src/stream/StopAwareSleep.cpp
     ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
 )
 
@@ -72,6 +73,7 @@ add_infer_test(test_debug_logging)
 add_infer_test(test_read_timeout)
 add_infer_test(test_file_source_config)
 add_infer_test(test_ffmpeg_log_level)
+add_infer_test(test_stop_aware_sleep)
 
 # Phase 10: stream health state machine (no hardware deps)
 add_infer_test(test_stream_health)

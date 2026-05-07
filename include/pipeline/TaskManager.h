@@ -45,7 +45,7 @@ public:
 
 private:
     struct Entry {
-        std::unique_ptr<GraphExecutor> executor;
+        std::shared_ptr<GraphExecutor> executor;
         State state{State::Stopped};
     };
 

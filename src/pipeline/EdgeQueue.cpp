@@ -38,6 +38,12 @@ void EdgeQueue::stop() {
     cv_.notify_all();
 }
 
+void EdgeQueue::reopen() {
+    std::lock_guard<std::mutex> lock(mu_);
+    stopped_ = false;
+    cv_.notify_all();
+}
+
 std::size_t EdgeQueue::size() const {
     std::lock_guard<std::mutex> lock(mu_);
     return queue_.size();

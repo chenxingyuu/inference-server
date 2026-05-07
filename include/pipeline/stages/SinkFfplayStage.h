@@ -64,7 +64,7 @@ private:
     std::condition_variable cv_;
     std::deque<QueueItem> queue_;
     FILE* ffplay_pipe_{nullptr};
-    pid_t ffplay_pid_{-1};
+    std::atomic<pid_t> ffplay_pid_{-1};
 
     std::atomic<uint64_t> reconnect_attempts_{0};
     // Worker-thread-only — no mutex needed
