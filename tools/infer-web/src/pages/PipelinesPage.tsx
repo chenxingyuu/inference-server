@@ -9,6 +9,8 @@ import type { PipelineCreate, StageConfig, EdgeConfig, DropPolicy } from '../typ
 const blankNode = (): StageConfig => ({ id: '', type: '' })
 const blankEdge = (): EdgeConfig => ({ from: '', to: '', capacity: 32, drop_policy: 'drop_oldest' })
 
+type WithPair = { k: string; v: string }
+
 function NodeRow({
   node, idx, onChange, onRemove,
 }: {
@@ -17,24 +19,75 @@ function NodeRow({
   onChange: (n: StageConfig) => void
   onRemove: () => void
 }) {
+  const { t } = useT()
+  const [pairs, setPairs] = useState<WithPair[]>(
+    () => Object.entries(node.with ?? {}).map(([k, v]) => ({ k, v }))
+  )
+
+  const pairsToWith = (ps: WithPair[]) => {
+    const record: Record<string, string> = {}
+    ps.forEach(({ k, v }) => { if (k) record[k] = v })
+    return Object.keys(record).length ? record : undefined
+  }
+
+  const handlePairsChange = (ps: WithPair[]) => {
+    setPairs(ps)
+    onChange({ ...node, with: pairsToWith(ps) })
+  }
+
+  const updatePair = (i: number, patch: Partial<WithPair>) =>
+    handlePairsChange(pairs.map((p, j) => (j === i ? { ...p, ...patch } : p)))
+
   return (
-    <div className="flex gap-2 items-start">
-      <div className="flex-none w-5 h-7 flex items-center justify-center text-[10px] font-mono text-ink-muted">
-        {idx + 1}
+    <div className="space-y-1">
+      <div className="flex gap-2 items-start">
+        <div className="flex-none w-5 h-7 flex items-center justify-center text-[10px] font-mono text-ink-muted">
+          {idx + 1}
+        </div>
+        <Input
+          placeholder="node-id"
+          value={node.id}
+          onChange={(e) => onChange({ ...node, id: e.target.value })}
+          className="flex-1"
+        />
+        <Input
+          placeholder="type (e.g. infer.engine)"
+          value={node.type}
+          onChange={(e) => onChange({ ...node, type: e.target.value })}
+          className="flex-1"
+        />
+        <button onClick={onRemove} className="btn-icon text-danger/50 hover:text-danger mt-0.5">×</button>
       </div>
-      <Input
-        placeholder="node-id"
-        value={node.id}
-        onChange={(e) => onChange({ ...node, id: e.target.value })}
-        className="flex-1"
-      />
-      <Input
-        placeholder="type (e.g. yolo-infer)"
-        value={node.type}
-        onChange={(e) => onChange({ ...node, type: e.target.value })}
-        className="flex-1"
-      />
-      <button onClick={onRemove} className="btn-icon text-danger/50 hover:text-danger mt-0.5">×</button>
+
+      {pairs.map((p, i) => (
+        <div key={i} className="flex gap-2 items-start pl-7">
+          <Input
+            placeholder={t('pipelines.col.key')}
+            value={p.k}
+            onChange={(e) => updatePair(i, { k: e.target.value })}
+            className="flex-1 text-[11px]"
+          />
+          <Input
+            placeholder={t('pipelines.col.value')}
+            value={p.v}
+            onChange={(e) => updatePair(i, { v: e.target.value })}
+            className="flex-1 text-[11px]"
+          />
+          <button
+            onClick={() => handlePairsChange(pairs.filter((_, j) => j !== i))}
+            className="btn-icon text-danger/50 hover:text-danger mt-0.5"
+          >×</button>
+        </div>
+      ))}
+
+      <div className="pl-7">
+        <button
+          onClick={() => handlePairsChange([...pairs, { k: '', v: '' }])}
+          className="text-[10px] text-ink-muted hover:text-accent"
+        >
+          {t('pipelines.add_param')}
+        </button>
+      </div>
     </div>
   )
 }
@@ -172,10 +225,26 @@ export function PipelinesPage() {
                             <div className="label mb-2">{t('pipelines.section.nodes')}</div>
                             <div className="space-y-1">
                               {p.nodes.map((n) => (
-                                <div key={n.id} className="flex gap-2 items-center text-[12px]">
-                                  <span className="font-mono text-accent w-28 truncate">{n.id}</span>
-                                  <span className="text-ink-muted">→</span>
-                                  <span className="font-mono text-ink-secondary">{n.type}</span>
+                                <div key={n.id} className="text-[12px]">
+                                  <div className="flex gap-2 items-center">
+                                    <span className="font-mono text-accent w-28 truncate">{n.id}</span>
+                                    <span className="text-ink-muted">→</span>
+                                    <span className="font-mono text-ink-secondary">{n.type}</span>
+                                  </div>
+                                  {n.with && Object.keys(n.with).length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-0.5 pl-[calc(7rem+1.25rem)]">
+                                      {Object.entries(n.with).map(([k, v]) => (
+                                        <span
+                                          key={k}
+                                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-bg-overlay border border-border text-[10px] font-mono text-ink-muted"
+                                        >
+                                          <span className="text-accent">{k}</span>
+                                          <span>=</span>
+                                          <span>{v}</span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -33,6 +34,8 @@ var (
 	socketPath = envOr("INFER_SOCKET", "/var/run/infer.sock")
 	listenAddr = envOr("INFER_SERVER_ADDR", ":8080")
 	apiKey     = os.Getenv("INFER_API_KEY")
+	statePath  = envOr("INFER_STATE_FILE", "/var/lib/infer-server/state.json")
+	store      *Store
 )
 
 func envOr(key, def string) string {
@@ -70,7 +73,8 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
-func call(cmd map[string]any) (map[string]any, error) {
+// callFn is the engine communication function; replaceable in tests.
+var callFn = func(cmd map[string]any) (map[string]any, error) {
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		return nil, err
@@ -89,6 +93,8 @@ func call(cmd map[string]any) (map[string]any, error) {
 	}
 	return resp, nil
 }
+
+func call(cmd map[string]any) (map[string]any, error) { return callFn(cmd) }
 
 func engineUnavailable(c *gin.Context, err error) {
 	c.String(http.StatusServiceUnavailable, err.Error())
@@ -168,7 +174,26 @@ func handleListSources(c *gin.Context) {
 //	@Failure	503		{string}	string	"engine unreachable"
 //	@Router		/sources [post]
 func handleAddSource(c *gin.Context) {
-	callCreate(c, "add_source")
+	var body SourceCreate
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.String(http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	m := mustToMap(body)
+	m["cmd"] = "add_source"
+	resp, err := call(m)
+	if err != nil {
+		engineUnavailable(c, err)
+		return
+	}
+	if resp["status"] == "ok" {
+		_ = store.SaveSource(body)
+	}
+	code := http.StatusCreated
+	if resp["status"] != "ok" {
+		code = http.StatusBadRequest
+	}
+	c.JSON(code, resp)
 }
 
 // handleRemoveSource godoc
@@ -185,7 +210,7 @@ func handleAddSource(c *gin.Context) {
 //	@Failure	503	{string}	string			"engine unreachable"
 //	@Router		/sources/{id} [delete]
 func handleRemoveSource(c *gin.Context) {
-	callDelete(c, "remove_source")
+	callDelete(c, "remove_source", func(id string) { _ = store.DeleteSource(id) })
 }
 
 // handleListPipelines godoc
@@ -221,7 +246,26 @@ func handleListPipelines(c *gin.Context) {
 //	@Failure	503		{string}	string	"engine unreachable"
 //	@Router		/pipelines [post]
 func handleAddPipeline(c *gin.Context) {
-	callCreate(c, "add_pipeline")
+	var body PipelineCreate
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.String(http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	m := mustToMap(body)
+	m["cmd"] = "add_pipeline"
+	resp, err := call(m)
+	if err != nil {
+		engineUnavailable(c, err)
+		return
+	}
+	if resp["status"] == "ok" {
+		_ = store.SavePipeline(body)
+	}
+	code := http.StatusCreated
+	if resp["status"] != "ok" {
+		code = http.StatusBadRequest
+	}
+	c.JSON(code, resp)
 }
 
 // handleRemovePipeline godoc
@@ -238,7 +282,7 @@ func handleAddPipeline(c *gin.Context) {
 //	@Failure	503	{string}	string			"engine unreachable"
 //	@Router		/pipelines/{id} [delete]
 func handleRemovePipeline(c *gin.Context) {
-	callDelete(c, "remove_pipeline")
+	callDelete(c, "remove_pipeline", func(id string) { _ = store.DeletePipeline(id) })
 }
 
 // handleListModels godoc
@@ -274,7 +318,26 @@ func handleListModels(c *gin.Context) {
 //	@Failure	503		{string}	string	"engine unreachable"
 //	@Router		/models [post]
 func handleLoadModel(c *gin.Context) {
-	callCreate(c, "load_model")
+	var body ModelLoad
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.String(http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	m := mustToMap(body)
+	m["cmd"] = "load_model"
+	resp, err := call(m)
+	if err != nil {
+		engineUnavailable(c, err)
+		return
+	}
+	if resp["status"] == "ok" {
+		_ = store.SaveModel(body)
+	}
+	code := http.StatusCreated
+	if resp["status"] != "ok" {
+		code = http.StatusBadRequest
+	}
+	c.JSON(code, resp)
 }
 
 // handleUnloadModel godoc
@@ -291,7 +354,7 @@ func handleLoadModel(c *gin.Context) {
 //	@Failure	503	{string}	string			"engine unreachable"
 //	@Router		/models/{id} [delete]
 func handleUnloadModel(c *gin.Context) {
-	callDelete(c, "unload_model")
+	callDelete(c, "unload_model", func(id string) { _ = store.DeleteModel(id) })
 }
 
 // handleListTasks godoc
@@ -328,7 +391,26 @@ func handleListTasks(c *gin.Context) {
 //	@Failure		503		{string}	string	"engine unreachable"
 //	@Router			/tasks [post]
 func handleAddTask(c *gin.Context) {
-	callCreate(c, "add_task")
+	var body TaskCreate
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.String(http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	m := mustToMap(body)
+	m["cmd"] = "add_task"
+	resp, err := call(m)
+	if err != nil {
+		engineUnavailable(c, err)
+		return
+	}
+	if resp["status"] == "ok" {
+		_ = store.SaveTask(body)
+	}
+	code := http.StatusCreated
+	if resp["status"] != "ok" {
+		code = http.StatusBadRequest
+	}
+	c.JSON(code, resp)
 }
 
 // handleRemoveTask godoc
@@ -344,7 +426,7 @@ func handleAddTask(c *gin.Context) {
 //	@Failure	503	{string}	string	"engine unreachable"
 //	@Router		/tasks/{id} [delete]
 func handleRemoveTask(c *gin.Context) {
-	callDelete(c, "remove_task")
+	callDelete(c, "remove_task", func(id string) { _ = store.DeleteTask(id) })
 }
 
 // handleTaskAction godoc
@@ -372,6 +454,9 @@ func handleTaskAction(c *gin.Context) {
 		engineUnavailable(c, err)
 		return
 	}
+	if resp["status"] == "ok" {
+		_ = store.SetTaskRunning(id, action == "start")
+	}
 	code := http.StatusOK
 	if resp["status"] != "ok" {
 		code = http.StatusNotFound
@@ -379,31 +464,15 @@ func handleTaskAction(c *gin.Context) {
 	c.JSON(code, resp)
 }
 
-func callCreate(c *gin.Context, cmd string) {
-	var body map[string]any
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.String(http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	body["cmd"] = cmd
-	resp, err := call(body)
-	if err != nil {
-		engineUnavailable(c, err)
-		return
-	}
-	code := http.StatusCreated
-	if resp["status"] != "ok" {
-		code = http.StatusBadRequest
-	}
-	c.JSON(code, resp)
-}
-
-func callDelete(c *gin.Context, cmd string) {
+func callDelete(c *gin.Context, cmd string, onSuccess func(id string)) {
 	id := c.Param("id")
 	resp, err := call(map[string]any{"cmd": cmd, "id": id})
 	if err != nil {
 		engineUnavailable(c, err)
 		return
+	}
+	if resp["status"] == "ok" && onSuccess != nil {
+		onSuccess(id)
 	}
 	code := http.StatusOK
 	if resp["status"] != "ok" {
@@ -420,6 +489,18 @@ func main() {
 	if apiKey == "" {
 		fmt.Fprintln(os.Stderr, "WARNING: INFER_API_KEY not set; management endpoints are unprotected")
 	}
+
+	var err error
+	store, err = NewStore(statePath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "state store init:", err)
+		os.Exit(1)
+	}
+	go func() {
+		if err := replayState(store.Snapshot(), callFn, 30, 2*time.Second); err != nil {
+			fmt.Fprintln(os.Stderr, "WARNING: state replay incomplete:", err)
+		}
+	}()
 
 	r := gin.Default()
 	r.Use(corsMiddleware())

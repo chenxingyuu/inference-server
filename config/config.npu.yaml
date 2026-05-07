@@ -14,59 +14,8 @@ server:
   log_level: "debug"
   model_repository: "models"
 
-sources:
-  - id: "cam_001"
-    url: "rtsp://192.168.3.145:554/01-day-left.mp4"
-    reconnect_delay_ms: 3000
-    max_reconnect_delay_ms: 60000
-    degraded_threshold: 5
-    max_reconnect_attempts: 5
+# sources / pipelines / tasks 通过 API 管理，由 infer-server 持久化到 state.json 并在启动时重放。
 
-pipelines:
-  - id: "pipeline_default"
-    nodes:
-      - id: "cam_001"
-        type: "source.rtsp"
-      - id: "archive_1"
-        type: "archive.raw"
-      - id: "infer_1"
-        type: "infer.engine"
-        with:
-          model_id: "yolov5su_ascend"
-      - id: "track_1"
-        type: "track.bytetrack"
-        with:
-          high_det_thresh: "0.5"
-          low_det_thresh: "0.1"
-          match_iou_thresh: "0.3"
-          min_hits_to_confirm: "2"
-          max_lost_frames: "30"
-      - id: "sink_1"
-        type: "sink.publish"
-    edges:
-      - from: "cam_001"
-        to: "archive_1"
-      - from: "cam_001"
-        to: "infer_1"
-        queue:
-          capacity: 4
-          drop_policy: "drop_oldest"
-      - from: "infer_1"
-        to: "track_1"
-      - from: "track_1"
-        to: "sink_1"
-
-
-tasks:
-  - id: "task_cam_001"
-    source_id: "cam_001"
-    pipeline_id: "pipeline_default"
-    sample_fps: 5
-    sampling_mode: "time_based"
-    use_hwdec: false
-    use_ascend_dvpp: true
-
-  
 # 推理结果发布（buildPublisher）：与 CPU/GPU 模板一致；无 pipeline 的 streams 布局同样依赖此块。
 # gRPC / Redis 需二进制打开 BUILD_GRPC_PUBLISHER / BUILD_REDIS_PUBLISHER（见 Makefile configure-*）。
 publishers:

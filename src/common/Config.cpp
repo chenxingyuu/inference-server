@@ -157,9 +157,6 @@ void validatePipelineGraphs(const AppConfig& cfg) {
 }
 
 void validateTasks(const AppConfig& cfg) {
-    if (cfg.tasks.empty()) {
-        throw std::runtime_error("tasks must not be empty");
-    }
     std::unordered_set<std::string> task_ids;
     for (const auto& t : cfg.tasks) {
         if (t.id.empty()) throw std::runtime_error("task.id must not be empty");

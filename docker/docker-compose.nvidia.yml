@@ -27,8 +27,10 @@ services:
       - "8080:8080"
     environment:
       - INFER_SOCKET=/var/run/infer/infer.sock
+      - INFER_STATE_FILE=/var/lib/infer-server/state.json
     volumes:
       - infer-socket:/var/run/infer:ro
+      - infer-state:/var/lib/infer-server
     depends_on:
       - infer-trt
     restart: unless-stopped
@@ -115,3 +117,4 @@ volumes:
   prometheus-data:
   grafana-data:
   infer-socket:
+  infer-state:
