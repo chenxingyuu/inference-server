@@ -15,6 +15,15 @@ export const auth = {
   clear: () => localStorage.removeItem('infer_api_key'),
 }
 
+function buildApiUrl(path: string): string {
+  const base = serverUrl.get()
+  const apiPath = path.startsWith('/') ? path : `/${path}`
+  const normalizedBase = base.replace(/\/$/, '')
+  const origin = window.location.origin.replace(/\/$/, '')
+  const usePrefixedApi = normalizedBase === origin
+  return usePrefixedApi ? `${normalizedBase}/api${apiPath}` : `${normalizedBase}${apiPath}`
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string, public code?: string) {
     super(message)
@@ -24,8 +33,7 @@ class ApiError extends Error {
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const key = auth.get()
-  const base = serverUrl.get()
-  const res = await fetch(`${base}${path}`, {
+  const res = await fetch(buildApiUrl(path), {
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -50,10 +58,9 @@ export type HealthStatus = 'ok' | 'engine_down' | 'unreachable'
 export const api = {
   health: {
     check: async (): Promise<{ status: HealthStatus }> => {
-      const base = serverUrl.get()
       let res: Response
       try {
-        res = await fetch(`${base}/healthz`)
+        res = await fetch(buildApiUrl('/healthz'))
       } catch {
         return { status: 'unreachable' }
       }

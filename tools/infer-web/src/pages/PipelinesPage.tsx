@@ -3,6 +3,7 @@ import { usePipelines, useAddPipeline, useRemovePipeline } from '../hooks/querie
 import { Modal } from '../components/ui/Modal'
 import { Field, Input, Select } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
+import { useT } from '../lib/i18n'
 import type { PipelineCreate, StageConfig, EdgeConfig, DropPolicy } from '../types'
 
 const blankNode = (): StageConfig => ({ id: '', type: '' })
@@ -85,6 +86,7 @@ export function PipelinesPage() {
   const { data: pipelines = [], isLoading } = usePipelines()
   const add = useAddPipeline()
   const remove = useRemovePipeline()
+  const { t } = useT()
 
   const [open, setOpen] = useState(false)
   const [pipeId, setPipeId] = useState('')
@@ -117,11 +119,11 @@ export function PipelinesPage() {
   return (
     <div>
       <PageHeader
-        title="Pipelines"
-        subtitle="Processing node graphs"
+        title={t('pipelines.title')}
+        subtitle={t('pipelines.subtitle')}
         action={
           <button onClick={() => setOpen(true)} className="btn-primary">
-            + Add Pipeline
+            {t('pipelines.add')}
           </button>
         }
       />
@@ -131,16 +133,16 @@ export function PipelinesPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Nodes</th>
-                <th>Edges</th>
+                <th>{t('common.id')}</th>
+                <th>{t('pipelines.col.nodes')}</th>
+                <th>{t('pipelines.col.edges')}</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {isLoading && <LoadingRows cols={4} />}
               {!isLoading && pipelines.length === 0 && (
-                <EmptyState message="No pipelines defined. Add one to connect sources to inference." />
+                <EmptyState message={t('pipelines.empty')} />
               )}
               {pipelines.map((p) => (
                 <>
@@ -167,7 +169,7 @@ export function PipelinesPage() {
                       <td colSpan={4} className="bg-bg-overlay px-6 py-3">
                         <div className="grid grid-cols-2 gap-6">
                           <div>
-                            <div className="label mb-2">Nodes</div>
+                            <div className="label mb-2">{t('pipelines.section.nodes')}</div>
                             <div className="space-y-1">
                               {p.nodes.map((n) => (
                                 <div key={n.id} className="flex gap-2 items-center text-[12px]">
@@ -180,7 +182,7 @@ export function PipelinesPage() {
                           </div>
                           {p.edges.length > 0 && (
                             <div>
-                              <div className="label mb-2">Edges</div>
+                              <div className="label mb-2">{t('pipelines.section.edges')}</div>
                               <div className="space-y-1">
                                 {p.edges.map((e, i) => (
                                   <div key={i} className="flex gap-2 items-center text-[12px]">
@@ -206,9 +208,9 @@ export function PipelinesPage() {
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Add Pipeline" width="max-w-2xl">
+      <Modal open={open} onClose={() => setOpen(false)} title={t('pipelines.modal_title')} width="max-w-2xl">
         <div className="space-y-5">
-          <Field label="Pipeline ID">
+          <Field label={t('pipelines.field.id')}>
             <Input
               placeholder="detection-pipeline"
               value={pipeId}
@@ -219,18 +221,18 @@ export function PipelinesPage() {
           {/* Nodes */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="label">Nodes</span>
+              <span className="label">{t('pipelines.section.nodes')}</span>
               <button
                 onClick={() => setNodes((ns) => [...ns, blankNode()])}
                 className="text-[11px] text-accent hover:underline"
               >
-                + Add node
+                {t('pipelines.add_node')}
               </button>
             </div>
             <div className="space-y-2">
               <div className="flex gap-2 text-[10px] text-ink-muted mb-1 pl-7">
-                <span className="flex-1">Node ID</span>
-                <span className="flex-1">Type</span>
+                <span className="flex-1">{t('pipelines.col.node_id')}</span>
+                <span className="flex-1">{t('pipelines.col.type')}</span>
                 <span className="w-4" />
               </div>
               {nodes.map((n, i) => (
@@ -248,22 +250,22 @@ export function PipelinesPage() {
           {/* Edges */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="label">Edges (optional)</span>
+              <span className="label">{t('pipelines.section.edges')}</span>
               <button
                 onClick={() => setEdges((es) => [...es, blankEdge()])}
                 className="text-[11px] text-accent hover:underline"
               >
-                + Add edge
+                {t('pipelines.add_edge')}
               </button>
             </div>
             {edges.length > 0 && (
               <div className="space-y-2">
                 <div className="flex gap-2 text-[10px] text-ink-muted mb-1">
-                  <span className="flex-1">From</span>
+                  <span className="flex-1">{t('pipelines.col.from')}</span>
                   <span className="w-4" />
-                  <span className="flex-1">To</span>
-                  <span className="w-20">Capacity</span>
-                  <span className="w-32">Drop Policy</span>
+                  <span className="flex-1">{t('pipelines.col.to')}</span>
+                  <span className="w-20">{t('pipelines.col.capacity')}</span>
+                  <span className="w-32">{t('pipelines.col.drop_policy')}</span>
                   <span className="w-4" />
                 </div>
                 {edges.map((e, i) => (
@@ -279,13 +281,13 @@ export function PipelinesPage() {
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setOpen(false)} className="btn-ghost">Cancel</button>
+            <button onClick={() => setOpen(false)} className="btn-ghost">{t('common.cancel')}</button>
             <button
               onClick={submit}
               disabled={!pipeId || nodes.some((n) => !n.id || !n.type) || add.isPending}
               className="btn-primary"
             >
-              {add.isPending ? 'Adding…' : 'Add Pipeline'}
+              {add.isPending ? t('pipelines.adding') : t('pipelines.add')}
             </button>
           </div>
         </div>

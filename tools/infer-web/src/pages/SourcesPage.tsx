@@ -4,6 +4,7 @@ import { StatusBadge } from '../components/ui/StatusBadge'
 import { Modal } from '../components/ui/Modal'
 import { Field, Input } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
+import { useT } from '../lib/i18n'
 import type { SourceCreate } from '../types'
 
 const DEFAULTS: SourceCreate = {
@@ -20,6 +21,7 @@ export function SourcesPage() {
   const { data: sources = [], isLoading } = useSources()
   const add = useAddSource()
   const remove = useRemoveSource()
+  const { t } = useT()
 
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<SourceCreate>(DEFAULTS)
@@ -35,11 +37,11 @@ export function SourcesPage() {
   return (
     <div>
       <PageHeader
-        title="Sources"
-        subtitle="Video stream sources (RTSP / file)"
+        title={t('sources.title')}
+        subtitle={t('sources.subtitle')}
         action={
           <button onClick={() => setOpen(true)} className="btn-primary">
-            + Add Source
+            {t('sources.add')}
           </button>
         }
       />
@@ -49,17 +51,17 @@ export function SourcesPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>State</th>
-                <th>Reconnects</th>
-                <th>URL</th>
+                <th>{t('common.id')}</th>
+                <th>{t('common.state')}</th>
+                <th>{t('sources.col.reconnects')}</th>
+                <th>{t('sources.col.url')}</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {isLoading && <LoadingRows cols={5} />}
               {!isLoading && sources.length === 0 && (
-                <EmptyState message="No sources configured. Add one to start streaming." />
+                <EmptyState message={t('sources.empty')} />
               )}
               {sources.map((s) => (
                 <tr key={s.id}>
@@ -80,17 +82,17 @@ export function SourcesPage() {
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Add Source">
+      <Modal open={open} onClose={() => setOpen(false)} title={t('sources.modal_title')}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Source ID" hint="Unique identifier">
+            <Field label={t('sources.field.id')} hint={t('sources.field.id_hint')}>
               <Input
                 placeholder="cam01"
                 value={form.id}
                 onChange={(e) => set('id', e.target.value)}
               />
             </Field>
-            <Field label="URL" hint="rtsp:// or file://…">
+            <Field label={t('sources.field.url')} hint={t('sources.field.url_hint')}>
               <Input
                 placeholder="rtsp://192.168.1.10/stream"
                 value={form.url}
@@ -102,35 +104,35 @@ export function SourcesPage() {
           <details className="group">
             <summary className="label cursor-pointer list-none flex items-center gap-1 select-none">
               <span className="group-open:rotate-90 transition-transform">▶</span>
-              Advanced options
+              {t('sources.advanced')}
             </summary>
             <div className="mt-3 grid grid-cols-2 gap-4">
-              <Field label="Reconnect delay (ms)">
+              <Field label={t('sources.field.reconnect_delay')}>
                 <Input type="number" value={form.reconnect_delay_ms} onChange={(e) => set('reconnect_delay_ms', +e.target.value)} />
               </Field>
-              <Field label="Max reconnect delay (ms)">
+              <Field label={t('sources.field.max_delay')}>
                 <Input type="number" value={form.max_reconnect_delay_ms} onChange={(e) => set('max_reconnect_delay_ms', +e.target.value)} />
               </Field>
-              <Field label="Max reconnect attempts">
+              <Field label={t('sources.field.max_attempts')}>
                 <Input type="number" value={form.max_reconnect_attempts} onChange={(e) => set('max_reconnect_attempts', +e.target.value)} />
               </Field>
-              <Field label="Open timeout (ms)">
+              <Field label={t('sources.field.open_timeout')}>
                 <Input type="number" value={form.open_timeout_ms} onChange={(e) => set('open_timeout_ms', +e.target.value)} />
               </Field>
-              <Field label="Read timeout (ms)">
+              <Field label={t('sources.field.read_timeout')}>
                 <Input type="number" value={form.read_timeout_ms} onChange={(e) => set('read_timeout_ms', +e.target.value)} />
               </Field>
             </div>
           </details>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setOpen(false)} className="btn-ghost">Cancel</button>
+            <button onClick={() => setOpen(false)} className="btn-ghost">{t('common.cancel')}</button>
             <button
               onClick={submit}
               disabled={!form.id || !form.url || add.isPending}
               className="btn-primary"
             >
-              {add.isPending ? 'Adding…' : 'Add Source'}
+              {add.isPending ? t('sources.adding') : t('sources.add')}
             </button>
           </div>
         </div>

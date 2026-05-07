@@ -7,6 +7,7 @@ import { StatusBadge } from '../components/ui/StatusBadge'
 import { Modal } from '../components/ui/Modal'
 import { Field, Input, Select } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
+import { useT } from '../lib/i18n'
 import type { TaskCreate, SamplingMode } from '../types'
 
 const DEFAULTS: TaskCreate = {
@@ -38,6 +39,7 @@ export function TasksPage() {
   const { data: tasks = [], isLoading } = useTasks()
   const { data: sources = [] } = useSources()
   const { data: pipelines = [] } = usePipelines()
+  const { t } = useT()
 
   const add = useAddTask()
   const remove = useRemoveTask()
@@ -55,20 +57,20 @@ export function TasksPage() {
     add.mutate(form, { onSuccess: () => { setOpen(false); setForm(DEFAULTS) } })
   }
 
-  const runningCount = tasks.filter((t) => t.state === 'running').length
+  const runningCount = tasks.filter((tk) => tk.state === 'running').length
 
   return (
     <div>
       <PageHeader
-        title="Tasks"
+        title={t('tasks.title')}
         subtitle={
           tasks.length
-            ? `${tasks.length} total · ${runningCount} running`
-            : 'Bind a source to a pipeline and start inference'
+            ? t('tasks.subtitle_stats', { total: tasks.length, running: runningCount })
+            : t('tasks.subtitle_empty')
         }
         action={
           <button onClick={() => setOpen(true)} className="btn-primary">
-            + New Task
+            {t('tasks.add')}
           </button>
         }
       />
@@ -78,25 +80,25 @@ export function TasksPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>State</th>
-                <th className="text-right pr-4">Actions</th>
+                <th>{t('common.id')}</th>
+                <th>{t('common.state')}</th>
+                <th className="text-right pr-4">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && <LoadingRows cols={3} />}
               {!isLoading && tasks.length === 0 && (
-                <EmptyState message="No tasks. Create one to start inference." />
+                <EmptyState message={t('tasks.empty')} />
               )}
-              {tasks.map((t) => (
-                <tr key={t.id}>
-                  <td className="font-mono text-[12px] text-ink-primary font-medium">{t.id}</td>
-                  <td><StatusBadge status={t.state} /></td>
+              {tasks.map((tk) => (
+                <tr key={tk.id}>
+                  <td className="font-mono text-[12px] text-ink-primary font-medium">{tk.id}</td>
+                  <td><StatusBadge status={tk.state} /></td>
                   <td>
                     <div className="flex items-center justify-end gap-1 pr-2">
-                      {t.state === 'stopped' ? (
+                      {tk.state === 'stopped' ? (
                         <button
-                          onClick={() => start.mutate(t.id)}
+                          onClick={() => start.mutate(tk.id)}
                           disabled={start.isPending}
                           title="Start"
                           className="btn-icon text-success/60 hover:text-success"
@@ -105,7 +107,7 @@ export function TasksPage() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => stop.mutate(t.id)}
+                          onClick={() => stop.mutate(tk.id)}
                           disabled={stop.isPending}
                           title="Stop"
                           className="btn-icon text-warning/60 hover:text-warning"
@@ -115,7 +117,7 @@ export function TasksPage() {
                       )}
                       <DeleteButton
                         loading={remove.isPending}
-                        onClick={() => remove.mutate(t.id)}
+                        onClick={() => remove.mutate(tk.id)}
                       />
                     </div>
                   </td>
@@ -126,9 +128,9 @@ export function TasksPage() {
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New Task">
+      <Modal open={open} onClose={() => setOpen(false)} title={t('tasks.modal_title')}>
         <div className="space-y-4">
-          <Field label="Task ID">
+          <Field label={t('tasks.field.id')}>
             <Input
               placeholder="task-cam01-detect"
               value={form.id}
@@ -137,12 +139,12 @@ export function TasksPage() {
           </Field>
 
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Source" hint="Must be added in Sources">
+            <Field label={t('tasks.field.source')} hint={t('tasks.field.source_hint')}>
               <Select
                 value={form.source_id}
                 onChange={(e) => set('source_id', e.target.value)}
               >
-                <option value="">— select source —</option>
+                <option value="">{t('tasks.select_source')}</option>
                 {sources.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.id} ({s.state})
@@ -150,12 +152,12 @@ export function TasksPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="Pipeline" hint="Must be added in Pipelines">
+            <Field label={t('tasks.field.pipeline')} hint={t('tasks.field.pipeline_hint')}>
               <Select
                 value={form.pipeline_id}
                 onChange={(e) => set('pipeline_id', e.target.value)}
               >
-                <option value="">— select pipeline —</option>
+                <option value="">{t('tasks.select_pipeline')}</option>
                 {pipelines.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.id}
@@ -166,7 +168,7 @@ export function TasksPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Sample FPS">
+            <Field label={t('tasks.field.sample_fps')}>
               <Input
                 type="number"
                 min={1}
@@ -175,7 +177,7 @@ export function TasksPage() {
                 onChange={(e) => set('sample_fps', +e.target.value)}
               />
             </Field>
-            <Field label="Sampling Mode">
+            <Field label={t('tasks.field.sampling')}>
               <Select
                 value={form.sampling_mode}
                 onChange={(e) => set('sampling_mode', e.target.value as SamplingMode)}
@@ -193,17 +195,17 @@ export function TasksPage() {
               onChange={(e) => set('use_hwdec', e.target.checked)}
               className="w-3.5 h-3.5 accent-accent"
             />
-            <span className="text-[12px] text-ink-secondary">Enable hardware decode (hwdec)</span>
+            <span className="text-[12px] text-ink-secondary">{t('tasks.field.hwdec')}</span>
           </label>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setOpen(false)} className="btn-ghost">Cancel</button>
+            <button onClick={() => setOpen(false)} className="btn-ghost">{t('common.cancel')}</button>
             <button
               onClick={submit}
               disabled={!form.id || !form.source_id || !form.pipeline_id || add.isPending}
               className="btn-primary"
             >
-              {add.isPending ? 'Creating…' : 'Create Task'}
+              {add.isPending ? t('tasks.creating') : t('tasks.add')}
             </button>
           </div>
         </div>

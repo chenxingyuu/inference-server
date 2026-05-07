@@ -1,5 +1,6 @@
 import { useHealth, useSources, useModels, usePipelines, useTasks } from '../hooks/queries'
 import { serverUrl } from '../lib/api'
+import { useT } from '../lib/i18n'
 import { PageHeader } from '../components/layout/Layout'
 import type { SourceState, TaskState } from '../types'
 
@@ -39,6 +40,7 @@ export function DashboardPage() {
   const { data: models = [] } = useModels()
   const { data: pipelines = [] } = usePipelines()
   const { data: tasks = [] } = useTasks()
+  const { t } = useT()
 
   const streaming = sources.filter((s) => s.state === 'STREAMING').length
   const degraded = sources.filter((s) => s.state === 'DEGRADED' || s.state === 'RECONNECTING').length
@@ -53,8 +55,8 @@ export function DashboardPage() {
   return (
     <div>
       <PageHeader
-        title="Dashboard"
-        subtitle="System overview — auto-refreshes every 5–30s"
+        title={t('dashboard.title')}
+        subtitle={t('dashboard.subtitle')}
       />
 
       {/* Health banner */}
@@ -62,10 +64,10 @@ export function DashboardPage() {
         {(() => {
           const s = health?.status
           const cfg =
-            s === 'ok'          ? { cls: 'bg-success/8 border-success/20 text-success',  dot: 'bg-success led-pulse', msg: 'Engine healthy' } :
-            s === 'engine_down' ? { cls: 'bg-warning/8 border-warning/20 text-warning',  dot: 'bg-warning',          msg: 'C++ engine not connected — Go server is reachable, start the inference engine' } :
-            s === 'unreachable' ? { cls: 'bg-danger/8  border-danger/25  text-danger',   dot: 'bg-danger',           msg: `Cannot reach server — check the Server URL in the sidebar (${serverUrl.get()})` } :
-                                  { cls: 'bg-bg-elevated border-border   text-ink-muted', dot: 'bg-ink-muted',        msg: 'Checking…' }
+            s === 'ok'          ? { cls: 'bg-success/8 border-success/20 text-success',  dot: 'bg-success led-pulse', msg: t('health.ok') } :
+            s === 'engine_down' ? { cls: 'bg-warning/8 border-warning/20 text-warning',  dot: 'bg-warning',          msg: t('health.engine_down') } :
+            s === 'unreachable' ? { cls: 'bg-danger/8  border-danger/25  text-danger',   dot: 'bg-danger',           msg: t('health.unreachable', { url: serverUrl.get() }) } :
+                                  { cls: 'bg-bg-elevated border-border   text-ink-muted', dot: 'bg-ink-muted',        msg: t('health.checking') }
           return (
             <div className={`flex items-center gap-2.5 px-4 py-2.5 rounded border text-sm font-medium ${cfg.cls}`}>
               <span className={`w-2 h-2 rounded-full flex-none ${cfg.dot}`} />
@@ -78,25 +80,31 @@ export function DashboardPage() {
       {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-6">
         <StatCard
-          label="Sources"
+          label={t('dashboard.stat.sources')}
           value={sources.length}
-          sub={sources.length ? `${streaming} streaming · ${degraded} degraded` : 'none configured'}
+          sub={sources.length
+            ? t('dashboard.sources.sub', { streaming, degraded })
+            : t('dashboard.sources.empty')}
           color={sourceColor}
         />
         <StatCard
-          label="Models"
+          label={t('dashboard.stat.models')}
           value={models.length}
-          sub={models.length ? models.map((m) => m.backend).join(', ') : 'none loaded'}
+          sub={models.length
+            ? t('dashboard.models.sub', { backends: models.map((m) => m.backend).join(', ') })
+            : t('dashboard.models.empty')}
         />
         <StatCard
-          label="Pipelines"
+          label={t('dashboard.stat.pipelines')}
           value={pipelines.length}
-          sub={pipelines.length ? `${pipelines.reduce((s, p) => s + p.nodes.length, 0)} nodes total` : 'none defined'}
+          sub={pipelines.length
+            ? t('dashboard.pipelines.sub', { nodes: pipelines.reduce((s, p) => s + p.nodes.length, 0) })
+            : t('dashboard.pipelines.empty')}
         />
         <StatCard
-          label="Tasks"
+          label={t('dashboard.stat.tasks')}
           value={tasks.length}
-          sub={tasks.length ? `${running} running` : 'none created'}
+          sub={tasks.length ? t('dashboard.tasks.sub', { running }) : t('dashboard.tasks.empty')}
           color={running > 0 ? taskColors.running : 'text-ink-primary'}
         />
       </div>
@@ -107,16 +115,16 @@ export function DashboardPage() {
           <div className="card overflow-hidden">
             <div className="px-4 py-3 border-b border-border">
               <span className="text-[10.5px] font-semibold uppercase tracking-widest text-ink-muted">
-                Source States
+                {t('dashboard.source_states')}
               </span>
             </div>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>State</th>
-                  <th>Reconnects</th>
-                  <th>URL</th>
+                  <th>{t('common.id')}</th>
+                  <th>{t('common.state')}</th>
+                  <th>{t('sources.col.reconnects')}</th>
+                  <th>{t('sources.col.url')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -135,7 +143,7 @@ export function DashboardPage() {
                 {sources.length > 8 && (
                   <tr>
                     <td colSpan={4} className="text-center text-[11px] text-ink-muted py-2">
-                      +{sources.length - 8} more — view all in Sources
+                      {t('dashboard.more', { n: sources.length - 8 })}
                     </td>
                   </tr>
                 )}
@@ -151,20 +159,20 @@ export function DashboardPage() {
           <div className="card overflow-hidden">
             <div className="px-4 py-3 border-b border-border">
               <span className="text-[10.5px] font-semibold uppercase tracking-widest text-ink-muted">
-                Task States
+                {t('dashboard.task_states')}
               </span>
             </div>
             <table className="data-table">
               <thead>
-                <tr><th>ID</th><th>State</th></tr>
+                <tr><th>{t('common.id')}</th><th>{t('common.state')}</th></tr>
               </thead>
               <tbody>
-                {tasks.map((t) => (
-                  <tr key={t.id}>
-                    <td className="font-mono text-[12px] text-ink-primary">{t.id}</td>
+                {tasks.map((tk) => (
+                  <tr key={tk.id}>
+                    <td className="font-mono text-[12px] text-ink-primary">{tk.id}</td>
                     <td>
-                      <span className={`font-mono text-[11px] font-medium ${taskColors[t.state]}`}>
-                        {t.state}
+                      <span className={`font-mono text-[11px] font-medium ${taskColors[tk.state]}`}>
+                        {tk.state}
                       </span>
                     </td>
                   </tr>
