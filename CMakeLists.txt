@@ -94,16 +94,6 @@ if(BUILD_ONNX_BACKEND)
     endif()
 endif()
 
-# ── cpp-httplib (header-only HTTP server) ──────────────────────────────────────
-include(FetchContent)
-FetchContent_Declare(
-    httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG        v0.14.3
-    GIT_SHALLOW    TRUE
-)
-set(HTTPLIB_COMPILE OFF CACHE BOOL "Use header-only mode")
-FetchContent_MakeAvailable(httplib)
 
 # ── Source files ──────────────────────────────────────────────────────────────
 set(COMMON_SOURCES
@@ -316,7 +306,7 @@ set(METRICS_SOURCES
 )
 
 set(SERVER_SOURCES
-    src/server/ManagementServer.cpp
+    src/server/UnixSocketServer.cpp
 )
 
 # ── Library ───────────────────────────────────────────────────────────────────
@@ -356,8 +346,7 @@ target_link_libraries(infer_core PUBLIC
     ${OpenCV_LIBS}
     ${RDKAFKA_LIBRARIES}
     CURL::libcurl
-    httplib::httplib
-    $<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer>
+$<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer>
     $<$<BOOL:${BUILD_TRT_BACKEND}>:CUDA::cudart>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:AscendCL::ascendcl>
     $<$<AND:$<BOOL:${BUILD_ASCEND_BACKEND}>,$<TARGET_EXISTS:AscendCL::dvpp>>:AscendCL::dvpp>

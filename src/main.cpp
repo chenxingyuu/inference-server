@@ -12,7 +12,7 @@
 #ifdef BUILD_GRPC_PUBLISHER
 #include "publisher/GrpcPublisher.h"
 #endif
-#include "server/ManagementServer.h"
+#include "server/UnixSocketServer.h"
 #include "archive/FrameArchiver.h"
 #include <curl/curl.h>
 
@@ -157,11 +157,11 @@ int main(int argc, char* argv[]) {
     }
 
     // ── Start management HTTP server ──────────────────────────────────────────
-    infer::ManagementServer mgmt_server(cfg.server.management_port, task_manager);
+    infer::UnixSocketServer mgmt_server(cfg.server.socket_path, task_manager);
     mgmt_server.start();
 
-    LOG_INFO("All tasks running. TaskCount: {} ManagementPort: {}",
-             cfg.tasks.size(), cfg.server.management_port);
+    LOG_INFO("All tasks running. TaskCount: {} SocketPath: {}",
+             cfg.tasks.size(), cfg.server.socket_path);
 
     // ── Main wait loop ────────────────────────────────────────────────────────
     while (!g_shutdown.load()) {

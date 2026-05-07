@@ -2,6 +2,7 @@
 
 #include "common/Config.h"
 #include "pipeline/GraphExecutor.h"
+#include "pipeline/ITaskManager.h"
 #include "publisher/IPublisher.h"
 #include "archive/FrameArchiver.h"
 #include <memory>
@@ -10,9 +11,9 @@
 
 namespace infer {
 
-class TaskManager {
+class TaskManager : public ITaskManager {
 public:
-    enum class State { Stopped, Running };
+    using State = ITaskManager::State;
 
     TaskManager(const AppConfig& cfg,
                 IPublisher& publisher,

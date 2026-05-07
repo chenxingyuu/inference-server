@@ -12,7 +12,7 @@ namespace infer {
 struct ServerConfig {
     int stream_pool_threads{32};
     int max_streams{100};
-    int management_port{8080};          // HTTP management server port
+    std::string socket_path{"/var/run/infer.sock"};
     std::string ffmpeg_log_level{"warning"};  // FFmpeg log threshold (quiet/fatal/error/warning/info/debug/trace)
     std::string log_level{"info"};            // spdlog level (trace/debug/info/warn/error/critical/off)
     // Triton-style model repository root (<root>/<model_id>/config.yaml + version subdirs). Empty disables scan.

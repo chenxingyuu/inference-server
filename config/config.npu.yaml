@@ -9,7 +9,7 @@
 server:
   stream_pool_threads: 16
   max_streams: 50
-  management_port: 8080
+  socket_path: "/var/run/infer.sock"
   ffmpeg_log_level: "fatal"
   log_level: "debug"
   model_repository: "models"

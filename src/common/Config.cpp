@@ -587,7 +587,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
     if (auto sn = root["server"]) {
         cfg.server.stream_pool_threads = sn["stream_pool_threads"].as<int>(32);
         cfg.server.max_streams         = sn["max_streams"].as<int>(100);
-        cfg.server.management_port     = sn["management_port"].as<int>(8080);
+        cfg.server.socket_path         = sn["socket_path"].as<std::string>("/var/run/infer.sock");
         cfg.server.ffmpeg_log_level    = sn["ffmpeg_log_level"].as<std::string>("warning");
         cfg.server.log_level           = sn["log_level"].as<std::string>("info");
         cfg.server.model_repository    = sn["model_repository"].as<std::string>("");
