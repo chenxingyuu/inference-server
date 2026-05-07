@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -55,9 +55,42 @@ export function LoadingRows({ cols }: { cols: number }) {
 }
 
 export function DeleteButton({ onClick, loading }: { onClick: () => void; loading?: boolean }) {
+  const [confirming, setConfirming] = useState(false)
+
+  useEffect(() => {
+    if (!confirming) return
+    const t = setTimeout(() => setConfirming(false), 3000)
+    return () => clearTimeout(t)
+  }, [confirming])
+
+  if (confirming) {
+    return (
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => { setConfirming(false); onClick() }}
+          className="btn-icon text-danger hover:text-danger bg-danger/10 border border-danger/25 rounded px-1"
+          title="Confirm"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-3 h-3">
+            <path d="M2 8l4 4 8-8" />
+          </svg>
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="btn-icon text-ink-muted hover:text-ink-secondary"
+          title="Cancel"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3">
+            <path d="M3 3l10 10M13 3L3 13" />
+          </svg>
+        </button>
+      </div>
+    )
+  }
+
   return (
     <button
-      onClick={onClick}
+      onClick={() => setConfirming(true)}
       disabled={loading}
       className="btn-icon text-danger/60 hover:text-danger"
       title="Remove"
