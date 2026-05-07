@@ -2,11 +2,15 @@
 	configure-cpu configure-gpu configure-npu configure-tests \
 	build build-cpu build-gpu build-npu build-tests \
 	build-go swagger \
+	build-web dev-web \
 	run run-cpu run-gpu run-npu \
 	test validate clean \
-	docker-build-cpu docker-build-gpu docker-build-npu docker-build-infer-server \
+	docker-build-cpu docker-build-gpu docker-build-npu docker-build-infer-server docker-build-infer-web \
 	up up-cpu up-gpu up-npu \
 	down down-cpu down-gpu down-npu
+
+PNPM ?= $(shell which pnpm 2>/dev/null || echo pnpm)
+WEB_DIR := tools/infer-web
 
 BUILD_DIR ?= build
 BUILD_TYPE ?= Release
@@ -113,8 +117,17 @@ build-go: swagger
 	cd tools && $(GO) build -o bin/infer-ctl ./infer-ctl/
 	cd tools && $(GO) build -o bin/infer-server ./infer-server/
 
+build-web:
+	cd $(WEB_DIR) && $(PNPM) install && $(PNPM) run build
+
+dev-web:
+	cd $(WEB_DIR) && $(PNPM) install && $(PNPM) run dev
+
 docker-build-infer-server:
 	DOCKER_BUILDKIT=1 docker build -t infer-server:latest -f docker/Dockerfile.infer-server .
+
+docker-build-infer-web:
+	DOCKER_BUILDKIT=1 docker build -t infer-web:latest -f docker/Dockerfile.infer-web .
 
 docker-build-cpu:
 	DOCKER_BUILDKIT=1 docker build -t inference-server:cpu -f docker/Dockerfile.cpu .

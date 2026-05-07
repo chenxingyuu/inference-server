@@ -41,3 +41,6 @@ build_agent/
 __pycache__/
 .venv/
 tools/bin/
+
+dist/
+node_modules/

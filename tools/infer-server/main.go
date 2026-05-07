@@ -42,6 +42,19 @@ func envOr(key, def string) string {
 	return def
 }
 
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
+}
+
 func authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bearer := c.GetHeader("Authorization")
@@ -409,6 +422,7 @@ func main() {
 	}
 
 	r := gin.Default()
+	r.Use(corsMiddleware())
 
 	// Public: health probe, metrics scrape, API docs.
 	r.GET("/healthz", handleHealthz)

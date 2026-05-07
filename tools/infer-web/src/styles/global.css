@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-bg-base text-ink-primary font-sans antialiased;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { @apply bg-bg-base; }
+  ::-webkit-scrollbar-thumb { @apply bg-ink-muted/40 rounded; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-ink-muted/70; }
+}
+
+@layer components {
+  .data-table { @apply w-full border-collapse; }
+
+  .data-table th {
+    @apply text-left text-[10.5px] font-semibold uppercase tracking-[0.1em]
+           text-ink-muted px-4 py-2 border-b border-border;
+  }
+
+  .data-table td {
+    @apply px-4 py-2.5 border-b border-border/60;
+  }
+
+  .data-table tr:last-child td { @apply border-b-0; }
+
+  .data-table tbody tr {
+    @apply transition-colors duration-75;
+  }
+  .data-table tbody tr:hover { @apply bg-bg-overlay/70; }
+
+  .page-header {
+    @apply flex items-center justify-between px-6 py-4 border-b border-border;
+  }
+
+  .page-title {
+    @apply text-base font-semibold text-ink-primary;
+  }
+
+  .page-subtitle {
+    @apply text-xs text-ink-muted mt-0.5;
+  }
+
+  .section {
+    @apply p-6;
+  }
+
+  .card {
+    @apply bg-bg-surface border border-border rounded;
+  }
+
+  .input-field {
+    @apply w-full bg-bg-overlay border border-border rounded px-3 py-2
+           text-ink-primary placeholder-ink-muted/60
+           focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/20
+           transition-colors duration-150;
+    font-size: 13px;
+  }
+
+  .label {
+    @apply block text-[11px] font-medium uppercase tracking-wide text-ink-muted mb-1.5;
+  }
+
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded font-medium
+           transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
+    font-size: 12.5px;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-bg-base hover:bg-accent/90 active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply btn border border-border text-ink-secondary hover:border-ink-muted/60
+           hover:text-ink-primary active:scale-95;
+  }
+
+  .btn-danger {
+    @apply btn border border-danger/30 text-danger hover:bg-danger/10 active:scale-95;
+  }
+
+  .btn-icon {
+    @apply p-1.5 rounded text-ink-muted hover:text-ink-primary hover:bg-bg-elevated
+           transition-all duration-100 active:scale-90;
+  }
+}
+
+@keyframes led-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.led-pulse { animation: led-pulse 1.8s ease-in-out infinite; }

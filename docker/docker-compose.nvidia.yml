@@ -33,6 +33,15 @@ services:
       - infer-trt
     restart: unless-stopped
 
+  # ── Web UI ────────────────────────────────────────────────────────────────
+  infer-web:
+    image: registry.cn-hangzhou.aliyuncs.com/daxx/infer-web:latest
+    ports:
+      - "8081:80"
+    depends_on:
+      - infer-server
+    restart: unless-stopped
+
   # ── ZooKeeper ─────────────────────────────────────────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0

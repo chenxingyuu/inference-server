@@ -27,7 +27,14 @@ services:
       options:
         max-size: "100m"
         max-file: "5"
-
+  # ── Web UI ────────────────────────────────────────────────────────────────
+  infer-web:
+    image: registry.cn-hangzhou.aliyuncs.com/daxx/infer-web:latest
+    ports:
+      - "8081:80"
+    depends_on:
+      - infer-server
+    restart: unless-stopped
   # ── Management HTTP sidecar (Go) ───────────────────────────────────────────
   infer-server:
     image: registry.cn-hangzhou.aliyuncs.com/daxx/infer-server:latest
