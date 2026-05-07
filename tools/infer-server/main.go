@@ -268,6 +268,47 @@ func handleAddPipeline(c *gin.Context) {
 	c.JSON(code, resp)
 }
 
+// handleUpdatePipeline godoc
+//
+//	@Summary	Update a pipeline
+//	@Tags		pipelines
+//	@Accept		json
+//	@Produce	json
+//	@Security	ApiKeyAuth
+//	@Param		id		path		string			true	"Pipeline ID"
+//	@Param		body	body		PipelineCreate	true	"Pipeline definition"
+//	@Success	200		{object}	OkResponse
+//	@Failure	400		{object}	ErrorResponse
+//	@Failure	401		{object}	ErrorResponse
+//	@Failure	404		{object}	ErrorResponse
+//	@Failure	409		{object}	ErrorResponse	"pipeline is in use by a task"
+//	@Failure	503		{string}	string			"engine unreachable"
+//	@Router		/pipelines/{id} [put]
+func handleUpdatePipeline(c *gin.Context) {
+	id := c.Param("id")
+	var body PipelineCreate
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.String(http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	body.ID = id
+	m := mustToMap(body)
+	m["cmd"] = "update_pipeline"
+	resp, err := call(m)
+	if err != nil {
+		engineUnavailable(c, err)
+		return
+	}
+	if resp["status"] == "ok" {
+		_ = store.SavePipeline(body)
+	}
+	code := http.StatusOK
+	if resp["status"] != "ok" {
+		code = http.StatusBadRequest
+	}
+	c.JSON(code, resp)
+}
+
 // handleRemovePipeline godoc
 //
 //	@Summary	Remove a pipeline
@@ -522,6 +563,7 @@ func main() {
 
 	api.GET("/pipelines", handleListPipelines)
 	api.POST("/pipelines", handleAddPipeline)
+	api.PUT("/pipelines/:id", handleUpdatePipeline)
 	api.DELETE("/pipelines/:id", handleRemovePipeline)
 
 	api.GET("/models", handleListModels)

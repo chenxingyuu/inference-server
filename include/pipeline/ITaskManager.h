@@ -61,6 +61,7 @@ public:
 
     virtual bool addPipeline(const PipelineConfig& pipeline) = 0;
     virtual bool removePipeline(const std::string& id) = 0;
+    virtual bool updatePipeline(const PipelineConfig& pipeline) = 0;
 
     virtual bool addTask(const TaskConfig& task) = 0;
     virtual bool removeTask(const std::string& id) = 0;

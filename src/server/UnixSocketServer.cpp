@@ -238,6 +238,32 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 
+    if (cmd == "update_pipeline") {
+        const auto id = req.value("id", std::string{});
+        if (id.empty())
+            return json({{"status", "error"}, {"message", "missing field: id"}}).dump();
+        PipelineConfig p;
+        p.id = id;
+        for (const auto& n : req.value("nodes", json::array())) {
+            StageConfig s;
+            s.id   = n.value("id",   std::string{});
+            s.type = n.value("type", std::string{});
+            if (n.contains("with") && n["with"].is_object())
+                for (const auto& [k, v] : n["with"].items())
+                    s.with[k] = v.get<std::string>();
+            p.nodes.push_back(std::move(s));
+        }
+        for (const auto& e : req.value("edges", json::array())) {
+            EdgeConfig ec;
+            ec.from = e.value("from", std::string{});
+            ec.to   = e.value("to",   std::string{});
+            p.edges.push_back(std::move(ec));
+        }
+        if (!task_manager_.updatePipeline(p))
+            return json({{"status", "error"}, {"message", "not found or in use: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
     if (cmd == "remove_pipeline") {
         const auto id = req.value("id", std::string{});
         const auto pipes = task_manager_.listPipelines();

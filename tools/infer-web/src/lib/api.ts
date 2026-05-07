@@ -78,6 +78,7 @@ export const api = {
   pipelines: {
     list: () => req<PipelineInfo[]>('/pipelines'),
     add: (body: PipelineCreate) => req<OkResponse>('/pipelines', { method: 'POST', body: json(body) }),
+    update: (id: string, body: PipelineCreate) => req<OkResponse>(`/pipelines/${id}`, { method: 'PUT', body: json(body) }),
     remove: (id: string) => req<OkResponse>(`/pipelines/${id}`, { method: 'DELETE' }),
   },
 

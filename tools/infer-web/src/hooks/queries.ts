@@ -67,6 +67,18 @@ export const useAddPipeline = () => {
   })
 }
 
+export const useUpdatePipeline = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: PipelineCreate }) => api.pipelines.update(id, body),
+    onSuccess: (_, { id }) => {
+      toast.success(`Pipeline "${id}" updated`)
+      qc.invalidateQueries({ queryKey: ['pipelines'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
 export const useRemovePipeline = () => {
   const qc = useQueryClient()
   return useMutation({

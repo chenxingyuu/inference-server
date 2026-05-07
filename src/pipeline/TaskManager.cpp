@@ -313,6 +313,19 @@ bool TaskManager::removePipeline(const std::string& id) {
     return true;
 }
 
+bool TaskManager::updatePipeline(const PipelineConfig& pipeline) {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!cfg_.findPipeline(pipeline.id)) return false;
+    for (const auto& t : cfg_.tasks)
+        if (t.pipeline_id == pipeline.id) return false;
+    for (auto& p : cfg_.pipelines)
+        if (p.id == pipeline.id) { p = pipeline; break; }
+    for (auto& p : runtime_state_.added_pipelines)
+        if (p.id == pipeline.id) { p = pipeline; break; }
+    persist();
+    return true;
+}
+
 bool TaskManager::addTask(const TaskConfig& task) {
     std::lock_guard<std::mutex> lock(mu_);
     if (entries_.count(task.id)) return false;

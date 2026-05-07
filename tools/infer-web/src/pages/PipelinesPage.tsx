@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { usePipelines, useAddPipeline, useRemovePipeline } from '../hooks/queries'
+import { usePipelines, useAddPipeline, useUpdatePipeline, useRemovePipeline } from '../hooks/queries'
 import { Modal } from '../components/ui/Modal'
 import { Field, Input, Select } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
 import { useT } from '../lib/i18n'
 import { NODE_TYPE_DEFS, NODE_CATEGORIES, getNodeTypeDef } from '../lib/nodeTypes'
-import type { PipelineCreate, StageConfig, EdgeConfig, DropPolicy } from '../types'
+import type { PipelineCreate, PipelineInfo, StageConfig, EdgeConfig, DropPolicy } from '../types'
 
 const CUSTOM = '__custom__'
 
@@ -190,14 +190,50 @@ function EdgeRow({
 export function PipelinesPage() {
   const { data: pipelines = [], isLoading } = usePipelines()
   const add = useAddPipeline()
+  const update = useUpdatePipeline()
   const remove = useRemovePipeline()
   const { t } = useT()
 
   const [open, setOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [pipeId, setPipeId] = useState('')
   const [nodes, setNodes] = useState<StageConfig[]>([blankNode()])
   const [edges, setEdges] = useState<EdgeConfig[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
+
+  const isEditing = editingId !== null
+
+  const openAdd = () => {
+    setEditingId(null)
+    setPipeId('')
+    setNodes([blankNode()])
+    setEdges([])
+    setOpen(true)
+  }
+
+  const openCopy = (p: PipelineInfo) => {
+    setEditingId(null)
+    setPipeId(`${p.id}-copy`)
+    setNodes(p.nodes.length ? p.nodes : [blankNode()])
+    setEdges(p.edges ?? [])
+    setOpen(true)
+  }
+
+  const openEdit = (p: PipelineInfo) => {
+    setEditingId(p.id)
+    setPipeId(p.id)
+    setNodes(p.nodes.length ? p.nodes : [blankNode()])
+    setEdges(p.edges ?? [])
+    setOpen(true)
+  }
+
+  const closeModal = () => {
+    setOpen(false)
+    setEditingId(null)
+    setPipeId('')
+    setNodes([blankNode()])
+    setEdges([])
+  }
 
   const updateNode = (i: number, n: StageConfig) =>
     setNodes((ns) => ns.map((x, j) => (j === i ? n : x)))
@@ -211,14 +247,11 @@ export function PipelinesPage() {
       nodes,
       edges: edges.filter((e) => e.from && e.to),
     }
-    add.mutate(body, {
-      onSuccess: () => {
-        setOpen(false)
-        setPipeId('')
-        setNodes([blankNode()])
-        setEdges([])
-      },
-    })
+    if (isEditing) {
+      update.mutate({ id: editingId!, body }, { onSuccess: closeModal })
+    } else {
+      add.mutate(body, { onSuccess: closeModal })
+    }
   }
 
   return (
@@ -227,7 +260,7 @@ export function PipelinesPage() {
         title={t('pipelines.title')}
         subtitle={t('pipelines.subtitle')}
         action={
-          <button onClick={() => setOpen(true)} className="btn-primary">
+          <button onClick={openAdd} className="btn-primary">
             {t('pipelines.add')}
           </button>
         }
@@ -262,7 +295,21 @@ export function PipelinesPage() {
                     </td>
                     <td className="font-mono text-[12px] text-ink-secondary">{p.nodes.length}</td>
                     <td className="font-mono text-[12px] text-ink-secondary">{p.edges.length}</td>
-                    <td className="text-right pr-2" onClick={(e) => e.stopPropagation()}>
+                    <td className="text-right pr-2 flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => openCopy(p)}
+                        className="btn-icon text-ink-muted hover:text-accent"
+                        title={t('pipelines.copy')}
+                      >
+                        ⎘
+                      </button>
+                      <button
+                        onClick={() => openEdit(p)}
+                        className="btn-icon text-ink-muted hover:text-accent"
+                        title={t('pipelines.edit')}
+                      >
+                        ✎
+                      </button>
                       <DeleteButton
                         loading={remove.isPending}
                         onClick={() => remove.mutate(p.id)}
@@ -329,13 +376,15 @@ export function PipelinesPage() {
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title={t('pipelines.modal_title')} width="max-w-2xl">
+      <Modal open={open} onClose={closeModal} title={isEditing ? t('pipelines.modal_edit_title') : t('pipelines.modal_title')} width="max-w-2xl">
         <div className="space-y-5">
           <Field label={t('pipelines.field.id')}>
             <Input
               placeholder="detection-pipeline"
               value={pipeId}
               onChange={(e) => setPipeId(e.target.value)}
+              disabled={isEditing}
+              className={isEditing ? 'opacity-60 cursor-not-allowed' : ''}
             />
           </Field>
 
@@ -403,13 +452,15 @@ export function PipelinesPage() {
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setOpen(false)} className="btn-ghost">{t('common.cancel')}</button>
+            <button onClick={closeModal} className="btn-ghost">{t('common.cancel')}</button>
             <button
               onClick={submit}
-              disabled={!pipeId || nodes.some((n) => !n.id || !n.type) || add.isPending}
+              disabled={!pipeId || nodes.some((n) => !n.id || !n.type) || add.isPending || update.isPending}
               className="btn-primary"
             >
-              {add.isPending ? t('pipelines.adding') : t('pipelines.add')}
+              {isEditing
+                ? (update.isPending ? t('pipelines.saving') : t('pipelines.save'))
+                : (add.isPending ? t('pipelines.adding') : t('pipelines.add'))}
             </button>
           </div>
         </div>

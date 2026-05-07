@@ -112,6 +112,11 @@ const en = {
   'pipelines.col.drop_policy': 'Drop Policy',
   'pipelines.empty':           'No pipelines defined. Add one to connect sources to inference.',
   'pipelines.adding':          'Adding…',
+  'pipelines.copy':            'Copy',
+  'pipelines.edit':            'Edit',
+  'pipelines.modal_edit_title': 'Edit Pipeline',
+  'pipelines.saving':          'Saving…',
+  'pipelines.save':            'Save',
 
   'tasks.title':               'Tasks',
   'tasks.subtitle_stats':      '{total} total · {running} running',
@@ -240,6 +245,11 @@ const zh: Record<keyof typeof en, string> = {
   'pipelines.col.drop_policy': '丢弃策略',
   'pipelines.empty':           '暂无流水线，添加一个以连接数据源与推理。',
   'pipelines.adding':          '添加中…',
+  'pipelines.copy':            '复制',
+  'pipelines.edit':            '编辑',
+  'pipelines.modal_edit_title': '编辑流水线',
+  'pipelines.saving':          '保存中…',
+  'pipelines.save':            '保存',
 
   'tasks.title':               '任务',
   'tasks.subtitle_stats':      '共 {total} 个 · {running} 个运行中',

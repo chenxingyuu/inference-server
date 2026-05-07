@@ -31,6 +31,7 @@ struct FakeTaskManager : ITaskManager {
     bool remove_source_result{true};
     bool add_pipeline_result{true};
     bool remove_pipeline_result{true};
+    bool update_pipeline_result{true};
     bool add_task_result{true};
     bool remove_task_result{true};
     bool load_model_result{true};
@@ -47,6 +48,7 @@ struct FakeTaskManager : ITaskManager {
     bool removeSource(const std::string&)       override { return remove_source_result; }
     bool addPipeline(const PipelineConfig&)     override { return add_pipeline_result; }
     bool removePipeline(const std::string&)     override { return remove_pipeline_result; }
+    bool updatePipeline(const PipelineConfig&)  override { return update_pipeline_result; }
     bool addTask(const TaskConfig&)             override { return add_task_result; }
     bool removeTask(const std::string&)         override { return remove_task_result; }
     bool loadModel(const ModelConfig&)          override { return load_model_result; }
