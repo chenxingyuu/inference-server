@@ -99,6 +99,7 @@ endif()
 set(COMMON_SOURCES
     src/common/Config.cpp
     src/common/Logger.cpp
+    src/common/RuntimeState.cpp
 )
 
 set(STREAM_SOURCES

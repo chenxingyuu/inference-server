@@ -213,19 +213,11 @@ add_test(NAME test_gpu_fault_recovery COMMAND test_gpu_fault_recovery
 # Unix socket management server (no GPU/Kafka/FFmpeg deps)
 add_executable(test_unix_socket_server test_unix_socket_server.cpp
     ${CMAKE_SOURCE_DIR}/src/server/UnixSocketServer.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
     ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
 )
-target_include_directories(test_unix_socket_server PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${OpenCV_INCLUDE_DIRS}
-)
 target_link_libraries(test_unix_socket_server PRIVATE
+    infer_testable
     GTest::gtest_main
-    spdlog::spdlog
-    nlohmann_json::nlohmann_json
-    ${OpenCV_LIBS}
-    Threads::Threads
 )
 add_test(NAME test_unix_socket_server COMMAND test_unix_socket_server
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)

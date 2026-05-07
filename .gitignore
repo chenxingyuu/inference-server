@@ -40,3 +40,4 @@ build_agent/
 
 __pycache__/
 .venv/
+tools/bin/

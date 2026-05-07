@@ -107,6 +107,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // cfg will be moved into TaskManager. Snapshot fields needed afterwards.
+    const auto mgmt_socket_path = cfg.server.socket_path;
+    const auto kafka_cfg        = cfg.publishers.kafka;
+    const auto task_count       = cfg.tasks.size();
+
     // Re-apply log level from config now that it is parsed.
     infer::initLogger(cfg.server.log_level);
     logConfiguredPipelinesAndTasks(cfg);
@@ -132,14 +137,14 @@ int main(int argc, char* argv[]) {
     }
 
     auto frame_archiver = std::make_shared<infer::FrameArchiver>(cfg.frame_archive);
-    infer::TaskManager task_manager(cfg, *publisher, frame_archiver);
+    infer::TaskManager task_manager(std::move(cfg), config_path, *publisher, frame_archiver);
     task_manager.loadAll();
     task_manager.startAll();
 
     // ── Start heartbeat publisher (Phase 10) ─────────────────────────────────
     std::unique_ptr<infer::HeartbeatPublisher> heartbeat;
     try {
-        heartbeat = std::make_unique<infer::HeartbeatPublisher>(cfg.publishers.kafka);
+        heartbeat = std::make_unique<infer::HeartbeatPublisher>(kafka_cfg);
         heartbeat->start();
     } catch (const std::exception& e) {
         LOG_WARN("HeartbeatPublisher init failed (non-fatal): {}", e.what());
@@ -149,7 +154,7 @@ int main(int argc, char* argv[]) {
     // ── Start control publisher (Phase 14) ───────────────────────────────────
     std::shared_ptr<infer::ControlPublisher> control;
     try {
-        control = std::make_shared<infer::ControlPublisher>(cfg.publishers.kafka.brokers, cfg.publishers.kafka.control_topic);
+        control = std::make_shared<infer::ControlPublisher>(kafka_cfg.brokers, kafka_cfg.control_topic);
         infer::ControlEventBus::get().setPublisher(control);
     } catch (const std::exception& e) {
         LOG_WARN("ControlPublisher init failed (non-fatal): {}", e.what());
@@ -157,11 +162,11 @@ int main(int argc, char* argv[]) {
     }
 
     // ── Start management HTTP server ──────────────────────────────────────────
-    infer::UnixSocketServer mgmt_server(cfg.server.socket_path, task_manager);
+    infer::UnixSocketServer mgmt_server(mgmt_socket_path, task_manager);
     mgmt_server.start();
 
     LOG_INFO("All tasks running. TaskCount: {} SocketPath: {}",
-             cfg.tasks.size(), cfg.server.socket_path);
+             task_count, mgmt_socket_path);
 
     // ── Main wait loop ────────────────────────────────────────────────────────
     while (!g_shutdown.load()) {

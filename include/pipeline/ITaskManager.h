@@ -1,10 +1,34 @@
 #pragma once
 
+#include "common/Config.h"
+
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace infer {
+
+struct SourceInfo {
+    std::string id;
+    std::string url;
+    std::string state;       // streamStateStr() value
+    int         reconnect_count{0};
+};
+
+struct PipelineInfo {
+    std::string              id;
+    std::vector<std::string> nodes;
+    int                      edge_count{0};
+};
+
+struct ModelInfo {
+    std::string id;
+    std::string backend;
+    std::string version;
+    std::string input_shape;  // "CxHxW"
+    int         batch_size{1};
+    int         instance_count{1};
+};
 
 class ITaskManager {
 public:
@@ -13,7 +37,23 @@ public:
     virtual ~ITaskManager() = default;
     virtual bool start(const std::string& task_id) = 0;
     virtual bool stop(const std::string& task_id) = 0;
-    virtual std::vector<std::pair<std::string, State>> listTasks() const = 0;
+    virtual std::vector<std::pair<std::string, State>> listTasks()    const = 0;
+    virtual std::vector<SourceInfo>                    listSources()  const = 0;
+    virtual std::vector<PipelineInfo>                  listPipelines()const = 0;
+    virtual std::vector<ModelInfo>                     listModels()   const = 0;
+
+    // Mutations — all return false on conflict (duplicate id or id not found).
+    virtual bool addSource(const PipelineSourceConfig& src) = 0;
+    virtual bool removeSource(const std::string& id) = 0;
+
+    virtual bool addPipeline(const PipelineConfig& pipeline) = 0;
+    virtual bool removePipeline(const std::string& id) = 0;
+
+    virtual bool addTask(const TaskConfig& task) = 0;
+    virtual bool removeTask(const std::string& id) = 0;
+
+    virtual bool loadModel(const ModelConfig& model) = 0;
+    virtual bool unloadModel(const std::string& id) = 0;
 };
 
 } // namespace infer

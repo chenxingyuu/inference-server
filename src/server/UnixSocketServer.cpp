@@ -1,4 +1,5 @@
 #include "server/UnixSocketServer.h"
+#include "common/Config.h"
 #include "metrics/Metrics.h"
 #include "common/Logger.h"
 
@@ -116,6 +117,138 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         const auto id = req.value("id", std::string{});
         if (!task_manager_.stop(id))
             return json({{"status", "error"}, {"message", "task not found: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
+    if (cmd == "list_sources") {
+        json arr = json::array();
+        for (const auto& s : task_manager_.listSources()) {
+            arr.push_back({{"id", s.id}, {"url", s.url}, {"state", s.state}, {"reconnect_count", s.reconnect_count}});
+        }
+        return json({{"status", "ok"}, {"data", arr}}).dump();
+    }
+
+    if (cmd == "list_pipelines") {
+        json arr = json::array();
+        for (const auto& p : task_manager_.listPipelines()) {
+            arr.push_back({{"id", p.id}, {"nodes", p.nodes}, {"edge_count", p.edge_count}});
+        }
+        return json({{"status", "ok"}, {"data", arr}}).dump();
+    }
+
+    if (cmd == "list_models") {
+        json arr = json::array();
+        for (const auto& m : task_manager_.listModels()) {
+            arr.push_back({{"id", m.id}, {"backend", m.backend}, {"version", m.version},
+                           {"input_shape", m.input_shape}, {"batch_size", m.batch_size},
+                           {"instance_count", m.instance_count}});
+        }
+        return json({{"status", "ok"}, {"data", arr}}).dump();
+    }
+
+    if (cmd == "add_source") {
+        const auto id = req.value("id", std::string{});
+        if (id.empty())
+            return json({{"status", "error"}, {"message", "missing field: id"}}).dump();
+        PipelineSourceConfig src;
+        src.id                    = id;
+        src.url                   = req.value("url", std::string{});
+        src.reconnect_delay_ms    = req.value("reconnect_delay_ms",    src.reconnect_delay_ms);
+        src.max_reconnect_delay_ms= req.value("max_reconnect_delay_ms",src.max_reconnect_delay_ms);
+        src.degraded_threshold    = req.value("degraded_threshold",    src.degraded_threshold);
+        src.max_reconnect_attempts= req.value("max_reconnect_attempts",src.max_reconnect_attempts);
+        if (!task_manager_.addSource(src))
+            return json({{"status", "error"}, {"message", "already exists: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
+    if (cmd == "remove_source") {
+        const auto id = req.value("id", std::string{});
+        if (!task_manager_.removeSource(id))
+            return json({{"status", "error"}, {"message", "not found or in use: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
+    if (cmd == "add_pipeline") {
+        const auto id = req.value("id", std::string{});
+        if (id.empty())
+            return json({{"status", "error"}, {"message", "missing field: id"}}).dump();
+        PipelineConfig p;
+        p.id = id;
+        for (const auto& n : req.value("nodes", json::array())) {
+            StageConfig s;
+            s.id   = n.value("id",   std::string{});
+            s.type = n.value("type", std::string{});
+            if (n.contains("with") && n["with"].is_object())
+                for (const auto& [k, v] : n["with"].items())
+                    s.with[k] = v.get<std::string>();
+            p.nodes.push_back(std::move(s));
+        }
+        for (const auto& e : req.value("edges", json::array())) {
+            EdgeConfig ec;
+            ec.from = e.value("from", std::string{});
+            ec.to   = e.value("to",   std::string{});
+            p.edges.push_back(std::move(ec));
+        }
+        if (!task_manager_.addPipeline(p))
+            return json({{"status", "error"}, {"message", "already exists: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
+    if (cmd == "remove_pipeline") {
+        const auto id = req.value("id", std::string{});
+        if (!task_manager_.removePipeline(id))
+            return json({{"status", "error"}, {"message", "not found or in use: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
+    if (cmd == "add_task") {
+        const auto id          = req.value("id",          std::string{});
+        const auto source_id   = req.value("source_id",   std::string{});
+        const auto pipeline_id = req.value("pipeline_id", std::string{});
+        if (id.empty() || source_id.empty() || pipeline_id.empty())
+            return json({{"status", "error"}, {"message", "missing required fields: id, source_id, pipeline_id"}}).dump();
+        TaskConfig t;
+        t.id          = id;
+        t.source_id   = source_id;
+        t.pipeline_id = pipeline_id;
+        t.sample_fps  = req.value("sample_fps", t.sample_fps);
+        if (!task_manager_.addTask(t))
+            return json({{"status", "error"}, {"message", "failed to add task: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
+    if (cmd == "remove_task") {
+        const auto id = req.value("id", std::string{});
+        if (!task_manager_.removeTask(id))
+            return json({{"status", "error"}, {"message", "not found: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
+    if (cmd == "load_model") {
+        const auto id = req.value("id", std::string{});
+        if (id.empty())
+            return json({{"status", "error"}, {"message", "missing field: id"}}).dump();
+        ModelConfig m;
+        m.id         = id;
+        m.backend    = parseDeviceType(req.value("backend", std::string{"cpu"}));
+        m.onnx_path  = req.value("onnx_path",   std::string{});
+        m.engine_path= req.value("engine_path", std::string{});
+        m.batch_size = req.value("batch_size",  m.batch_size);
+        if (req.contains("input_shape") && req["input_shape"].is_object()) {
+            m.input_shape.channels = req["input_shape"].value("c", m.input_shape.channels);
+            m.input_shape.height   = req["input_shape"].value("h", m.input_shape.height);
+            m.input_shape.width    = req["input_shape"].value("w", m.input_shape.width);
+        }
+        if (!task_manager_.loadModel(m))
+            return json({{"status", "error"}, {"message", "already exists: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
+    if (cmd == "unload_model") {
+        const auto id = req.value("id", std::string{});
+        if (!task_manager_.unloadModel(id))
+            return json({{"status", "error"}, {"message", "not found: " + id}}).dump();
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 
