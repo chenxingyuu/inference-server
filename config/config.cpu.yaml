@@ -11,7 +11,7 @@
 server:
   stream_pool_threads: 16
   max_streams: 50
-  socket_path: "./infer.sock"
+  socket_path: "/var/run/infer/infer.sock"
   ffmpeg_log_level: "warning"
   log_level: "info"
   # 仓库根：其下每个子目录若含 config.yaml 则注册为一个 model_id（如 models/yolov8n_cpu/）。

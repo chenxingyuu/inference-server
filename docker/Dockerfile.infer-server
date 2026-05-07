@@ -1,0 +1,13 @@
+FROM golang:1.21-alpine AS builder
+WORKDIR /build
+COPY tools/go.mod .
+RUN go mod download
+COPY tools/ .
+RUN CGO_ENABLED=0 go build -o /infer-server ./infer-server/
+
+FROM alpine:3.19
+COPY --from=builder /infer-server /usr/local/bin/infer-server
+ENV INFER_SOCKET=/var/run/infer/infer.sock
+ENV INFER_SERVER_ADDR=:8080
+EXPOSE 8080
+CMD ["infer-server"]

@@ -632,6 +632,43 @@ tasks:
 
 ---
 
+## Phase 26 — 管理接口重构（UnixSocket + Go Sidecar）
+
+**完成**：2026-05-07
+
+**目标**：移除 C++ 内嵌 HTTP server（cpp-httplib），改用 POSIX Unix domain socket 暴露管理接口；Go sidecar 负责 HTTP 层，CLI 工具面向运维人员。
+
+**动机**：cpp-httplib 通过 FetchContent 引入，增加构建时间与依赖；HTTP 解析/路由逻辑在 C++ 中维护成本高；Go 更适合做轻量 HTTP 服务与 CLI 工具。
+
+**架构变化**：
+```
+旧: inferenced (C++) → cpp-httplib → HTTP :8080
+新: inferenced (C++) → Unix socket (/var/run/infer.sock) ← infer-server (Go) → HTTP :8080
+                                                          ← infer-ctl (Go CLI)
+```
+
+**协议**：换行分隔 JSON（NDJSON），每个连接一问一答：
+```json
+→ {"cmd":"list_tasks"}
+← {"status":"ok","data":[{"id":"cam0","state":"running"}]}
+```
+
+**新增**：
+- `include/pipeline/ITaskManager.h`：抽取纯接口（`listTasks` / `start` / `stop`），`TaskManager` 继承它，解耦测试依赖
+- `include/server/UnixSocketServer.h` + `src/server/UnixSocketServer.cpp`：POSIX socket 实现，零第三方依赖，`detach` 线程处理并发连接
+- `tools/infer-ctl/main.go`：CLI，子命令 `health / tasks / start / stop / metrics`，`INFER_SOCKET` 环境变量覆盖路径
+- `tools/infer-server/main.go`：HTTP sidecar，将 REST 请求转发到 socket，Prometheus 可直接 scrape `/metrics`
+
+**移除**：
+- `src/server/ManagementServer.cpp` / `include/server/ManagementServer.h`
+- CMakeLists.txt 中 `FetchContent_Declare(httplib ...)` 及 `httplib::httplib` 链接项
+
+**配置变更**：`server.management_port` → `server.socket_path`（默认 `/var/run/infer.sock`）
+
+**测试**：`tests/test_unix_socket_server.cpp` 10 个测试全绿，覆盖全部命令、错误路径、无效 JSON。
+
+---
+
 ## 待办
 
 - [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
