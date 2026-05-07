@@ -30,7 +30,10 @@ func call(cmd map[string]any) (map[string]any, error) {
 	}
 	defer conn.Close()
 
-	data, _ := json.Marshal(cmd)
+	data, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
 	fmt.Fprintf(conn, "%s\n", data)
 
 	var resp map[string]any
@@ -107,7 +110,11 @@ func deleteHandler(removeCmd string) gin.HandlerFunc {
 		}
 		code := http.StatusOK
 		if resp["status"] != "ok" {
-			code = http.StatusNotFound
+			if resp["code"] == "in_use" {
+				code = http.StatusConflict // 409: resource exists but is referenced
+			} else {
+				code = http.StatusNotFound // 404: resource not found
+			}
 		}
 		c.JSON(code, resp)
 	}

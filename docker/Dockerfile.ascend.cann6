@@ -72,6 +72,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server
+COPY --from=builder /src/build/_deps/hiredis-build/libhiredis.so* /usr/local/lib/
+RUN ldconfig
 
 VOLUME ["/models", "/config"]
 ENTRYPOINT ["/usr/local/bin/infer_server", "/config/config.yaml"]

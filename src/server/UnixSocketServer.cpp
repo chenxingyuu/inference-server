@@ -5,9 +5,14 @@
 
 #include <nlohmann/json.hpp>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <stdexcept>
 #include <thread>
 
 namespace infer {
@@ -26,12 +31,28 @@ void UnixSocketServer::start() {
     ::unlink(path_.c_str());
 
     server_fd_ = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server_fd_ < 0)
+        throw std::runtime_error(std::string("UnixSocketServer: socket() failed: ") + std::strerror(errno));
 
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     ::strncpy(addr.sun_path, path_.c_str(), sizeof(addr.sun_path) - 1);
-    ::bind(server_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-    ::listen(server_fd_, 8);
+
+    if (::bind(server_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        ::close(server_fd_);
+        server_fd_ = -1;
+        throw std::runtime_error(std::string("UnixSocketServer: bind() failed on ") + path_ + ": " + std::strerror(errno));
+    }
+
+    // Restrict socket access to the owning user only.
+    ::chmod(path_.c_str(), 0600);
+
+    if (::listen(server_fd_, 8) < 0) {
+        ::close(server_fd_);
+        server_fd_ = -1;
+        ::unlink(path_.c_str());
+        throw std::runtime_error(std::string("UnixSocketServer: listen() failed: ") + std::strerror(errno));
+    }
 
     thread_ = std::thread([this] {
         LOG_INFO("UnixSocketServer: listening on {}", path_);
@@ -46,6 +67,16 @@ void UnixSocketServer::stop() {
     ::close(server_fd_);
     server_fd_ = -1;
     if (thread_.joinable()) thread_.join();
+
+    // Join all client threads before releasing the object.
+    std::vector<std::thread> to_join;
+    {
+        std::lock_guard<std::mutex> lock(clients_mu_);
+        to_join.swap(client_threads_);
+    }
+    for (auto& t : to_join)
+        if (t.joinable()) t.join();
+
     ::unlink(path_.c_str());
 }
 
@@ -53,10 +84,12 @@ void UnixSocketServer::acceptLoop() {
     while (running_) {
         int client_fd = ::accept(server_fd_, nullptr, nullptr);
         if (client_fd < 0) break;
-        std::thread([this, client_fd] {
+
+        std::lock_guard<std::mutex> lock(clients_mu_);
+        client_threads_.emplace_back([this, client_fd] {
             handleClient(client_fd);
             ::close(client_fd);
-        }).detach();
+        });
     }
 }
 
@@ -164,8 +197,11 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
 
     if (cmd == "remove_source") {
         const auto id = req.value("id", std::string{});
+        const auto srcs = task_manager_.listSources();
+        if (std::none_of(srcs.begin(), srcs.end(), [&](const auto& s){ return s.id == id; }))
+            return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();
         if (!task_manager_.removeSource(id))
-            return json({{"status", "error"}, {"message", "not found or in use: " + id}}).dump();
+            return json({{"status", "error"}, {"code", "in_use"}, {"message", "source in use by a task: " + id}}).dump();
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 
@@ -197,8 +233,11 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
 
     if (cmd == "remove_pipeline") {
         const auto id = req.value("id", std::string{});
+        const auto pipes = task_manager_.listPipelines();
+        if (std::none_of(pipes.begin(), pipes.end(), [&](const auto& p){ return p.id == id; }))
+            return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();
         if (!task_manager_.removePipeline(id))
-            return json({{"status", "error"}, {"message", "not found or in use: " + id}}).dump();
+            return json({{"status", "error"}, {"code", "in_use"}, {"message", "pipeline in use by a task: " + id}}).dump();
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 
@@ -220,8 +259,11 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
 
     if (cmd == "remove_task") {
         const auto id = req.value("id", std::string{});
+        const auto tasks = task_manager_.listTasks();
+        if (std::none_of(tasks.begin(), tasks.end(), [&](const auto& kv){ return kv.first == id; }))
+            return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();
         if (!task_manager_.removeTask(id))
-            return json({{"status", "error"}, {"message", "not found: " + id}}).dump();
+            return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 
@@ -247,8 +289,11 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
 
     if (cmd == "unload_model") {
         const auto id = req.value("id", std::string{});
+        const auto models = task_manager_.listModels();
+        if (std::none_of(models.begin(), models.end(), [&](const auto& m){ return m.id == id; }))
+            return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();
         if (!task_manager_.unloadModel(id))
-            return json({{"status", "error"}, {"message", "not found: " + id}}).dump();
+            return json({{"status", "error"}, {"code", "in_use"}, {"message", "model in use by a running task: " + id}}).dump();
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 

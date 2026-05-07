@@ -231,6 +231,9 @@ YOLOVersion parseYOLOVersion(const std::string& s);
 // Convert string → DeviceType
 DeviceType parseDeviceType(const std::string& s);
 
+// Convert DeviceType → canonical string (matches parseDeviceType round-trip)
+std::string deviceTypeToStr(DeviceType d);
+
 // Convert string → TrackerType
 TrackerType parseTrackerType(const std::string& s);
 

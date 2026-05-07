@@ -3,6 +3,7 @@
 #include "stream/GpuDeviceAllocator.h"
 #include "stream/StreamHealthRegistry.h"
 #include "common/Logger.h"
+#include "common/Config.h"
 
 #include <algorithm>
 #include <set>
@@ -10,16 +11,6 @@
 namespace infer {
 
 namespace {
-
-const char* deviceTypeStr(DeviceType d) {
-    switch (d) {
-        case DeviceType::CUDA:   return "tensorrt";
-        case DeviceType::Ascend: return "ascend";
-        case DeviceType::CPU:    return "cpu";
-        case DeviceType::MPS:    return "mps";
-    }
-    return "unknown";
-}
 
 const char* yoloVersionStr(YOLOVersion v) {
     switch (v) {
@@ -236,7 +227,7 @@ std::vector<ModelInfo> TaskManager::listModels() const {
         std::string shape = std::to_string(s.channels) + "x"
                           + std::to_string(s.height)   + "x"
                           + std::to_string(s.width);
-        out.push_back({m.id, deviceTypeStr(m.backend), yoloVersionStr(m.version),
+        out.push_back({m.id, deviceTypeToStr(m.backend), yoloVersionStr(m.version),
                        std::move(shape), m.batch_size, m.instance_count});
     }
     return out;

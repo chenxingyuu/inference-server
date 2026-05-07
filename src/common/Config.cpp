@@ -504,6 +504,16 @@ DeviceType parseDeviceType(const std::string& s) {
     throw std::runtime_error("Unknown device type: " + s);
 }
 
+std::string deviceTypeToStr(DeviceType d) {
+    switch (d) {
+        case DeviceType::CUDA:   return "tensorrt";
+        case DeviceType::Ascend: return "ascend";
+        case DeviceType::CPU:    return "cpu";
+        case DeviceType::MPS:    return "mps";
+    }
+    return "cpu";
+}
+
 TrackerType parseTrackerType(const std::string& s) {
     if (s == "none") return TrackerType::None;
     if (s == "bytetrack") return TrackerType::ByteTrack;

@@ -30,9 +30,7 @@ services:
 
   # ── Management HTTP sidecar (Go) ───────────────────────────────────────────
   infer-server:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.infer-server
+    image: registry.cn-hangzhou.aliyuncs.com/daxx/infer-server:latest
     ports:
       - "8080:8080"
     environment:

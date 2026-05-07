@@ -4,7 +4,6 @@
 #include <nlohmann/json.hpp>
 
 #include <fstream>
-#include <stdexcept>
 
 namespace infer {
 
@@ -101,16 +100,6 @@ static TaskConfig taskFromJson(const json& j) {
     t.sample_fps  = j.value("sample_fps",  t.sample_fps);
     t.use_hwdec   = j.value("use_hwdec",   t.use_hwdec);
     return t;
-}
-
-static std::string deviceTypeToStr(DeviceType d) {
-    switch (d) {
-        case DeviceType::CUDA:   return "tensorrt";
-        case DeviceType::Ascend: return "ascend";
-        case DeviceType::CPU:    return "cpu";
-        case DeviceType::MPS:    return "mps";
-    }
-    return "cpu";
 }
 
 static json toJson(const ModelConfig& m) {

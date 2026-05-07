@@ -271,16 +271,26 @@ TEST_F(UnixSocketServerTest, AddSourceDuplicate) {
 }
 
 TEST_F(UnixSocketServerTest, RemoveSourceSuccess) {
+    fake_tm_.sources = {{"cam_001", "rtsp://host/0", "STREAMING", 0}};
     auto resp = roundtrip({{"cmd", "remove_source"}, {"id", "cam_001"}});
     EXPECT_EQ(resp["status"], "ok");
     EXPECT_EQ(resp["id"],     "cam_001");
 }
 
 TEST_F(UnixSocketServerTest, RemoveSourceNotFound) {
-    fake_tm_.remove_source_result = false;
+    // sources is empty — id doesn't exist
     auto resp = roundtrip({{"cmd", "remove_source"}, {"id", "missing"}});
     EXPECT_EQ(resp["status"], "error");
-    EXPECT_TRUE(resp.contains("message"));
+    EXPECT_EQ(resp["code"],   "not_found");
+}
+
+TEST_F(UnixSocketServerTest, RemoveSourceInUse) {
+    // source exists but removeSource returns false (task is using it)
+    fake_tm_.sources = {{"cam_001", "rtsp://host/0", "STREAMING", 0}};
+    fake_tm_.remove_source_result = false;
+    auto resp = roundtrip({{"cmd", "remove_source"}, {"id", "cam_001"}});
+    EXPECT_EQ(resp["status"], "error");
+    EXPECT_EQ(resp["code"],   "in_use");
 }
 
 // ── add_pipeline / remove_pipeline ───────────────────────────────────────────
@@ -304,16 +314,26 @@ TEST_F(UnixSocketServerTest, AddPipelineDuplicate) {
 }
 
 TEST_F(UnixSocketServerTest, RemovePipelineSuccess) {
+    fake_tm_.pipelines = {{"pipeline_default", {}, 0}};
     auto resp = roundtrip({{"cmd", "remove_pipeline"}, {"id", "pipeline_default"}});
     EXPECT_EQ(resp["status"], "ok");
     EXPECT_EQ(resp["id"],     "pipeline_default");
 }
 
 TEST_F(UnixSocketServerTest, RemovePipelineNotFound) {
-    fake_tm_.remove_pipeline_result = false;
+    // pipelines is empty — id doesn't exist
     auto resp = roundtrip({{"cmd", "remove_pipeline"}, {"id", "missing"}});
     EXPECT_EQ(resp["status"], "error");
-    EXPECT_TRUE(resp.contains("message"));
+    EXPECT_EQ(resp["code"],   "not_found");
+}
+
+TEST_F(UnixSocketServerTest, RemovePipelineInUse) {
+    // pipeline exists but removePipeline returns false (a task references it)
+    fake_tm_.pipelines = {{"pipeline_default", {}, 0}};
+    fake_tm_.remove_pipeline_result = false;
+    auto resp = roundtrip({{"cmd", "remove_pipeline"}, {"id", "pipeline_default"}});
+    EXPECT_EQ(resp["status"], "error");
+    EXPECT_EQ(resp["code"],   "in_use");
 }
 
 // ── add_task / remove_task ────────────────────────────────────────────────────
@@ -330,24 +350,24 @@ TEST_F(UnixSocketServerTest, AddTaskSuccess) {
 }
 
 TEST_F(UnixSocketServerTest, AddTaskMissingFields) {
-    // Missing source_id and pipeline_id should return error.
-    fake_tm_.add_task_result = false;
+    // Dispatch-layer validation catches missing source_id/pipeline_id before reaching task_manager.
     auto resp = roundtrip({{"cmd", "add_task"}, {"id", "task_bad"}});
     EXPECT_EQ(resp["status"], "error");
     EXPECT_TRUE(resp.contains("message"));
 }
 
 TEST_F(UnixSocketServerTest, RemoveTaskSuccess) {
+    fake_tm_.tasks = {{"task_cam_001", ITaskManager::State::Stopped}};
     auto resp = roundtrip({{"cmd", "remove_task"}, {"id", "task_cam_001"}});
     EXPECT_EQ(resp["status"], "ok");
     EXPECT_EQ(resp["id"],     "task_cam_001");
 }
 
 TEST_F(UnixSocketServerTest, RemoveTaskNotFound) {
-    fake_tm_.remove_task_result = false;
+    // tasks is empty — id doesn't exist
     auto resp = roundtrip({{"cmd", "remove_task"}, {"id", "missing"}});
     EXPECT_EQ(resp["status"], "error");
-    EXPECT_TRUE(resp.contains("message"));
+    EXPECT_EQ(resp["code"],   "not_found");
 }
 
 // ── load_model / unload_model ─────────────────────────────────────────────────
@@ -372,14 +392,24 @@ TEST_F(UnixSocketServerTest, LoadModelDuplicate) {
 }
 
 TEST_F(UnixSocketServerTest, UnloadModelSuccess) {
+    fake_tm_.models = {{"yolov8n", "tensorrt", "v8", "3x640x640", 16, 1}};
     auto resp = roundtrip({{"cmd", "unload_model"}, {"id", "yolov8n"}});
     EXPECT_EQ(resp["status"], "ok");
     EXPECT_EQ(resp["id"],     "yolov8n");
 }
 
 TEST_F(UnixSocketServerTest, UnloadModelNotFound) {
-    fake_tm_.unload_model_result = false;
+    // models is empty — id doesn't exist
     auto resp = roundtrip({{"cmd", "unload_model"}, {"id", "missing"}});
     EXPECT_EQ(resp["status"], "error");
-    EXPECT_TRUE(resp.contains("message"));
+    EXPECT_EQ(resp["code"],   "not_found");
+}
+
+TEST_F(UnixSocketServerTest, UnloadModelInUse) {
+    // model exists but unloadModel returns false (running task uses it)
+    fake_tm_.models = {{"yolov8n", "tensorrt", "v8", "3x640x640", 16, 1}};
+    fake_tm_.unload_model_result = false;
+    auto resp = roundtrip({{"cmd", "unload_model"}, {"id", "yolov8n"}});
+    EXPECT_EQ(resp["status"], "error");
+    EXPECT_EQ(resp["code"],   "in_use");
 }
