@@ -229,8 +229,10 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         }
         for (const auto& e : req.value("edges", json::array())) {
             EdgeConfig ec;
-            ec.from = e.value("from", std::string{});
-            ec.to   = e.value("to",   std::string{});
+            ec.from        = e.value("from", std::string{});
+            ec.to          = e.value("to",   std::string{});
+            ec.capacity    = e.value("capacity", ec.capacity);
+            ec.drop_policy = parseEdgeDropPolicy(e.value("drop_policy", std::string{"block"}));
             p.edges.push_back(std::move(ec));
         }
         if (!task_manager_.addPipeline(p))
@@ -255,8 +257,10 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         }
         for (const auto& e : req.value("edges", json::array())) {
             EdgeConfig ec;
-            ec.from = e.value("from", std::string{});
-            ec.to   = e.value("to",   std::string{});
+            ec.from        = e.value("from", std::string{});
+            ec.to          = e.value("to",   std::string{});
+            ec.capacity    = e.value("capacity", ec.capacity);
+            ec.drop_policy = parseEdgeDropPolicy(e.value("drop_policy", std::string{"block"}));
             p.edges.push_back(std::move(ec));
         }
         if (!task_manager_.updatePipeline(p))
