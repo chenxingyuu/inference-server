@@ -185,11 +185,16 @@ bool TaskManager::stop(const std::string& task_id) {
     return true;
 }
 
-std::vector<std::pair<std::string, TaskManager::State>> TaskManager::listTasks() const {
+std::vector<TaskManager::TaskRuntimeInfo> TaskManager::listTasks() const {
     std::lock_guard<std::mutex> lock(mu_);
-    std::vector<std::pair<std::string, State>> out;
+    std::vector<TaskRuntimeInfo> out;
     out.reserve(entries_.size());
-    for (const auto& [id, entry] : entries_) out.emplace_back(id, entry.state);
+    for (const auto& [id, entry] : entries_) {
+        TaskConfig cfg;
+        for (const auto& t : cfg_.tasks)
+            if (t.id == id) { cfg = t; break; }
+        out.push_back({cfg, entry.state});
+    }
     return out;
 }
 
@@ -322,6 +327,23 @@ bool TaskManager::updatePipeline(const PipelineConfig& pipeline) {
         if (p.id == pipeline.id) { p = pipeline; break; }
     for (auto& p : runtime_state_.added_pipelines)
         if (p.id == pipeline.id) { p = pipeline; break; }
+    persist();
+    return true;
+}
+
+bool TaskManager::updateTask(const TaskConfig& task) {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(task.id);
+    if (it == entries_.end()) return false;
+    if (it->second.state == State::Running) return false;
+    if (!cfg_.findSource(task.source_id))     return false;
+    if (!cfg_.findPipeline(task.pipeline_id)) return false;
+    entries_.erase(it);
+    for (auto& t : cfg_.tasks)
+        if (t.id == task.id) { t = task; break; }
+    for (auto& t : runtime_state_.added_tasks)
+        if (t.id == task.id) { t = task; break; }
+    buildEntry(task, false);
     persist();
     return true;
 }

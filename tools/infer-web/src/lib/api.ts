@@ -91,6 +91,7 @@ export const api = {
   tasks: {
     list: () => req<TaskInfo[]>('/tasks'),
     add: (body: TaskCreate) => req<OkResponse>('/tasks', { method: 'POST', body: json(body) }),
+    update: (id: string, body: TaskCreate) => req<OkResponse>(`/tasks/${id}`, { method: 'PUT', body: json(body) }),
     remove: (id: string) => req<OkResponse>(`/tasks/${id}`, { method: 'DELETE' }),
     start: (id: string) => req<OkResponse>(`/tasks/${id}/start`, { method: 'POST' }),
     stop: (id: string) => req<OkResponse>(`/tasks/${id}/stop`, { method: 'POST' }),

@@ -454,6 +454,46 @@ func handleAddTask(c *gin.Context) {
 	c.JSON(code, resp)
 }
 
+// handleUpdateTask godoc
+//
+//	@Summary	Update a task (must be stopped)
+//	@Tags		tasks
+//	@Accept		json
+//	@Produce	json
+//	@Security	ApiKeyAuth
+//	@Param		id		path		string		true	"Task ID"
+//	@Param		body	body		TaskCreate	true	"Task definition"
+//	@Success	200		{object}	OkResponse
+//	@Failure	400		{object}	ErrorResponse
+//	@Failure	401		{object}	ErrorResponse
+//	@Failure	409		{object}	ErrorResponse	"task is running"
+//	@Failure	503		{string}	string			"engine unreachable"
+//	@Router		/tasks/{id} [put]
+func handleUpdateTask(c *gin.Context) {
+	id := c.Param("id")
+	var body TaskCreate
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.String(http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	body.ID = id
+	m := mustToMap(body)
+	m["cmd"] = "update_task"
+	resp, err := call(m)
+	if err != nil {
+		engineUnavailable(c, err)
+		return
+	}
+	if resp["status"] == "ok" {
+		_ = store.SaveTask(body)
+	}
+	code := http.StatusOK
+	if resp["status"] != "ok" {
+		code = http.StatusBadRequest
+	}
+	c.JSON(code, resp)
+}
+
 // handleRemoveTask godoc
 //
 //	@Summary	Remove a task
@@ -572,6 +612,7 @@ func main() {
 
 	api.GET("/tasks", handleListTasks)
 	api.POST("/tasks", handleAddTask)
+	api.PUT("/tasks/:id", handleUpdateTask)
 	api.DELETE("/tasks/:id", handleRemoveTask)
 	api.POST("/tasks/:id/:action", handleTaskAction)
 

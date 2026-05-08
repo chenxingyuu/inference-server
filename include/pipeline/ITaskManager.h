@@ -47,10 +47,15 @@ class ITaskManager {
 public:
     enum class State { Stopped, Running };
 
+    struct TaskRuntimeInfo {
+        TaskConfig config;
+        State      state{State::Stopped};
+    };
+
     virtual ~ITaskManager() = default;
     virtual bool start(const std::string& task_id) = 0;
     virtual bool stop(const std::string& task_id) = 0;
-    virtual std::vector<std::pair<std::string, State>> listTasks()    const = 0;
+    virtual std::vector<TaskRuntimeInfo> listTasks()    const = 0;
     virtual std::vector<SourceInfo>                    listSources()  const = 0;
     virtual std::vector<PipelineInfo>                  listPipelines()const = 0;
     virtual std::vector<ModelInfo>                     listModels()   const = 0;
@@ -64,6 +69,7 @@ public:
     virtual bool updatePipeline(const PipelineConfig& pipeline) = 0;
 
     virtual bool addTask(const TaskConfig& task, bool autostart = true) = 0;
+    virtual bool updateTask(const TaskConfig& task) = 0;
     virtual bool removeTask(const std::string& id) = 0;
 
     virtual bool loadModel(const ModelConfig& model) = 0;

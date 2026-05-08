@@ -135,6 +135,10 @@ const en = {
   'tasks.select_pipeline':     '— select pipeline —',
   'tasks.empty':               'No tasks. Create one to start inference.',
   'tasks.creating':            'Creating…',
+  'tasks.modal_edit_title':    'Edit Task',
+  'tasks.edit':                'Edit',
+  'tasks.saving':              'Saving…',
+  'tasks.save':                'Save',
 } as const
 
 const zh: Record<keyof typeof en, string> = {
@@ -268,6 +272,10 @@ const zh: Record<keyof typeof en, string> = {
   'tasks.select_pipeline':     '— 选择流水线 —',
   'tasks.empty':               '暂无任务，创建一个以启动推理。',
   'tasks.creating':            '创建中…',
+  'tasks.modal_edit_title':    '编辑任务',
+  'tasks.edit':                '编辑',
+  'tasks.saving':              '保存中…',
+  'tasks.save':                '保存',
 }
 
 // ─── Context & Hook ────────────────────────────────────────────────────────

@@ -19,10 +19,10 @@ using namespace infer;
 // ── Fake TaskManager ──────────────────────────────────────────────────────────
 
 struct FakeTaskManager : ITaskManager {
-    std::vector<std::pair<std::string, State>> tasks;
-    std::vector<SourceInfo>   sources;
-    std::vector<PipelineInfo> pipelines;
-    std::vector<ModelInfo>    models;
+    std::vector<TaskRuntimeInfo> tasks;
+    std::vector<SourceInfo>      sources;
+    std::vector<PipelineInfo>    pipelines;
+    std::vector<ModelInfo>       models;
     bool start_result{true};
     bool stop_result{true};
 
@@ -33,14 +33,15 @@ struct FakeTaskManager : ITaskManager {
     bool remove_pipeline_result{true};
     bool update_pipeline_result{true};
     bool add_task_result{true};
+    bool update_task_result{true};
     bool remove_task_result{true};
     bool load_model_result{true};
     bool unload_model_result{true};
 
-    std::vector<std::pair<std::string, State>> listTasks()    const override { return tasks; }
-    std::vector<SourceInfo>                    listSources()  const override { return sources; }
-    std::vector<PipelineInfo>                  listPipelines()const override { return pipelines; }
-    std::vector<ModelInfo>                     listModels()   const override { return models; }
+    std::vector<TaskRuntimeInfo> listTasks()    const override { return tasks; }
+    std::vector<SourceInfo>      listSources()  const override { return sources; }
+    std::vector<PipelineInfo>    listPipelines()const override { return pipelines; }
+    std::vector<ModelInfo>       listModels()   const override { return models; }
     bool start(const std::string&) override { return start_result; }
     bool stop(const std::string&) override { return stop_result; }
 
@@ -50,9 +51,10 @@ struct FakeTaskManager : ITaskManager {
     bool removePipeline(const std::string&)     override { return remove_pipeline_result; }
     bool updatePipeline(const PipelineConfig&)  override { return update_pipeline_result; }
     bool addTask(const TaskConfig&, bool = true) override { return add_task_result; }
-    bool removeTask(const std::string&)         override { return remove_task_result; }
-    bool loadModel(const ModelConfig&)          override { return load_model_result; }
-    bool unloadModel(const std::string&)        override { return unload_model_result; }
+    bool updateTask(const TaskConfig&)           override { return update_task_result; }
+    bool removeTask(const std::string&)          override { return remove_task_result; }
+    bool loadModel(const ModelConfig&)           override { return load_model_result; }
+    bool unloadModel(const std::string&)         override { return unload_model_result; }
 };
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
@@ -110,8 +112,8 @@ TEST_F(UnixSocketServerTest, ListTasksEmpty) {
 }
 
 TEST_F(UnixSocketServerTest, ListTasksWithItems) {
-    fake_tm_.tasks = {{"cam0", ITaskManager::State::Running},
-                      {"cam1", ITaskManager::State::Stopped}};
+    fake_tm_.tasks = {ITaskManager::TaskRuntimeInfo{TaskConfig{"cam0"}, ITaskManager::State::Running},
+                      ITaskManager::TaskRuntimeInfo{TaskConfig{"cam1"}, ITaskManager::State::Stopped}};
     auto resp = roundtrip({{"cmd", "list_tasks"}});
     ASSERT_EQ(resp["data"].size(), 2u);
     EXPECT_EQ(resp["data"][0]["id"],    "cam0");
@@ -359,7 +361,7 @@ TEST_F(UnixSocketServerTest, AddTaskMissingFields) {
 }
 
 TEST_F(UnixSocketServerTest, RemoveTaskSuccess) {
-    fake_tm_.tasks = {{"task_cam_001", ITaskManager::State::Stopped}};
+    fake_tm_.tasks = {ITaskManager::TaskRuntimeInfo{TaskConfig{"task_cam_001"}, ITaskManager::State::Stopped}};
     auto resp = roundtrip({{"cmd", "remove_task"}, {"id", "task_cam_001"}});
     EXPECT_EQ(resp["status"], "ok");
     EXPECT_EQ(resp["id"],     "task_cam_001");

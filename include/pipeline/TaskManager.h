@@ -29,7 +29,7 @@ public:
     bool start(const std::string& task_id) override;
     bool stop(const std::string& task_id) override;
 
-    std::vector<std::pair<std::string, State>> listTasks()    const override;
+    std::vector<TaskRuntimeInfo>               listTasks()    const override;
     std::vector<SourceInfo>                    listSources()  const override;
     std::vector<PipelineInfo>                  listPipelines()const override;
     std::vector<ModelInfo>                     listModels()   const override;
@@ -40,6 +40,7 @@ public:
     bool removePipeline(const std::string& id)          override;
     bool updatePipeline(const PipelineConfig& pipeline) override;
     bool addTask(const TaskConfig& task, bool autostart = true) override;
+    bool updateTask(const TaskConfig& task)          override;
     bool removeTask(const std::string& id)           override;
     bool loadModel(const ModelConfig& model)         override;
     bool unloadModel(const std::string& id)          override;

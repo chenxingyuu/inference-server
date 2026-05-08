@@ -90,6 +90,13 @@ export interface ModelLoad {
 export interface TaskInfo {
   id: string
   state: TaskState
+  source_id?: string
+  pipeline_id?: string
+  sample_fps?: number
+  sampling_mode?: SamplingMode
+  use_hwdec?: boolean
+  use_ascend_dvpp?: boolean
+  ascend_device_id?: number
 }
 
 export interface TaskCreate {

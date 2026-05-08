@@ -132,9 +132,18 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
 
     if (cmd == "list_tasks") {
         json arr = json::array();
-        for (const auto& [id, state] : task_manager_.listTasks()) {
-            arr.push_back({{"id", id},
-                           {"state", state == ITaskManager::State::Running ? "running" : "stopped"}});
+        for (const auto& info : task_manager_.listTasks()) {
+            arr.push_back({
+                {"id",               info.config.id},
+                {"state",            info.state == ITaskManager::State::Running ? "running" : "stopped"},
+                {"source_id",        info.config.source_id},
+                {"pipeline_id",      info.config.pipeline_id},
+                {"sample_fps",       info.config.sample_fps},
+                {"sampling_mode",    info.config.sampling_mode == SamplingMode::TimeBased ? "time_based" : "frame_count"},
+                {"use_hwdec",        info.config.use_hwdec},
+                {"use_ascend_dvpp",  info.config.use_ascend_dvpp},
+                {"ascend_device_id", info.config.ascend_device_id},
+            });
         }
         return json({{"status", "ok"}, {"data", arr}}).dump();
     }
@@ -295,10 +304,29 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 
+    if (cmd == "update_task") {
+        const auto id          = req.value("id",          std::string{});
+        const auto source_id   = req.value("source_id",   std::string{});
+        const auto pipeline_id = req.value("pipeline_id", std::string{});
+        if (id.empty() || source_id.empty() || pipeline_id.empty())
+            return json({{"status", "error"}, {"message", "missing required fields: id, source_id, pipeline_id"}}).dump();
+        TaskConfig t;
+        t.id               = id;
+        t.source_id        = source_id;
+        t.pipeline_id      = pipeline_id;
+        t.sample_fps       = req.value("sample_fps",      t.sample_fps);
+        t.use_hwdec        = req.value("use_hwdec",        t.use_hwdec);
+        t.use_ascend_dvpp  = req.value("use_ascend_dvpp",  t.use_ascend_dvpp);
+        t.ascend_device_id = req.value("ascend_device_id", t.ascend_device_id);
+        if (!task_manager_.updateTask(t))
+            return json({{"status", "error"}, {"message", "not found, running, or invalid deps: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
     if (cmd == "remove_task") {
         const auto id = req.value("id", std::string{});
         const auto tasks = task_manager_.listTasks();
-        if (std::none_of(tasks.begin(), tasks.end(), [&](const auto& kv){ return kv.first == id; }))
+        if (std::none_of(tasks.begin(), tasks.end(), [&](const auto& info){ return info.config.id == id; }))
             return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();
         if (!task_manager_.removeTask(id))
             return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();

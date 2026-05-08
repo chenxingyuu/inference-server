@@ -145,6 +145,18 @@ export const useAddTask = () => {
   })
 }
 
+export const useUpdateTask = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: TaskCreate }) => api.tasks.update(id, body),
+    onSuccess: (_, { id }) => {
+      toast.success(`Task "${id}" updated`)
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
 export const useRemoveTask = () => {
   const qc = useQueryClient()
   return useMutation({

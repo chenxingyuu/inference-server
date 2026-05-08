@@ -101,10 +101,17 @@ type ModelLoad struct {
 	MaxQueueDelayUs     int        `json:"max_queue_delay_us,omitempty"`
 }
 
-// TaskInfo describes a task's current state.
+// TaskInfo describes a task's current state and configuration.
 type TaskInfo struct {
-	ID    string `json:"id"`
-	State string `json:"state" enums:"running,stopped"`
+	ID             string  `json:"id"`
+	State          string  `json:"state"                        enums:"running,stopped"`
+	SourceID       string  `json:"source_id,omitempty"`
+	PipelineID     string  `json:"pipeline_id,omitempty"`
+	SampleFPS      float64 `json:"sample_fps,omitempty"`
+	SamplingMode   string  `json:"sampling_mode,omitempty"`
+	UseHwdec       bool    `json:"use_hwdec,omitempty"`
+	UseAscendDvpp  bool    `json:"use_ascend_dvpp,omitempty"`
+	AscendDeviceID int     `json:"ascend_device_id,omitempty"`
 }
 
 // TaskCreate is the request body for POST /tasks.

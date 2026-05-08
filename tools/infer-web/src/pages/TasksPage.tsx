@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  useTasks, useAddTask, useRemoveTask, useStartTask, useStopTask,
+  useTasks, useAddTask, useUpdateTask, useRemoveTask, useStartTask, useStopTask,
   useSources, usePipelines,
 } from '../hooks/queries'
 import { StatusBadge } from '../components/ui/StatusBadge'
@@ -8,7 +8,7 @@ import { Modal } from '../components/ui/Modal'
 import { Field, Input, Select } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
 import { useT } from '../lib/i18n'
-import type { TaskCreate, SamplingMode } from '../types'
+import type { TaskCreate, TaskInfo, SamplingMode } from '../types'
 
 const DEFAULTS: TaskCreate = {
   id: '',
@@ -42,19 +42,52 @@ export function TasksPage() {
   const { t } = useT()
 
   const add = useAddTask()
+  const update = useUpdateTask()
   const remove = useRemoveTask()
   const start = useStartTask()
   const stop = useStopTask()
 
   const [open, setOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<TaskCreate>(DEFAULTS)
+
+  const isEditing = editingId !== null
 
   const set = <K extends keyof TaskCreate>(k: K, v: TaskCreate[K]) =>
     setForm((f) => ({ ...f, [k]: v }))
 
+  const openAdd = () => {
+    setEditingId(null)
+    setForm(DEFAULTS)
+    setOpen(true)
+  }
+
+  const openEdit = (tk: TaskInfo) => {
+    setEditingId(tk.id)
+    setForm({
+      id: tk.id,
+      source_id: tk.source_id ?? '',
+      pipeline_id: tk.pipeline_id ?? '',
+      sample_fps: tk.sample_fps ?? 25,
+      sampling_mode: tk.sampling_mode ?? 'frame_count',
+      use_hwdec: tk.use_hwdec ?? false,
+    })
+    setOpen(true)
+  }
+
+  const closeModal = () => {
+    setOpen(false)
+    setEditingId(null)
+    setForm(DEFAULTS)
+  }
+
   const submit = () => {
     if (!form.id || !form.source_id || !form.pipeline_id) return
-    add.mutate(form, { onSuccess: () => { setOpen(false); setForm(DEFAULTS) } })
+    if (isEditing) {
+      update.mutate({ id: editingId!, body: form }, { onSuccess: closeModal })
+    } else {
+      add.mutate(form, { onSuccess: closeModal })
+    }
   }
 
   const runningCount = tasks.filter((tk) => tk.state === 'running').length
@@ -69,7 +102,7 @@ export function TasksPage() {
             : t('tasks.subtitle_empty')
         }
         action={
-          <button onClick={() => setOpen(true)} className="btn-primary">
+          <button onClick={openAdd} className="btn-primary">
             {t('tasks.add')}
           </button>
         }
@@ -97,14 +130,23 @@ export function TasksPage() {
                   <td>
                     <div className="flex items-center justify-end gap-1 pr-2">
                       {tk.state === 'stopped' ? (
-                        <button
-                          onClick={() => start.mutate(tk.id)}
-                          disabled={start.isPending}
-                          title="Start"
-                          className="btn-icon text-success/60 hover:text-success"
-                        >
-                          <PlayIcon />
-                        </button>
+                        <>
+                          <button
+                            onClick={() => openEdit(tk)}
+                            className="btn-icon text-ink-muted hover:text-accent"
+                            title={t('tasks.edit')}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            onClick={() => start.mutate(tk.id)}
+                            disabled={start.isPending}
+                            title="Start"
+                            className="btn-icon text-success/60 hover:text-success"
+                          >
+                            <PlayIcon />
+                          </button>
+                        </>
                       ) : (
                         <button
                           onClick={() => stop.mutate(tk.id)}
@@ -128,13 +170,15 @@ export function TasksPage() {
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title={t('tasks.modal_title')}>
+      <Modal open={open} onClose={closeModal} title={isEditing ? t('tasks.modal_edit_title') : t('tasks.modal_title')}>
         <div className="space-y-4">
           <Field label={t('tasks.field.id')}>
             <Input
               placeholder="task-cam01-detect"
               value={form.id}
               onChange={(e) => set('id', e.target.value)}
+              disabled={isEditing}
+              className={isEditing ? 'opacity-60 cursor-not-allowed' : ''}
             />
           </Field>
 
@@ -199,13 +243,15 @@ export function TasksPage() {
           </label>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setOpen(false)} className="btn-ghost">{t('common.cancel')}</button>
+            <button onClick={closeModal} className="btn-ghost">{t('common.cancel')}</button>
             <button
               onClick={submit}
-              disabled={!form.id || !form.source_id || !form.pipeline_id || add.isPending}
+              disabled={!form.id || !form.source_id || !form.pipeline_id || add.isPending || update.isPending}
               className="btn-primary"
             >
-              {add.isPending ? t('tasks.creating') : t('tasks.add')}
+              {isEditing
+                ? (update.isPending ? t('tasks.saving') : t('tasks.save'))
+                : (add.isPending ? t('tasks.creating') : t('tasks.add'))}
             </button>
           </div>
         </div>
