@@ -106,6 +106,8 @@ export interface TaskCreate {
   sample_fps?: number
   sampling_mode?: SamplingMode
   use_hwdec?: boolean
+  use_ascend_dvpp?: boolean
+  ascend_device_id?: number
 }
 
 export interface OkResponse {

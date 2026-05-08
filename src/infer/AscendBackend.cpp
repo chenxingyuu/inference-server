@@ -6,6 +6,8 @@
 #include <acl/acl.h>
 #include <stdexcept>
 #include <algorithm>
+#include <cstdlib>
+#include <mutex>
 #include <opencv2/imgproc.hpp>
 
 namespace infer {
@@ -14,6 +16,25 @@ namespace infer {
 std::atomic<int> AscendBackend::s_acl_refcount_{0};
 
 namespace {
+
+// CANN may return ACL_ERROR_GE_EXEC_NOT_INIT (145001) on aclmdlLoadFromFile after a
+// full aclFinalize → aclInit cycle in the same process. Keep the runtime alive for
+// the process lifetime and pair a single aclFinalize with std::atexit instead.
+std::atomic<bool> g_acl_runtime_initialized{false};
+std::once_flag    g_acl_atexit_registered;
+
+static void aclProcessAtExit() noexcept {
+    if (g_acl_runtime_initialized.load(std::memory_order_acquire)) {
+        aclFinalize();
+        g_acl_runtime_initialized.store(false, std::memory_order_release);
+    }
+}
+
+static void registerAclProcessTeardown() {
+    std::call_once(g_acl_atexit_registered, [] {
+        std::atexit(aclProcessAtExit);
+    });
+}
 
 #define ACL_CHECK(call) do { \
     aclError _err = (call); \
@@ -92,15 +113,24 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     input_w_        = cfg.input_shape.width;
     num_classes_    = cfg.num_classes;
 
-    // Increment process-wide refcount; call aclInit only on the first backend.
-    if (s_acl_refcount_.fetch_add(1, std::memory_order_acq_rel) == 0) {
-        const aclError init_rc = aclInit(nullptr);
-        if (init_rc != ACL_SUCCESS && init_rc != kAclRepeatInitCode && init_rc != kAclRepeatInitCodeCann6) {
-            s_acl_refcount_.fetch_sub(1, std::memory_order_release);
-            throw std::runtime_error(std::string("[ACL] aclInit error ") + std::to_string(init_rc)
-                                     + " at " + __FILE__ + ":" + std::to_string(__LINE__));
+    // Increment process-wide refcount. First init in the process calls aclInit; after
+    // all backends have unloaded we keep ACL initialized until process exit (see
+    // unloadModel) so a later pipeline rebuild does not hit GE_EXEC_NOT_INIT.
+    const int prev_ref = s_acl_refcount_.fetch_add(1, std::memory_order_acq_rel);
+    if (prev_ref == 0) {
+        if (!g_acl_runtime_initialized.load(std::memory_order_acquire)) {
+            const aclError init_rc = aclInit(nullptr);
+            if (init_rc != ACL_SUCCESS && init_rc != kAclRepeatInitCode && init_rc != kAclRepeatInitCodeCann6) {
+                s_acl_refcount_.fetch_sub(1, std::memory_order_release);
+                throw std::runtime_error(std::string("[ACL] aclInit error ") + std::to_string(init_rc)
+                                         + " at " + __FILE__ + ":" + std::to_string(__LINE__));
+            }
+            g_acl_runtime_initialized.store(true, std::memory_order_release);
+            registerAclProcessTeardown();
+            LOG_INFO("AscendBackend: aclInit succeeded (refcount=1)");
+        } else {
+            LOG_INFO("AscendBackend: reusing ACL runtime after hot unload (refcount=1)");
         }
-        LOG_INFO("AscendBackend: aclInit succeeded (refcount=1)");
     } else {
         LOG_INFO("AscendBackend: reusing ACL runtime (refcount={})",
                  s_acl_refcount_.load(std::memory_order_relaxed));
@@ -164,10 +194,11 @@ void AscendBackend::unloadModel() {
     // that destroys all ACL resources on the device, including those held by
     // sibling AscendBackend instances on the same device_id.
     //
-    // Decrement refcount; call aclFinalize only when the last backend stops.
+    // Decrement refcount. Do not aclFinalize here: CANN GE may not re-init cleanly
+    // in-process after finalize (aclmdlLoadFromFile → 145001). Teardown runs via
+    // std::atexit once the process exits.
     if (s_acl_refcount_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        aclFinalize();
-        LOG_INFO("AscendBackend: aclFinalize called (last backend stopped)");
+        LOG_INFO("AscendBackend: last backend stopped (ACL runtime kept until process exit)");
     }
     loaded_ = false;
 }

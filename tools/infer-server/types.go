@@ -109,9 +109,9 @@ type TaskInfo struct {
 	PipelineID     string  `json:"pipeline_id,omitempty"`
 	SampleFPS      float64 `json:"sample_fps,omitempty"`
 	SamplingMode   string  `json:"sampling_mode,omitempty"`
-	UseHwdec       bool    `json:"use_hwdec,omitempty"`
-	UseAscendDvpp  bool    `json:"use_ascend_dvpp,omitempty"`
-	AscendDeviceID int     `json:"ascend_device_id,omitempty"`
+	UseHwdec       bool    `json:"use_hwdec"`
+	UseAscendDvpp  bool    `json:"use_ascend_dvpp"`
+	AscendDeviceID int     `json:"ascend_device_id"`
 }
 
 // TaskCreate is the request body for POST /tasks.
@@ -121,9 +121,9 @@ type TaskCreate struct {
 	PipelineID      string  `json:"pipeline_id"                binding:"required"`
 	SampleFPS       float64 `json:"sample_fps,omitempty"`
 	SamplingMode    string  `json:"sampling_mode,omitempty"    enums:"frame_count,time_based"`
-	UseHwdec        bool    `json:"use_hwdec,omitempty"`
-	UseAscendDvpp   bool    `json:"use_ascend_dvpp,omitempty"`
-	AscendDeviceID  int     `json:"ascend_device_id,omitempty"`
+	UseHwdec        bool    `json:"use_hwdec"`
+	UseAscendDvpp   bool    `json:"use_ascend_dvpp"`
+	AscendDeviceID  int     `json:"ascend_device_id"`
 }
 
 // OkResponse is returned on successful write operations.

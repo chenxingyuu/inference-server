@@ -17,6 +17,8 @@ const DEFAULTS: TaskCreate = {
   sample_fps: 25,
   sampling_mode: 'frame_count',
   use_hwdec: false,
+  use_ascend_dvpp: false,
+  ascend_device_id: 0,
 }
 
 function PlayIcon() {
@@ -71,6 +73,8 @@ export function TasksPage() {
       sample_fps: tk.sample_fps ?? 25,
       sampling_mode: tk.sampling_mode ?? 'frame_count',
       use_hwdec: tk.use_hwdec ?? false,
+      use_ascend_dvpp: tk.use_ascend_dvpp ?? false,
+      ascend_device_id: tk.ascend_device_id ?? 0,
     })
     setOpen(true)
   }
@@ -232,15 +236,38 @@ export function TasksPage() {
             </Field>
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={form.use_hwdec}
-              onChange={(e) => set('use_hwdec', e.target.checked)}
-              className="w-3.5 h-3.5 accent-accent"
-            />
-            <span className="text-[12px] text-ink-secondary">{t('tasks.field.hwdec')}</span>
-          </label>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.use_hwdec}
+                onChange={(e) => set('use_hwdec', e.target.checked)}
+                className="w-3.5 h-3.5 accent-accent"
+              />
+              <span className="text-[12px] text-ink-secondary">{t('tasks.field.hwdec')}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.use_ascend_dvpp}
+                onChange={(e) => set('use_ascend_dvpp', e.target.checked)}
+                className="w-3.5 h-3.5 accent-accent"
+              />
+              <span className="text-[12px] text-ink-secondary">{t('tasks.field.ascend_dvpp')}</span>
+            </label>
+          </div>
+
+          {form.use_ascend_dvpp && (
+            <Field label={t('tasks.field.ascend_device')}>
+              <Input
+                type="number"
+                min={0}
+                value={form.ascend_device_id}
+                onChange={(e) => set('ascend_device_id', +e.target.value)}
+                className="w-32"
+              />
+            </Field>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={closeModal} className="btn-ghost">{t('common.cancel')}</button>

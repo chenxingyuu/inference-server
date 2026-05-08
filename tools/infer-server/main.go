@@ -446,6 +446,7 @@ func handleAddTask(c *gin.Context) {
 	}
 	if resp["status"] == "ok" {
 		_ = store.SaveTask(body)
+		_ = store.SetTaskRunning(body.ID, true)
 	}
 	code := http.StatusCreated
 	if resp["status"] != "ok" {
