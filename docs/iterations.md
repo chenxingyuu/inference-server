@@ -669,6 +669,93 @@ tasks:
 
 ---
 
+## Phase 27 — Runtime 状态机 + StopAwareSleep + Phase 26 收尾
+
+**完成**：2026-05-07
+
+**目标**：让 task 的 stop 路径可幂等、可观测，并把退避/重连等 sleep loop 改造为 stop 信号毫秒级可中断；同时清理 Phase 26 剩余的 `ManagementServer` 残留与 docker-compose 配置。
+
+**新增**：
+- `RuntimeState` 状态机（`UNINITIALIZED → RUNNING → STOPPING → STOPPED`）：`TaskManager` 持有，`stop()` 幂等，重复调用进入 `STOPPING` 后不再重复触发资源回收
+- `StopAwareSleep` helper：`SourceRtspStage` / 重连退避 / `EdgeQueue` 长等场景统一改为可中断 sleep，stop 信号到达后 ≤ 5ms 退出循环
+- 三套 docker-compose 同步：`infer-server`（Go HTTP sidecar）作为常驻服务挂载 `/var/run/infer.sock` 卷，与 `inferenced` 容器共享 socket
+- 删除 `src/server/ManagementServer.cpp` / `include/server/ManagementServer.h` 的最后残留与 CMake 引用，确认 cpp-httplib 已彻底从依赖图中移除
+
+**关键决策**：
+- `RuntimeState` 与 Phase 19 的 `WorkerState` 解耦：前者管 task 级生命周期，后者管 worker 级故障恢复，两者在不同抽象层级
+- StopAwareSleep 内部用 `condition_variable_any` + `stop_token`（C++20），不再依赖 `std::this_thread::sleep_for` 的不可中断行为
+
+---
+
+## Phase 28 — infer-server REST 完善（Swagger + 持久化 Store + DAG 元数据）
+
+**完成**：2026-05-07
+
+**目标**：让 Go sidecar 不仅是 HTTP→socket 的薄壳，而是承担 OpenAPI 文档生成、运行期状态持久化、以及 DAG 元数据结构化输出的完整管理面。
+
+**新增**：
+- **Swagger 集成**（`tools/infer-server/docs/`）：`swag init` 生成的 `docs.go` / `swagger.json` / `swagger.yaml`，挂载到 `/swagger/index.html`；`make swagger` target 重生成；移除 host 硬编码以适配多环境
+- **`PipelineNodeInfo` / `PipelineEdgeInfo`**（`include/pipeline/ITaskManager.h`）：取代旧的字符串数组，REST 返回的 pipeline 现包含完整 DAG（`node.type` / `node.params` / `edge.from/to/capacity/drop_policy`），前端无需二次推断
+- **`Store`**（`tools/infer-server/store.go`，259 行 + 508 行 `store_test.go`）：JSON 文件后端的运行期状态机，覆盖 `models` / `sources` / `pipelines` / `tasks`；server 启动时回放到 C++ 引擎，崩溃/重启不丢配置
+- 三套 docker-compose 新增 `state.json` 卷映射，作为持久化挂载点
+
+**关键决策**：
+- Store 与 YAML 配置文件解耦：YAML 仅作为首次启动的 seed，运行期改动通过 REST 写入 Store，避免"配置文件 vs 运行态"双源真相
+- Swagger 注解直接写在 handler 上方，CI 通过 `swag init --parseDependency` 校验注解一致性
+
+---
+
+## Phase 29 — infer-web 管理 UI（React + Vite + Tailwind）
+
+**完成**：2026-05-07 → 05-08
+
+**目标**：为运维人员提供可视化管理界面，避免每次只能用 `infer-ctl` CLI；端到端覆盖 Sources / Pipelines / Models / Tasks 四种资源的增删改查。
+
+**新增**：
+- **初版**（`db42121`）：React 18 + Vite + Tailwind + React Query；五大页面 `Dashboard / Sources / Pipelines / Models / Tasks`；侧边栏布局 + 复用 `Field` / `Modal` / `StatusBadge` 组件；约 3.8k 行新增
+- **API 与多语言**（`2ffd951`）：Vite dev proxy `/api` → infer-server，统一 `lib/api.ts` 客户端；`i18n.tsx` 中英文 dictionary，所有界面文案走 `t(key)` 解析
+- **删除二次确认**（`d42f1df`）：所有 destructive 操作走统一的 confirm modal，避免误删
+- **自定义节点类型**（`a0c9fca`）：`lib/nodeTypes.ts` 定义 stage 类型字典（`source.rtsp` / `infer.engine` / `archive.raw` / `track.bytetrack` / `sink.kafka` / ...），Pipelines 页编辑器据此渲染节点参数表单
+- **Pipeline 编辑模式**（`ba51590`）：`useUpdatePipeline` hook + Pipelines 页支持就地修改 nodes/edges
+- **Task 编辑模式**（`cb3f669`）：Tasks 页支持改 source/pipeline 绑定、`sample_fps` / `sampling_mode` / 采样阈值
+- **运行时镜像**（`Dockerfile.infer-web` / `Dockerfile.infer-web.runtime`）：pnpm 多阶段构建产出静态资源 + nginx 反代镜像
+
+**关键决策**：
+- 选 React Query 而非 Redux：管理界面以"远端状态读取 + 偶发写入"为主，无复杂客户端状态机，QueryClient 自带的缓存/失效已满足
+- 静态资源走独立 nginx 镜像，不与 inferenced/infer-server 共栈，部署解耦
+
+---
+
+## Phase 30 — 运行期管理增强 + Ascend ACL 生命周期修复
+
+**完成**：2026-05-08
+
+**目标**：补齐 Phase 28/29 的"读" 已完成、"改" 还缺位的部分；同时修复 Phase 26 ~ 29 期间发现的 Ascend 热停启严重 bug。
+
+**新增**：
+- **`addTask(autostart)`**（`3b23e30`）：`autostart=false` 时仅写入配置不启动，UI 手动触发；解决"添加 task 立即占用 GPU/NPU"的工程不便
+- **`update_task` 命令**（`9487c2f` + `cb3f669`）：`UnixSocketServer` 新增端点支持改 source/pipeline 绑定与采样参数；`list_tasks` 返回完整字段（`source_id` / `pipeline_id` / `sampling.*` / 状态）；新增 `TaskRuntimeInfo` 结构体把 config + runtime state 一次返回，前端不再做二次拼装
+- **模型仓库**（`9c70962`，1566 行变更）：
+  - C++ 侧：`ITaskManager::listRepositoryModels()` / `loadFromRepository(id)` + `RepositoryModelInfo` 结构体（含 `loaded` 标记）
+  - Go 侧：扫描 `model_repository` 目录列出可用 `.engine` / `.onnx` / `.om`，新增 8 个 endpoint：`/models/repository`、`/models/repository/:id/load`、`/models/upload`、`/models/upload/analyze`、`/models/upload/deploy/:token` 等
+  - 上传支持 tar/tar.gz/zip 归档，先 analyze（解析 metadata 返回 token），后 deploy（按 token 落盘到仓库）；可一键加载到运行期
+  - UI：`ModelsPage` 新增"仓库浏览"+"上传"+"一键加载"+ Ascend DVPP / device_id 字段配置（532 行变更）
+- **HIGH 修复 — Ascend ACL 生命周期**（`6d4fbd2`）：
+  - **背景**：CANN GE 在同进程内 `aclFinalize → aclInit` 循环后调用 `aclmdlLoadFromFile` 会报 `ACL_ERROR_GE_EXEC_NOT_INIT(145001)`，导致"热停 task → 重新创建同模型 task"的场景必 crash
+  - **修复**：ACL runtime 改为进程级常驻，`s_acl_refcount_` 仅做日志计数；首次 init 时通过 `std::call_once` 注册 `std::atexit` 回调；`unloadModel()` 不再调用 `aclFinalize`，仅在进程退出时执行单次 finalize
+  - **配置**：UI 新增任务级 `use_ascend_dvpp` toggle 与 `ascend_device_id` 字段，对应 `TaskConfig` 透传到 `SourceRtspStage`
+
+**关键决策**：
+- 模型上传两阶段（analyze → deploy）避免大文件长事务：analyze 阶段流式扫描归档不落盘，token 有效期内 deploy 才真正写入仓库
+- ACL refcount 保留但不再驱动 finalize：CANN runtime 一旦初始化就持有到进程结束，符合官方文档"建议每个进程仅 init 一次"的语义；以前的 finalize-on-last-unload 是过度优化
+- TaskRuntimeInfo 设计参考 Phase 28 的 PipelineNodeInfo：服务端聚合一次，前端不做拼装
+
+**真机验证（192.168.3.135）**：
+- 5/8 上午通过 UI 反复创建/删除 NPU 单卡 task 5 次，无 145001 错误，sibling task 不受影响
+- 模型仓库上传 `yolov8n.om`（tar.gz）→ analyze → deploy → load 全流程跑通
+
+---
+
 ## 待办
 
 - [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
