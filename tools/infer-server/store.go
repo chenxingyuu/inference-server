@@ -220,13 +220,8 @@ func replayState(state AppState, callFn func(map[string]any) (map[string]any, er
 }
 
 func replayOnce(state AppState, callFn func(map[string]any) (map[string]any, error)) error {
-	for _, m := range state.Models {
-		cmd := mustToMap(m)
-		cmd["cmd"] = "load_model"
-		if _, err := callFn(cmd); err != nil {
-			return err
-		}
-	}
+	// Models are NOT replayed: model_repository is the single source of truth.
+	// The C++ engine loads all repository models at startup via scanModelRepository().
 	for _, src := range state.Sources {
 		cmd := mustToMap(src)
 		cmd["cmd"] = "add_source"

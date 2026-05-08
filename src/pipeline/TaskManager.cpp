@@ -411,4 +411,46 @@ bool TaskManager::unloadModel(const std::string& id) {
     return true;
 }
 
+std::vector<RepositoryModelInfo> TaskManager::listRepositoryModels() const {
+    if (cfg_.server.model_repository.empty()) return {};
+    std::vector<ModelConfig> repo;
+    try {
+        repo = scanModelRepository(cfg_.server.model_repository);
+    } catch (const std::exception&) {
+        return {};
+    }
+    std::lock_guard<std::mutex> lock(mu_);
+    std::vector<RepositoryModelInfo> out;
+    out.reserve(repo.size());
+    for (const auto& m : repo) {
+        RepositoryModelInfo info;
+        info.id             = m.id;
+        info.backend        = deviceTypeToStr(m.backend);
+        info.version        = yoloVersionStr(m.version);
+        info.model_type     = (m.model_type == ModelType::Classifier) ? "classifier" : "detector";
+        info.batch_size     = m.batch_size;
+        info.num_classes    = m.num_classes;
+        info.conf_thresh    = m.conf_thresh;
+        info.nms_thresh     = m.nms_thresh;
+        info.instance_count = m.instance_count;
+        info.loaded         = (cfg_.findModel(m.id) != nullptr);
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
+bool TaskManager::loadFromRepository(const std::string& id) {
+    if (cfg_.server.model_repository.empty()) return false;
+    std::vector<ModelConfig> repo;
+    try {
+        repo = scanModelRepository(cfg_.server.model_repository);
+    } catch (const std::exception&) {
+        return false;
+    }
+    const auto it = std::find_if(repo.begin(), repo.end(),
+                                 [&](const auto& m){ return m.id == id; });
+    if (it == repo.end()) return false;
+    return loadModel(*it);
+}
+
 } // namespace infer

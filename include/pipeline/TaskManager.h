@@ -44,6 +44,8 @@ public:
     bool removeTask(const std::string& id)           override;
     bool loadModel(const ModelConfig& model)         override;
     bool unloadModel(const std::string& id)          override;
+    std::vector<RepositoryModelInfo> listRepositoryModels() const override;
+    bool loadFromRepository(const std::string& id)   override;
 
 private:
     struct Entry {

@@ -43,6 +43,19 @@ struct ModelInfo {
     int         instance_count{1};
 };
 
+struct RepositoryModelInfo {
+    std::string id;
+    std::string backend;       // "trt" | "ascend" | "cpu"
+    std::string version;       // "v5" | "v8" | "v11" | "v26"
+    std::string model_type;    // "detector" | "classifier"
+    int         batch_size{1};
+    int         num_classes{80};
+    float       conf_thresh{0.4f};
+    float       nms_thresh{0.45f};
+    int         instance_count{1};
+    bool        loaded{false};
+};
+
 class ITaskManager {
 public:
     enum class State { Stopped, Running };
@@ -74,6 +87,12 @@ public:
 
     virtual bool loadModel(const ModelConfig& model) = 0;
     virtual bool unloadModel(const std::string& id) = 0;
+
+    // Repository operations — require model_repository to be configured.
+    // Returns empty vector if repository path is unset or unreadable.
+    virtual std::vector<RepositoryModelInfo> listRepositoryModels() const = 0;
+    // Scan repository, find `id`, and load it. Returns false if not found or already loaded.
+    virtual bool loadFromRepository(const std::string& id) = 0;
 };
 
 } // namespace infer

@@ -100,12 +100,31 @@ export const useModels = () =>
     refetchInterval: 30_000,
   })
 
+export const useRepositoryModels = () =>
+  useQuery({
+    queryKey: ['models', 'repository'],
+    queryFn: api.models.listRepository,
+    refetchInterval: 30_000,
+  })
+
 export const useLoadModel = () => {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: ModelLoad) => api.models.load(body),
     onSuccess: (_, v) => {
       toast.success(`Model "${v.id}" loaded`)
+      qc.invalidateQueries({ queryKey: ['models'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+export const useLoadFromRepository = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.models.loadFromRepository(id),
+    onSuccess: (_, id) => {
+      toast.success(`Model "${id}" loaded`)
       qc.invalidateQueries({ queryKey: ['models'] })
     },
     onError: (e: Error) => toast.error(e.message),

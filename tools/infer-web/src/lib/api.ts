@@ -1,6 +1,6 @@
 import type {
   SourceInfo, SourceCreate, PipelineInfo, PipelineCreate,
-  ModelInfo, ModelLoad, TaskInfo, TaskCreate, OkResponse,
+  ModelInfo, ModelLoad, RepositoryModel, TaskInfo, TaskCreate, OkResponse, ArchiveAnalysis,
 } from '../types'
 
 export const serverUrl = {
@@ -86,6 +86,60 @@ export const api = {
     list: () => req<ModelInfo[]>('/models'),
     load: (body: ModelLoad) => req<OkResponse>('/models', { method: 'POST', body: json(body) }),
     unload: (id: string) => req<OkResponse>(`/models/${id}`, { method: 'DELETE' }),
+    listRepository: () => req<RepositoryModel[]>('/models/repository'),
+    loadFromRepository: (id: string) =>
+      req<OkResponse>(`/models/repository/${id}/load`, { method: 'POST' }),
+    upload: (
+      formData: FormData,
+      onProgress: (pct: number, loaded: number, total: number) => void,
+      signal?: AbortSignal,
+    ): Promise<OkResponse> =>
+      new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', buildApiUrl('/models/upload'))
+        const key = auth.get()
+        if (key) xhr.setRequestHeader('Authorization', `Bearer ${key}`)
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total)
+        }
+        xhr.onload = () => {
+          const body = (() => { try { return JSON.parse(xhr.responseText) } catch { return {} } })()
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(body as OkResponse)
+          } else {
+            reject(new ApiError(xhr.status, body.message ?? xhr.statusText, body.code))
+          }
+        }
+        xhr.onerror = () => reject(new Error('Network error'))
+        if (signal) signal.addEventListener('abort', () => xhr.abort())
+        xhr.send(formData)
+      }),
+
+    analyze: (
+      formData: FormData,
+      onProgress: (pct: number, loaded: number, total: number) => void,
+      signal?: AbortSignal,
+    ): Promise<ArchiveAnalysis> =>
+      new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', buildApiUrl('/models/upload/analyze'))
+        const key = auth.get()
+        if (key) xhr.setRequestHeader('Authorization', `Bearer ${key}`)
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total)
+        }
+        xhr.onload = () => {
+          const body = (() => { try { return JSON.parse(xhr.responseText) } catch { return {} } })()
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(body as ArchiveAnalysis)
+          } else {
+            reject(new ApiError(xhr.status, body.message ?? xhr.statusText, body.code))
+          }
+        }
+        xhr.onerror = () => reject(new Error('Network error'))
+        if (signal) signal.addEventListener('abort', () => xhr.abort())
+        xhr.send(formData)
+      }),
   },
 
   tasks: {

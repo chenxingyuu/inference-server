@@ -78,6 +78,7 @@ export interface ModelLoad {
   model_type?: ModelType
   onnx_path?: string
   engine_path?: string
+  om_paths?: Record<string, string>
   batch_size?: number
   input_shape?: { c: number; h: number; w: number }
   conf_thresh?: number
@@ -85,6 +86,19 @@ export interface ModelLoad {
   device_id?: number
   num_classes?: number
   instance_count?: number
+}
+
+export interface RepositoryModel {
+  id: string
+  backend: string
+  version: string
+  model_type: string
+  batch_size: number
+  num_classes: number
+  conf_thresh: number
+  nms_thresh: number
+  instance_count: number
+  loaded: boolean
 }
 
 export interface TaskInfo {
@@ -108,6 +122,21 @@ export interface TaskCreate {
   use_hwdec?: boolean
   use_ascend_dvpp?: boolean
   ascend_device_id?: number
+}
+
+export interface ArchiveAnalysis {
+  token: string
+  suggested_id?: string
+  backend: string
+  yolo_version: string
+  model_type: string
+  batch_size: number
+  conf_thresh: number
+  nms_thresh: number
+  num_classes: number
+  instance_count: number
+  has_config: boolean
+  files_found: string[]
 }
 
 export interface OkResponse {

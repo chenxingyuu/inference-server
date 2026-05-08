@@ -83,22 +83,37 @@ type InputShape struct {
 
 // ModelLoad is the request body for POST /models.
 type ModelLoad struct {
-	ID                  string     `json:"id"                              binding:"required"`
-	Backend             string     `json:"backend,omitempty"               enums:"cpu,trt,ascend"`
-	Version             string     `json:"version,omitempty"               enums:"v5,v8,v11,v26"`
-	ModelType           string     `json:"model_type,omitempty"            enums:"detector,classifier"`
-	OnnxPath            string     `json:"onnx_path,omitempty"`
-	EnginePath          string     `json:"engine_path,omitempty"`
-	BatchSize           int        `json:"batch_size,omitempty"`
-	InputShape          InputShape `json:"input_shape,omitempty"`
-	ConfThresh          float64    `json:"conf_thresh,omitempty"`
-	NmsThresh           float64    `json:"nms_thresh,omitempty"`
-	DeviceID            int        `json:"device_id,omitempty"`
-	NumClasses          int        `json:"num_classes,omitempty"`
-	ClassNames          []string   `json:"class_names,omitempty"`
-	InstanceCount       int        `json:"instance_count,omitempty"`
-	PreferredBatchSizes []int      `json:"preferred_batch_sizes,omitempty"`
-	MaxQueueDelayUs     int        `json:"max_queue_delay_us,omitempty"`
+	ID                  string            `json:"id"                              binding:"required"`
+	Backend             string            `json:"backend,omitempty"               enums:"cpu,trt,ascend"`
+	Version             string            `json:"version,omitempty"               enums:"v5,v8,v11,v26"`
+	ModelType           string            `json:"model_type,omitempty"            enums:"detector,classifier"`
+	OnnxPath            string            `json:"onnx_path,omitempty"`
+	EnginePath          string            `json:"engine_path,omitempty"`
+	OmPaths             map[string]string `json:"om_paths,omitempty"`
+	BatchSize           int               `json:"batch_size,omitempty"`
+	InputShape          InputShape        `json:"input_shape,omitempty"`
+	ConfThresh          float64           `json:"conf_thresh,omitempty"`
+	NmsThresh           float64           `json:"nms_thresh,omitempty"`
+	DeviceID            int               `json:"device_id,omitempty"`
+	NumClasses          int               `json:"num_classes,omitempty"`
+	ClassNames          []string          `json:"class_names,omitempty"`
+	InstanceCount       int               `json:"instance_count,omitempty"`
+	PreferredBatchSizes []int             `json:"preferred_batch_sizes,omitempty"`
+	MaxQueueDelayUs     int               `json:"max_queue_delay_us,omitempty"`
+}
+
+// RepositoryModel is returned by GET /models/repository.
+type RepositoryModel struct {
+	ID            string  `json:"id"`
+	Backend       string  `json:"backend"`
+	Version       string  `json:"version"`
+	ModelType     string  `json:"model_type"`
+	BatchSize     int     `json:"batch_size"`
+	NumClasses    int     `json:"num_classes"`
+	ConfThresh    float64 `json:"conf_thresh"`
+	NmsThresh     float64 `json:"nms_thresh"`
+	InstanceCount int     `json:"instance_count"`
+	Loaded        bool    `json:"loaded"`
 }
 
 // TaskInfo describes a task's current state and configuration.

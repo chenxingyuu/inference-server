@@ -342,8 +342,9 @@ func (r *callRecord) ordered() []string {
 }
 
 func TestReplayState_DependencyOrder(t *testing.T) {
+	// Models are NOT replayed (model_repository is the single source of truth).
 	state := AppState{
-		Models:    map[string]ModelLoad{"m1": {ID: "m1"}},
+		Models:    map[string]ModelLoad{"m1": {ID: "m1"}}, // present but not replayed
 		Sources:   map[string]SourceCreate{"s1": {ID: "s1", URL: "rtsp://s1"}},
 		Pipelines: map[string]PipelineCreate{"p1": {ID: "p1"}},
 		Tasks: map[string]TaskEntry{
@@ -358,13 +359,18 @@ func TestReplayState_DependencyOrder(t *testing.T) {
 	}
 
 	cmds := rec.ordered()
-	wantOrder := []string{"load_model", "add_source", "add_pipeline", "add_task", "start_task"}
+	wantOrder := []string{"add_source", "add_pipeline", "add_task", "start_task"}
 	if len(cmds) != len(wantOrder) {
 		t.Fatalf("expected %d calls, got %d: %v", len(wantOrder), len(cmds), cmds)
 	}
 	for i, want := range wantOrder {
 		if cmds[i] != want {
 			t.Errorf("cmd[%d]: want %q, got %q", i, want, cmds[i])
+		}
+	}
+	for _, cmd := range cmds {
+		if cmd == "load_model" {
+			t.Error("load_model must not be replayed; model_repository is the source of truth")
 		}
 	}
 }
@@ -391,8 +397,8 @@ func TestReplayState_DoesNotStartStoppedTasks(t *testing.T) {
 
 func TestReplayState_RetriesOnSocketError(t *testing.T) {
 	state := AppState{
-		Models:    map[string]ModelLoad{"m1": {ID: "m1"}},
-		Sources:   map[string]SourceCreate{},
+		Models:    map[string]ModelLoad{},
+		Sources:   map[string]SourceCreate{"s1": {ID: "s1", URL: "rtsp://s1"}},
 		Pipelines: map[string]PipelineCreate{},
 		Tasks:     map[string]TaskEntry{},
 	}
@@ -417,8 +423,8 @@ func TestReplayState_RetriesOnSocketError(t *testing.T) {
 
 func TestReplayState_ExceedsMaxAttempts(t *testing.T) {
 	state := AppState{
-		Models:    map[string]ModelLoad{"m1": {ID: "m1"}},
-		Sources:   map[string]SourceCreate{},
+		Models:    map[string]ModelLoad{},
+		Sources:   map[string]SourceCreate{"s1": {ID: "s1", URL: "rtsp://s1"}},
 		Pipelines: map[string]PipelineCreate{},
 		Tasks:     map[string]TaskEntry{},
 	}
@@ -434,20 +440,21 @@ func TestReplayState_ExceedsMaxAttempts(t *testing.T) {
 }
 
 func TestReplayState_SkipsEngineErrorsAndContinues(t *testing.T) {
+	// Engine-level errors (status != "ok") on add_source should not abort the replay.
 	state := AppState{
-		Models:    map[string]ModelLoad{"m1": {ID: "m1"}},
-		Sources:   map[string]SourceCreate{"s1": {ID: "s1", URL: "rtsp://s1"}},
+		Models:    map[string]ModelLoad{},
+		Sources:   map[string]SourceCreate{"s1": {ID: "s1", URL: "rtsp://s1"}, "s2": {ID: "s2", URL: "rtsp://s2"}},
 		Pipelines: map[string]PipelineCreate{},
 		Tasks:     map[string]TaskEntry{},
 	}
 
 	rec := &callRecord{}
 	fakeFn := func(cmd map[string]any) (map[string]any, error) {
-		if cmd["cmd"] == "load_model" {
-			rec.fn(cmd)
-			return map[string]any{"status": "error", "message": "already loaded"}, nil
+		_, _ = rec.fn(cmd)
+		if cmd["id"] == "s1" {
+			return map[string]any{"status": "error", "message": "already exists"}, nil
 		}
-		return rec.fn(cmd)
+		return map[string]any{"status": "ok"}, nil
 	}
 
 	err := replayState(state, fakeFn, 1, 0)
@@ -456,14 +463,14 @@ func TestReplayState_SkipsEngineErrorsAndContinues(t *testing.T) {
 	}
 
 	cmds := rec.ordered()
-	foundSource := false
+	count := 0
 	for _, c := range cmds {
 		if c == "add_source" {
-			foundSource = true
+			count++
 		}
 	}
-	if !foundSource {
-		t.Error("add_source should still be called even when load_model returned engine error")
+	if count < 2 {
+		t.Errorf("both add_source calls should be attempted; got %d", count)
 	}
 }
 

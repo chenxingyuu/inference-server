@@ -195,6 +195,27 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         return json({{"status", "ok"}, {"data", arr}}).dump();
     }
 
+    if (cmd == "list_repository") {
+        json arr = json::array();
+        for (const auto& m : task_manager_.listRepositoryModels()) {
+            arr.push_back({{"id", m.id}, {"backend", m.backend}, {"version", m.version},
+                           {"model_type", m.model_type}, {"batch_size", m.batch_size},
+                           {"num_classes", m.num_classes}, {"conf_thresh", m.conf_thresh},
+                           {"nms_thresh", m.nms_thresh}, {"instance_count", m.instance_count},
+                           {"loaded", m.loaded}});
+        }
+        return json({{"status", "ok"}, {"data", arr}}).dump();
+    }
+
+    if (cmd == "load_from_repository") {
+        const auto id = req.value("id", std::string{});
+        if (id.empty())
+            return json({{"status", "error"}, {"message", "missing field: id"}}).dump();
+        if (!task_manager_.loadFromRepository(id))
+            return json({{"status", "error"}, {"message", "not found or already loaded: " + id}}).dump();
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
     if (cmd == "add_source") {
         const auto id = req.value("id", std::string{});
         if (id.empty())
@@ -338,15 +359,28 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         if (id.empty())
             return json({{"status", "error"}, {"message", "missing field: id"}}).dump();
         ModelConfig m;
-        m.id         = id;
-        m.backend    = parseDeviceType(req.value("backend", std::string{"cpu"}));
-        m.onnx_path  = req.value("onnx_path",   std::string{});
-        m.engine_path= req.value("engine_path", std::string{});
-        m.batch_size = req.value("batch_size",  m.batch_size);
+        m.id            = id;
+        m.backend       = parseDeviceType(req.value("backend",    std::string{"cpu"}));
+        m.version       = parseYOLOVersion(req.value("version",   std::string{"yolov8"}));
+        m.model_type    = (req.value("model_type", std::string{"detector"}) == "classifier")
+                          ? ModelType::Classifier : ModelType::Detector;
+        m.onnx_path     = req.value("onnx_path",   std::string{});
+        m.engine_path   = req.value("engine_path", std::string{});
+        m.batch_size    = req.value("batch_size",    m.batch_size);
+        m.conf_thresh   = req.value("conf_thresh",   m.conf_thresh);
+        m.nms_thresh    = req.value("nms_thresh",    m.nms_thresh);
+        m.num_classes   = req.value("num_classes",   m.num_classes);
+        m.instance_count = req.value("instance_count", m.instance_count);
         if (req.contains("input_shape") && req["input_shape"].is_object()) {
             m.input_shape.channels = req["input_shape"].value("c", m.input_shape.channels);
             m.input_shape.height   = req["input_shape"].value("h", m.input_shape.height);
             m.input_shape.width    = req["input_shape"].value("w", m.input_shape.width);
+        }
+        if (req.contains("om_paths") && req["om_paths"].is_object()) {
+            for (const auto& [k, v] : req["om_paths"].items()) {
+                try { m.om_paths[std::stoi(k)] = v.get<std::string>(); }
+                catch (...) {}
+            }
         }
         if (!task_manager_.loadModel(m))
             return json({{"status", "error"}, {"message", "already exists: " + id}}).dump();
