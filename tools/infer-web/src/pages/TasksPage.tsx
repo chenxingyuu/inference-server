@@ -52,6 +52,7 @@ export function TasksPage() {
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<TaskCreate>(DEFAULTS)
+  const [expanded, setExpanded] = useState<string | null>(null)
 
   const isEditing = editingId !== null
 
@@ -128,46 +129,103 @@ export function TasksPage() {
                 <EmptyState message={t('tasks.empty')} />
               )}
               {tasks.map((tk) => (
-                <tr key={tk.id}>
-                  <td className="font-mono text-[12px] text-ink-primary font-medium">{tk.id}</td>
-                  <td><StatusBadge status={tk.state} /></td>
-                  <td>
-                    <div className="flex items-center justify-end gap-1 pr-2">
-                      {tk.state === 'stopped' ? (
-                        <>
+                <>
+                  <tr
+                    key={tk.id}
+                    className="cursor-pointer"
+                    onClick={() => setExpanded(expanded === tk.id ? null : tk.id)}
+                  >
+                    <td className="font-mono text-[12px] text-ink-primary font-medium">
+                      <span className="mr-2 text-ink-muted">{expanded === tk.id ? '▼' : '▶'}</span>
+                      {tk.id}
+                    </td>
+                    <td><StatusBadge status={tk.state} /></td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1 pr-2">
+                        {tk.state === 'stopped' ? (
+                          <>
+                            <button
+                              onClick={() => openEdit(tk)}
+                              className="btn-icon text-ink-muted hover:text-accent"
+                              title={t('tasks.edit')}
+                            >
+                              ✎
+                            </button>
+                            <button
+                              onClick={() => start.mutate(tk.id)}
+                              disabled={start.isPending}
+                              title="Start"
+                              className="btn-icon text-success/60 hover:text-success"
+                            >
+                              <PlayIcon />
+                            </button>
+                          </>
+                        ) : (
                           <button
-                            onClick={() => openEdit(tk)}
-                            className="btn-icon text-ink-muted hover:text-accent"
-                            title={t('tasks.edit')}
+                            onClick={() => stop.mutate(tk.id)}
+                            disabled={stop.isPending}
+                            title="Stop"
+                            className="btn-icon text-warning/60 hover:text-warning"
                           >
-                            ✎
+                            <StopIcon />
                           </button>
-                          <button
-                            onClick={() => start.mutate(tk.id)}
-                            disabled={start.isPending}
-                            title="Start"
-                            className="btn-icon text-success/60 hover:text-success"
-                          >
-                            <PlayIcon />
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          onClick={() => stop.mutate(tk.id)}
-                          disabled={stop.isPending}
-                          title="Stop"
-                          className="btn-icon text-warning/60 hover:text-warning"
-                        >
-                          <StopIcon />
-                        </button>
-                      )}
-                      <DeleteButton
-                        loading={remove.isPending}
-                        onClick={() => remove.mutate(tk.id)}
-                      />
-                    </div>
-                  </td>
-                </tr>
+                        )}
+                        <DeleteButton
+                          loading={remove.isPending}
+                          onClick={() => remove.mutate(tk.id)}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                  {expanded === tk.id && (
+                    <tr key={`${tk.id}-detail`}>
+                      <td colSpan={3} className="bg-bg-overlay px-6 py-3">
+                        <div className="grid grid-cols-2 gap-6">
+                          <div>
+                            <div className="label mb-2">{t('tasks.section.binding')}</div>
+                            <div className="space-y-1">
+                              <div className="flex gap-2 items-center text-[12px]">
+                                <span className="text-ink-muted w-20 flex-none">{t('tasks.field.source')}</span>
+                                <span className="font-mono text-accent">{tk.source_id ?? '—'}</span>
+                              </div>
+                              <div className="flex gap-2 items-center text-[12px]">
+                                <span className="text-ink-muted w-20 flex-none">{t('tasks.field.pipeline')}</span>
+                                <span className="font-mono text-accent">{tk.pipeline_id ?? '—'}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="label mb-2">{t('tasks.section.settings')}</div>
+                            <div className="space-y-1">
+                              <div className="flex gap-2 items-center text-[12px]">
+                                <span className="text-ink-muted w-24 flex-none">{t('tasks.field.sample_fps')}</span>
+                                <span className="font-mono text-ink-secondary">{tk.sample_fps ?? '—'}</span>
+                              </div>
+                              <div className="flex gap-2 items-center text-[12px]">
+                                <span className="text-ink-muted w-24 flex-none">{t('tasks.field.sampling')}</span>
+                                <span className="font-mono text-ink-secondary">{tk.sampling_mode ?? '—'}</span>
+                              </div>
+                              {(tk.use_hwdec || tk.use_ascend_dvpp) && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {tk.use_hwdec && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-overlay border border-border text-[10px] font-mono text-ink-muted">
+                                      hwdec
+                                    </span>
+                                  )}
+                                  {tk.use_ascend_dvpp && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-overlay border border-border text-[10px] font-mono text-ink-muted">
+                                      dvpp · device {tk.ascend_device_id ?? 0}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>

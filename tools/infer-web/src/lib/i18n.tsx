@@ -167,6 +167,8 @@ const en = {
   'tasks.edit':                'Edit',
   'tasks.saving':              'Saving…',
   'tasks.save':                'Save',
+  'tasks.section.binding':     'Binding',
+  'tasks.section.settings':    'Settings',
 } as const
 
 const zh: Record<keyof typeof en, string> = {
@@ -332,6 +334,8 @@ const zh: Record<keyof typeof en, string> = {
   'tasks.edit':                '编辑',
   'tasks.saving':              '保存中…',
   'tasks.save':                '保存',
+  'tasks.section.binding':     '绑定',
+  'tasks.section.settings':    '参数',
 }
 
 // ─── Context & Hook ────────────────────────────────────────────────────────
