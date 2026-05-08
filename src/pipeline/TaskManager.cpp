@@ -326,10 +326,10 @@ bool TaskManager::updatePipeline(const PipelineConfig& pipeline) {
     return true;
 }
 
-bool TaskManager::addTask(const TaskConfig& task) {
+bool TaskManager::addTask(const TaskConfig& task, bool autostart) {
     std::lock_guard<std::mutex> lock(mu_);
     if (entries_.count(task.id)) return false;
-    if (!buildEntry(task, true)) return false;
+    if (!buildEntry(task, autostart)) return false;
     cfg_.tasks.push_back(task);
     auto& removed = runtime_state_.removed_task_ids;
     removed.erase(std::remove(removed.begin(), removed.end(), task.id), removed.end());

@@ -63,7 +63,7 @@ public:
     virtual bool removePipeline(const std::string& id) = 0;
     virtual bool updatePipeline(const PipelineConfig& pipeline) = 0;
 
-    virtual bool addTask(const TaskConfig& task) = 0;
+    virtual bool addTask(const TaskConfig& task, bool autostart = true) = 0;
     virtual bool removeTask(const std::string& id) = 0;
 
     virtual bool loadModel(const ModelConfig& model) = 0;

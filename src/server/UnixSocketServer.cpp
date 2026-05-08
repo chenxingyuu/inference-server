@@ -285,7 +285,8 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         t.source_id   = source_id;
         t.pipeline_id = pipeline_id;
         t.sample_fps  = req.value("sample_fps", t.sample_fps);
-        if (!task_manager_.addTask(t))
+        const bool autostart = req.value("autostart", true);
+        if (!task_manager_.addTask(t, autostart))
             return json({{"status", "error"}, {"message", "failed to add task: " + id}}).dump();
         return json({{"status", "ok"}, {"id", id}}).dump();
     }

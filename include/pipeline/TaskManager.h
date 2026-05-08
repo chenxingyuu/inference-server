@@ -39,7 +39,7 @@ public:
     bool addPipeline(const PipelineConfig& pipeline)    override;
     bool removePipeline(const std::string& id)          override;
     bool updatePipeline(const PipelineConfig& pipeline) override;
-    bool addTask(const TaskConfig& task)             override;
+    bool addTask(const TaskConfig& task, bool autostart = true) override;
     bool removeTask(const std::string& id)           override;
     bool loadModel(const ModelConfig& model)         override;
     bool unloadModel(const std::string& id)          override;

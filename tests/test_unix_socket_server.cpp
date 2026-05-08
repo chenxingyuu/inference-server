@@ -49,7 +49,7 @@ struct FakeTaskManager : ITaskManager {
     bool addPipeline(const PipelineConfig&)     override { return add_pipeline_result; }
     bool removePipeline(const std::string&)     override { return remove_pipeline_result; }
     bool updatePipeline(const PipelineConfig&)  override { return update_pipeline_result; }
-    bool addTask(const TaskConfig&)             override { return add_task_result; }
+    bool addTask(const TaskConfig&, bool = true) override { return add_task_result; }
     bool removeTask(const std::string&)         override { return remove_task_result; }
     bool loadModel(const ModelConfig&)          override { return load_model_result; }
     bool unloadModel(const std::string&)        override { return unload_model_result; }

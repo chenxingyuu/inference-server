@@ -244,6 +244,7 @@ func replayOnce(state AppState, callFn func(map[string]any) (map[string]any, err
 	for _, entry := range state.Tasks {
 		cmd := mustToMap(entry.Create)
 		cmd["cmd"] = "add_task"
+		cmd["autostart"] = false
 		if _, err := callFn(cmd); err != nil {
 			return err
 		}
