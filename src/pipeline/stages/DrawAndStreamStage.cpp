@@ -4,6 +4,7 @@
 #include "pipeline/stages/DetectionOverlay.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <utility>
 
@@ -139,7 +140,8 @@ bool DrawAndStreamStage::ensureWriterOpened(const cv::Mat& frame) {
     if (now < next_reconnect_at_) return false;
 
     reconnect_attempts_.fetch_add(1, std::memory_order_relaxed);
-    if (writer_->open(cfg_.output_url, cfg_.protocol, cfg_.fps, cfg_.bitrate_kbps, frame.cols, frame.rows)) {
+    const int gop = (cfg_.gop > 0) ? cfg_.gop : std::max(1, static_cast<int>(std::lround(cfg_.fps)));
+    if (writer_->open(cfg_.output_url, cfg_.protocol, cfg_.fps, gop, cfg_.bitrate_kbps, frame.cols, frame.rows)) {
         LOG_INFO("DrawAndStreamStage[{}]: stream opened url={} protocol={} size={}x{} fps={}",
                  id_, cfg_.output_url, cfg_.protocol, frame.cols, frame.rows, cfg_.fps);
         reconnect_delay_ms_ = cfg_.reconnect_initial_ms;
@@ -166,6 +168,7 @@ bool DrawAndStreamStage::OpenCvStreamWriter::open(
     const std::string& url,
     const std::string& protocol,
     double fps,
+    int gop,
     int bitrate_kbps,
     int width,
     int height) {
@@ -184,6 +187,7 @@ bool DrawAndStreamStage::OpenCvStreamWriter::open(
         "-s " + std::to_string(width) + "x" + std::to_string(height) + " "
         "-r " + std::to_string(fps) + " -i - "
         "-an -c:v libx264 -pix_fmt yuv420p -preset veryfast -tune zerolatency "
+        "-g " + std::to_string(gop) + " -keyint_min " + std::to_string(gop) + " -sc_threshold 0 "
         "-b:v " + std::to_string(bitrate_kbps) + "k "
         "-f " + format + " " + shellQuote(output_url);
 

@@ -22,6 +22,7 @@ struct DrawAndStreamConfig {
     std::string output_url;
     std::string protocol{"rtsp"};
     double fps{15.0};
+    int gop{0}; // 0 => auto (rounded fps)
     int bitrate_kbps{2500};
     int queue_capacity{32};
     int reconnect_initial_ms{1000};
@@ -34,7 +35,7 @@ struct DrawAndStreamConfig {
 class IStreamWriter {
 public:
     virtual ~IStreamWriter() = default;
-    virtual bool open(const std::string& url, const std::string& protocol, double fps, int bitrate_kbps, int width, int height) = 0;
+    virtual bool open(const std::string& url, const std::string& protocol, double fps, int gop, int bitrate_kbps, int width, int height) = 0;
     virtual bool write(const cv::Mat& frame) = 0;
     virtual void close() = 0;
     virtual bool isOpened() const = 0;
@@ -61,7 +62,7 @@ private:
 
     class OpenCvStreamWriter final : public IStreamWriter {
     public:
-        bool open(const std::string& url, const std::string& protocol, double fps, int bitrate_kbps, int width, int height) override;
+        bool open(const std::string& url, const std::string& protocol, double fps, int gop, int bitrate_kbps, int width, int height) override;
         bool write(const cv::Mat& frame) override;
         void close() override;
         bool isOpened() const override;

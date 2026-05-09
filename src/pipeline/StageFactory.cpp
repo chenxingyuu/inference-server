@@ -152,6 +152,7 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         }
         validateShellSafeUrl(stream_cfg.output_url, "sink.stream");
         stream_cfg.fps = getFloatWithDefault(cfg.with, "fps", static_cast<float>(stream_cfg.fps));
+        stream_cfg.gop = getIntWithDefault(cfg.with, "gop", stream_cfg.gop);
         stream_cfg.bitrate_kbps = getIntWithDefault(cfg.with, "bitrate_kbps", stream_cfg.bitrate_kbps);
         stream_cfg.queue_capacity = getIntWithDefault(cfg.with, "queue_capacity", stream_cfg.queue_capacity);
         stream_cfg.reconnect_initial_ms = getIntWithDefault(cfg.with, "reconnect_initial_ms", stream_cfg.reconnect_initial_ms);
@@ -171,6 +172,9 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         }
         if (stream_cfg.fps <= 0) {
             throw std::runtime_error("sink.stream fps must be > 0");
+        }
+        if (stream_cfg.gop < 0) {
+            throw std::runtime_error("sink.stream gop must be >= 0");
         }
         if (stream_cfg.reconnect_initial_ms < 1 || stream_cfg.reconnect_max_ms < stream_cfg.reconnect_initial_ms) {
             throw std::runtime_error("sink.stream reconnect settings invalid");

@@ -92,6 +92,32 @@ TEST(StageFactory, RequiresSinkStreamOutputUrl) {
     EXPECT_THROW((void)StageFactory::create(cfg, makeContext()), std::runtime_error);
 }
 
+TEST(StageFactory, RejectsNegativeSinkStreamGop) {
+    StageConfig cfg;
+    cfg.id = "stream_sink_1";
+    cfg.type = "sink.stream";
+    cfg.with["output_url"] = "rtsp://localhost:8554/live/test";
+    cfg.with["protocol"] = "rtsp";
+    cfg.with["gop"] = "-1";
+
+    EXPECT_THROW((void)StageFactory::create(cfg, makeContext()), std::runtime_error);
+}
+
+TEST(StageFactory, AcceptsZeroSinkStreamGopForAutoMode) {
+    StageConfig cfg;
+    cfg.id = "stream_sink_auto_gop";
+    cfg.type = "sink.stream";
+    cfg.with["output_url"] = "rtsp://localhost:8554/live/test";
+    cfg.with["protocol"] = "rtsp";
+    cfg.with["gop"] = "0";
+
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, makeContext());
+        ASSERT_NE(stage, nullptr);
+        EXPECT_EQ(stage->id(), "stream_sink_auto_gop");
+    });
+}
+
 TEST(StageFactory, CreatesSinkFfplayStage) {
     StageConfig cfg;
     cfg.id = "ffplay_sink_1";
