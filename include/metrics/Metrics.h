@@ -22,6 +22,8 @@ public:
     // ── Latency histograms (milliseconds) ─────────────────────────────────────
     void recordInferLatency(const std::string& model_id, double ms);
     void recordE2eLatency(const std::string& stream_id, double ms);
+    void recordSinkPublishLatency(const std::string& stream_id, double ms);
+    void recordSinkStreamLatency(const std::string& stream_id, double ms);
 
     // ── Batch size histogram ───────────────────────────────────────────────────
     void recordInferBatchSize(const std::string& model_id, int size);
@@ -136,6 +138,8 @@ private:
 
     LabeledHistogram      infer_latency_;
     LabeledHistogram      e2e_latency_;
+    LabeledHistogram      sink_publish_latency_;
+    LabeledHistogram      sink_stream_latency_;
     LabeledHistogram      infer_batch_size_;
     LabeledHistogram      infer_queue_latency_;
     LabeledCounter        frames_decoded_;

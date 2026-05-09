@@ -87,6 +87,14 @@ void Metrics::recordE2eLatency(const std::string& stream_id, double ms) {
     e2e_latency_.observe(stream_id, ms);
 }
 
+void Metrics::recordSinkPublishLatency(const std::string& stream_id, double ms) {
+    sink_publish_latency_.observe(stream_id, ms);
+}
+
+void Metrics::recordSinkStreamLatency(const std::string& stream_id, double ms) {
+    sink_stream_latency_.observe(stream_id, ms);
+}
+
 void Metrics::recordInferBatchSize(const std::string& model_id, int size) {
     infer_batch_size_.observe(model_id, static_cast<double>(size));
 }
@@ -356,6 +364,18 @@ std::string Metrics::serialize() const {
         e2e_latency_.snapshot(snap);
         out << serializeHistogram("e2e_latency_ms",
             "End-to-end latency (capture to publish) in milliseconds", "stream_id", snap);
+    }
+    {
+        std::unordered_map<std::string, HistogramData> snap;
+        sink_publish_latency_.snapshot(snap);
+        out << serializeHistogram("sink_publish_latency_ms",
+            "Latency from frame capture to SinkKafkaStage receive in milliseconds", "stream_id", snap);
+    }
+    {
+        std::unordered_map<std::string, HistogramData> snap;
+        sink_stream_latency_.snapshot(snap);
+        out << serializeHistogram("sink_stream_latency_ms",
+            "Latency from frame capture to DrawAndStreamStage write success in milliseconds", "stream_id", snap);
     }
     {
         std::unordered_map<std::string, HistogramData> snap;

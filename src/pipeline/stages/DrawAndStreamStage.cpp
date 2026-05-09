@@ -1,6 +1,7 @@
 #include "pipeline/stages/DrawAndStreamStage.h"
 
 #include "common/Logger.h"
+#include "metrics/Metrics.h"
 #include "pipeline/stages/DetectionOverlay.h"
 
 #include <algorithm>
@@ -28,6 +29,13 @@ std::string shellQuote(const std::string& input) {
     out += "'";
     return out;
 }
+
+uint64_t nowSteadyNs() {
+    using namespace std::chrono;
+    return static_cast<uint64_t>(duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+double nsToMs(uint64_t ns) { return static_cast<double>(ns) / 1e6; }
 
 } // namespace
 
@@ -126,6 +134,23 @@ void DrawAndStreamStage::runWorker() {
             continue;
         }
         frames_written_.fetch_add(1, std::memory_order_relaxed);
+        if (item.infer_result.has_value() && item.infer_result->frame_mono_ns != 0) {
+            const uint64_t now_ns = nowSteadyNs();
+            if (now_ns >= item.infer_result->frame_mono_ns) {
+                Metrics::get().recordSinkStreamLatency(
+                    item.stream_id,
+                    nsToMs(now_ns - item.infer_result->frame_mono_ns));
+            }
+        }
+        const double latency_ms = item.infer_result.has_value() ? item.infer_result->latency_ms : -1.0;
+        const std::size_t dets = item.infer_result.has_value() ? item.infer_result->detections.size() : 0;
+        const uint64_t frame_seq = item.infer_result.has_value() ? item.infer_result->frame_seq : 0;
+        LOG_DEBUG("DrawAndStreamStage[{}]: streamed stream={} frame_seq={} dets={} latency_ms={:.1f}",
+                  id_,
+                  item.stream_id,
+                  frame_seq,
+                  dets,
+                  latency_ms);
         consecutive_failures_.store(0, std::memory_order_relaxed);
     }
     // writer_ is exclusively owned by this thread: close it here so stop() never

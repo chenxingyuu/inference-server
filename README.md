@@ -198,6 +198,8 @@ publishers:
 | --- | --- | --- | --- |
 | `infer_latency_ms` | histogram | `model_id` | 单批推理耗时 |
 | `e2e_latency_ms` | histogram | `stream_id` | 端到端延迟 |
+| `sink_publish_latency_ms` | histogram | `stream_id` | 帧到达 `sink.publish` 的延迟 |
+| `sink_stream_latency_ms` | histogram | `stream_id` | 帧在 `sink.stream` 写流成功时的延迟 |
 | `frames_decoded_total` | counter | `stream_id` | 解码帧数 |
 | `frames_dropped_total` | counter | `stream_id` | 解码丢帧数 |
 | `kafka_published_total` | counter | 无 | Kafka 成功发布数 |
