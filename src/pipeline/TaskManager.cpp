@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <set>
+#include <string_view>
 
 namespace infer {
 
@@ -30,6 +31,57 @@ std::string findInferModelId(const PipelineConfig& pipeline) {
         if (it != node.with.end()) return it->second;
     }
     return {};
+}
+
+std::string interpolateOutputUrlPlaceholders(
+    std::string_view raw,
+    const TaskConfig& task,
+    const std::string& pipeline_id,
+    const std::string& stage_id) {
+    std::string out;
+    out.reserve(raw.size() + 16);
+
+    std::size_t pos = 0;
+    while (pos < raw.size()) {
+        const std::size_t open = raw.find('{', pos);
+        if (open == std::string_view::npos) {
+            out.append(raw.substr(pos));
+            break;
+        }
+        out.append(raw.substr(pos, open - pos));
+        const std::size_t close = raw.find('}', open + 1);
+        if (close == std::string_view::npos) {
+            throw std::runtime_error(
+                "TaskManager: task '" + task.id + "' pipeline '" + pipeline_id + "' stage '" + stage_id +
+                "' has unterminated placeholder in sink.stream output_url: " + std::string(raw));
+        }
+        const std::string token(raw.substr(open + 1, close - open - 1));
+        if (token == "task_id") {
+            out += task.id;
+        } else if (token == "source_id") {
+            out += task.source_id;
+        } else {
+            throw std::runtime_error(
+                "TaskManager: task '" + task.id + "' pipeline '" + pipeline_id + "' stage '" + stage_id +
+                "' has unsupported placeholder '{" + token +
+                "}' in sink.stream output_url (supported: {task_id}, {source_id})");
+        }
+        pos = close + 1;
+    }
+    return out;
+}
+
+void interpolatePipelineForTask(PipelineConfig& runtime_cfg, const TaskConfig& task, const std::string& pipeline_id) {
+    for (auto& node : runtime_cfg.nodes) {
+        if (node.type != "sink.stream") continue;
+        auto output_url_it = node.with.find("output_url");
+        if (output_url_it == node.with.end()) continue;
+        const std::string_view raw(output_url_it->second);
+        if (raw.find('{') == std::string_view::npos && raw.find('}') == std::string_view::npos) {
+            continue;
+        }
+        output_url_it->second = interpolateOutputUrlPlaceholders(raw, task, pipeline_id, node.id);
+    }
 }
 
 } // namespace
@@ -96,6 +148,7 @@ bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
 
     PipelineConfig runtime_cfg = *pipeline_tpl;
     runtime_cfg.id = task.id;
+    interpolatePipelineForTask(runtime_cfg, task, pipeline_tpl->id);
     auto executor = std::make_shared<GraphExecutor>(runtime_cfg);
     StageFactory::Context ctx{
         cfg_,

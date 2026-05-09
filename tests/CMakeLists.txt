@@ -224,6 +224,14 @@ target_link_libraries(test_unix_socket_server PRIVATE
 add_test(NAME test_unix_socket_server COMMAND test_unix_socket_server
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+add_executable(test_task_manager_placeholder test_task_manager_placeholder.cpp)
+target_link_libraries(test_task_manager_placeholder PRIVATE
+    infer_core
+    GTest::gtest_main
+)
+add_test(NAME test_task_manager_placeholder COMMAND test_task_manager_placeholder
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
 # TrtUtils pure-logic unit tests — no GPU required, no TRT dependency
 add_infer_test(test_trt_utils)
 
