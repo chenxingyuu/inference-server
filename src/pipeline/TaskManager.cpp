@@ -373,13 +373,53 @@ bool TaskManager::removePipeline(const std::string& id) {
 
 bool TaskManager::updatePipeline(const PipelineConfig& pipeline) {
     std::lock_guard<std::mutex> lock(mu_);
-    if (!cfg_.findPipeline(pipeline.id)) return false;
-    for (const auto& t : cfg_.tasks)
-        if (t.pipeline_id == pipeline.id) return false;
+    const auto* old_ptr = cfg_.findPipeline(pipeline.id);
+    if (!old_ptr) return false;
+
+    // Block only while a task is actually running this pipeline; stopped tasks keep a
+    // snapshot GraphExecutor and must be rebuilt after the template changes.
+    for (const auto& t : cfg_.tasks) {
+        if (t.pipeline_id != pipeline.id) continue;
+        auto it = entries_.find(t.id);
+        if (it != entries_.end() && it->second.state == State::Running) return false;
+    }
+
+    const PipelineConfig backup = *old_ptr;
+
     for (auto& p : cfg_.pipelines)
         if (p.id == pipeline.id) { p = pipeline; break; }
     for (auto& p : runtime_state_.added_pipelines)
         if (p.id == pipeline.id) { p = pipeline; break; }
+
+    std::vector<TaskConfig> affected;
+    for (const auto& t : cfg_.tasks) {
+        if (t.pipeline_id == pipeline.id) affected.push_back(t);
+    }
+    for (const auto& t : affected) {
+        entries_.erase(t.id);
+    }
+
+    for (const auto& t : affected) {
+        if (!buildEntry(t, false)) {
+            LOG_ERROR(
+                "TaskManager: updatePipeline failed to rebuild stopped task '{}' after template change; restoring previous pipeline",
+                t.id);
+            for (auto& p : cfg_.pipelines)
+                if (p.id == pipeline.id) { p = backup; break; }
+            for (auto& p : runtime_state_.added_pipelines)
+                if (p.id == pipeline.id) { p = backup; break; }
+            for (const auto& t2 : affected) {
+                entries_.erase(t2.id);
+            }
+            for (const auto& t2 : affected) {
+                if (!buildEntry(t2, false)) {
+                    LOG_ERROR("TaskManager: updatePipeline failed to restore task '{}' to previous graph", t2.id);
+                }
+            }
+            return false;
+        }
+    }
+
     persist();
     return true;
 }

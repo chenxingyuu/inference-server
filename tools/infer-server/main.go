@@ -576,6 +576,14 @@ func handleUpdatePipeline(c *gin.Context) {
 	code := http.StatusOK
 	if resp["status"] != "ok" {
 		code = http.StatusBadRequest
+		if cStr, ok := resp["code"].(string); ok {
+			switch cStr {
+			case "not_found":
+				code = http.StatusNotFound
+			case "in_use":
+				code = http.StatusConflict
+			}
+		}
 	}
 	c.JSON(code, resp)
 }

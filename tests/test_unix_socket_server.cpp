@@ -16,6 +16,28 @@
 using json = nlohmann::json;
 using namespace infer;
 
+namespace {
+
+PipelineInfo pipelineWithId(std::string id) {
+    PipelineInfo p;
+    p.id = std::move(id);
+    return p;
+}
+
+PipelineInfo pipelineWithNodes(std::string id, std::initializer_list<std::pair<const char*, const char*>> node_id_types) {
+    PipelineInfo p;
+    p.id = std::move(id);
+    for (const auto& [nid, ntype] : node_id_types) {
+        PipelineNodeInfo n;
+        n.id   = nid;
+        n.type = ntype;
+        p.nodes.push_back(std::move(n));
+    }
+    return p;
+}
+
+} // namespace
+
 // ── Fake TaskManager ──────────────────────────────────────────────────────────
 
 struct FakeTaskManager : ITaskManager {
@@ -55,6 +77,9 @@ struct FakeTaskManager : ITaskManager {
     bool removeTask(const std::string&)          override { return remove_task_result; }
     bool loadModel(const ModelConfig&)           override { return load_model_result; }
     bool unloadModel(const std::string&)         override { return unload_model_result; }
+
+    std::vector<RepositoryModelInfo> listRepositoryModels() const override { return {}; }
+    bool loadFromRepository(const std::string&) override { return true; }
 };
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
@@ -219,15 +244,18 @@ TEST_F(UnixSocketServerTest, ListPipelinesEmpty) {
 }
 
 TEST_F(UnixSocketServerTest, ListPipelinesWithItems) {
-    fake_tm_.pipelines = {{"pipe0", {"decode", "infer", "kafka"}, 2}};
+    PipelineInfo p = pipelineWithNodes("pipe0", {{"n0", "decode"}, {"n1", "infer"}, {"n2", "kafka"}});
+    p.edges.push_back(PipelineEdgeInfo{"n0", "n1", 256, "block"});
+    p.edges.push_back(PipelineEdgeInfo{"n1", "n2", 256, "block"});
+    fake_tm_.pipelines = {std::move(p)};
     auto resp = roundtrip({{"cmd", "list_pipelines"}});
     ASSERT_EQ(resp["data"].size(), 1u);
-    EXPECT_EQ(resp["data"][0]["id"],         "pipe0");
-    EXPECT_EQ(resp["data"][0]["edge_count"], 2);
+    EXPECT_EQ(resp["data"][0]["id"], "pipe0");
+    EXPECT_EQ(resp["data"][0]["edges"].size(), 2u);
 }
 
 TEST_F(UnixSocketServerTest, ListPipelinesNodesIsArray) {
-    fake_tm_.pipelines = {{"pipe0", {"a", "b"}, 1}};
+    fake_tm_.pipelines = {pipelineWithNodes("pipe0", {{"n0", "a"}, {"n1", "b"}})};
     auto resp = roundtrip({{"cmd", "list_pipelines"}});
     EXPECT_TRUE(resp["data"][0]["nodes"].is_array());
     EXPECT_EQ(resp["data"][0]["nodes"].size(), 2u);
@@ -318,7 +346,7 @@ TEST_F(UnixSocketServerTest, AddPipelineDuplicate) {
 }
 
 TEST_F(UnixSocketServerTest, RemovePipelineSuccess) {
-    fake_tm_.pipelines = {{"pipeline_default", {}, 0}};
+    fake_tm_.pipelines = {pipelineWithId("pipeline_default")};
     auto resp = roundtrip({{"cmd", "remove_pipeline"}, {"id", "pipeline_default"}});
     EXPECT_EQ(resp["status"], "ok");
     EXPECT_EQ(resp["id"],     "pipeline_default");
@@ -333,11 +361,70 @@ TEST_F(UnixSocketServerTest, RemovePipelineNotFound) {
 
 TEST_F(UnixSocketServerTest, RemovePipelineInUse) {
     // pipeline exists but removePipeline returns false (a task references it)
-    fake_tm_.pipelines = {{"pipeline_default", {}, 0}};
+    fake_tm_.pipelines = {pipelineWithId("pipeline_default")};
     fake_tm_.remove_pipeline_result = false;
     auto resp = roundtrip({{"cmd", "remove_pipeline"}, {"id", "pipeline_default"}});
     EXPECT_EQ(resp["status"], "error");
     EXPECT_EQ(resp["code"],   "in_use");
+}
+
+TEST_F(UnixSocketServerTest, UpdatePipelineNotFound) {
+    auto resp = roundtrip({
+        {"cmd", "update_pipeline"},
+        {"id",  "missing"},
+        {"nodes", json::array()},
+        {"edges", json::array()},
+    });
+    EXPECT_EQ(resp["status"], "error");
+    EXPECT_EQ(resp["code"],   "not_found");
+}
+
+TEST_F(UnixSocketServerTest, UpdatePipelineInUseRunning) {
+    fake_tm_.pipelines = {pipelineWithId("pipe0")};
+    fake_tm_.update_pipeline_result = false;
+    TaskConfig tc;
+    tc.id          = "t1";
+    tc.source_id   = "src";
+    tc.pipeline_id = "pipe0";
+    fake_tm_.tasks = {ITaskManager::TaskRuntimeInfo{tc, ITaskManager::State::Running}};
+    auto resp = roundtrip({
+        {"cmd", "update_pipeline"},
+        {"id",  "pipe0"},
+        {"nodes", json::array()},
+        {"edges", json::array()},
+    });
+    EXPECT_EQ(resp["status"], "error");
+    EXPECT_EQ(resp["code"],   "in_use");
+}
+
+TEST_F(UnixSocketServerTest, UpdatePipelineInvalidGraph) {
+    fake_tm_.pipelines = {pipelineWithId("pipe0")};
+    fake_tm_.update_pipeline_result = false;
+    TaskConfig tc;
+    tc.id          = "t1";
+    tc.source_id   = "src";
+    tc.pipeline_id = "pipe0";
+    fake_tm_.tasks = {ITaskManager::TaskRuntimeInfo{tc, ITaskManager::State::Stopped}};
+    auto resp = roundtrip({
+        {"cmd", "update_pipeline"},
+        {"id",  "pipe0"},
+        {"nodes", json::array()},
+        {"edges", json::array()},
+    });
+    EXPECT_EQ(resp["status"], "error");
+    EXPECT_EQ(resp["code"],   "invalid_pipeline");
+}
+
+TEST_F(UnixSocketServerTest, UpdatePipelineSuccess) {
+    fake_tm_.pipelines = {pipelineWithId("pipe0")};
+    auto resp = roundtrip({
+        {"cmd", "update_pipeline"},
+        {"id",  "pipe0"},
+        {"nodes", json::array()},
+        {"edges", json::array()},
+    });
+    EXPECT_EQ(resp["status"], "ok");
+    EXPECT_EQ(resp["id"],     "pipe0");
 }
 
 // ── add_task / remove_task ────────────────────────────────────────────────────
