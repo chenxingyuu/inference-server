@@ -136,12 +136,37 @@ void AscendVencFfmpegMuxWriter::onVencCallback(acldvppPicDesc* input, acldvppStr
         void*          data = acldvppGetStreamDescData(output);
         const uint32_t sz  = acldvppGetStreamDescSize(output);
         if (data && sz > 0 && self->pipe_) {
-            std::lock_guard<std::mutex> lk(self->pipe_mu_);
-            const size_t wrote = std::fwrite(data, 1, static_cast<size_t>(sz), self->pipe_);
-            if (wrote != static_cast<size_t>(sz)) {
-                LOG_WARN("AscendVencFfmpegMuxWriter: short fwrite to ffmpeg ({} / {})", wrote, sz);
+            std::vector<uint8_t> host_packet(static_cast<size_t>(sz));
+            if (self->ctx_) {
+                const aclError set_ctx_rc = aclrtSetCurrentContext(self->ctx_);
+                if (set_ctx_rc != ACL_SUCCESS) {
+                    LOG_WARN("AscendVencFfmpegMuxWriter: callback aclrtSetCurrentContext failed ({})",
+                             static_cast<int>(set_ctx_rc));
+                }
             }
-            (void)std::fflush(self->pipe_);
+            const aclError copy_rc = aclrtMemcpy(
+                host_packet.data(),
+                static_cast<size_t>(sz),
+                data,
+                static_cast<size_t>(sz),
+                ACL_MEMCPY_DEVICE_TO_HOST);
+            if (copy_rc != ACL_SUCCESS) {
+                LOG_WARN("AscendVencFfmpegMuxWriter: callback D2H copy failed ({}) size={}",
+                         static_cast<int>(copy_rc),
+                         sz);
+            } else {
+            std::lock_guard<std::mutex> lk(self->pipe_mu_);
+                const size_t wrote = std::fwrite(host_packet.data(), 1, static_cast<size_t>(sz), self->pipe_);
+            if (wrote != static_cast<size_t>(sz)) {
+                    const int e = errno;
+                    LOG_WARN("AscendVencFfmpegMuxWriter: short fwrite to ffmpeg ({} / {}), errno={} ({})",
+                             wrote,
+                             sz,
+                             e,
+                             std::strerror(e));
+            }
+                (void)std::fflush(self->pipe_);
+            }
         }
     }
 
@@ -471,11 +496,19 @@ bool AscendVencFfmpegMuxWriter::write(const cv::Mat& frame) {
     }
     (void)aclvencDestroyFrameConfig(fc);
 
-    // DVPP/VENC callbacks are asynchronous (same class of issue as VDEC in DVPPDecoder.cpp).
-    // Prefer synchronizing the encode stream; device-wide sync alone may not retire VENC work on CANN 6.
+    // CANN6 VENC callback dispatch requires pumping report queue on the thread registered via
+    // aclvencSetChannelDescThreadId(). SynchronizeStream/Device alone may not trigger callback delivery.
     (void)aclrtSynchronizeStream(stream_);
     for (int i = 0; i < 2000; ++i) {
         if (frame_done_.load(std::memory_order_acquire)) break;
+        const aclError pr = aclrtProcessReport(1);
+        if (pr != ACL_SUCCESS
+#ifdef ACL_ERROR_RT_REPORT_TIMEOUT
+            && pr != ACL_ERROR_RT_REPORT_TIMEOUT
+#endif
+        ) {
+            LOG_WARN("AscendVencFfmpegMuxWriter: aclrtProcessReport failed ({})", static_cast<int>(pr));
+        }
         (void)aclrtSynchronizeStream(stream_);
         (void)aclrtSynchronizeDevice();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
