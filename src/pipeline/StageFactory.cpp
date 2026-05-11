@@ -6,6 +6,8 @@
 #include "pipeline/stages/SinkFfplayStage.h"
 #include "pipeline/stages/JoinByFrameStage.h"
 #include "pipeline/stages/PassthroughStage.h"
+#include "pipeline/stages/SahiMergeStage.h"
+#include "pipeline/stages/SahiSchedulerStage.h"
 #include "pipeline/stages/SinkKafkaStage.h"
 #include "pipeline/stages/SourceFileStage.h"
 #include "pipeline/stages/SourceRtspStage.h"
@@ -118,6 +120,42 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
     }
     if (cfg.type == "join.byFrameId") {
         return std::make_unique<JoinByFrameStage>(cfg.id);
+    }
+    if (cfg.type == "infer.sahiScheduler") {
+        SahiSchedulerConfig sahi_cfg;
+        sahi_cfg.tile_width = getIntWithDefault(cfg.with, "tile_width", sahi_cfg.tile_width);
+        sahi_cfg.tile_height = getIntWithDefault(cfg.with, "tile_height", sahi_cfg.tile_height);
+        const float overlap = getFloatWithDefault(cfg.with, "overlap_ratio", sahi_cfg.x_overlap_ratio);
+        sahi_cfg.x_overlap_ratio = getFloatWithDefault(cfg.with, "x_overlap_ratio", overlap);
+        sahi_cfg.y_overlap_ratio = getFloatWithDefault(cfg.with, "y_overlap_ratio", sahi_cfg.y_overlap_ratio);
+        sahi_cfg.full_interval = getIntWithDefault(cfg.with, "full_interval", sahi_cfg.full_interval);
+        sahi_cfg.roi_expand_ratio = getFloatWithDefault(cfg.with, "roi_expand_ratio", sahi_cfg.roi_expand_ratio);
+        sahi_cfg.max_tiles_per_frame = getIntWithDefault(cfg.with, "max_tiles_per_frame", sahi_cfg.max_tiles_per_frame);
+        sahi_cfg.min_roi_width = getIntWithDefault(cfg.with, "min_roi_width", sahi_cfg.min_roi_width);
+        sahi_cfg.min_roi_height = getIntWithDefault(cfg.with, "min_roi_height", sahi_cfg.min_roi_height);
+        sahi_cfg.roi_max_age_frames = getIntWithDefault(cfg.with, "roi_max_age_frames", sahi_cfg.roi_max_age_frames);
+        if (sahi_cfg.tile_width < 1 || sahi_cfg.tile_height < 1) {
+            throw std::runtime_error("infer.sahiScheduler tile_width/tile_height must be >= 1");
+        }
+        if (sahi_cfg.full_interval < 1) {
+            throw std::runtime_error("infer.sahiScheduler full_interval must be >= 1");
+        }
+        if (sahi_cfg.max_tiles_per_frame < 1) {
+            throw std::runtime_error("infer.sahiScheduler max_tiles_per_frame must be >= 1");
+        }
+        return std::make_unique<SahiSchedulerStage>(cfg.id, sahi_cfg);
+    }
+    if (cfg.type == "post.sahiMerge") {
+        SahiMergeConfig merge_cfg;
+        merge_cfg.merge_iou = getFloatWithDefault(cfg.with, "merge_iou", merge_cfg.merge_iou);
+        merge_cfg.stale_timeout_ms = getIntWithDefault(cfg.with, "stale_timeout_ms", merge_cfg.stale_timeout_ms);
+        if (merge_cfg.merge_iou <= 0.0f || merge_cfg.merge_iou > 1.0f) {
+            throw std::runtime_error("post.sahiMerge merge_iou must be in (0, 1]");
+        }
+        if (merge_cfg.stale_timeout_ms < 1) {
+            throw std::runtime_error("post.sahiMerge stale_timeout_ms must be >= 1");
+        }
+        return std::make_unique<SahiMergeStage>(cfg.id, merge_cfg);
     }
     if (cfg.type == "sink.publish") {
         return std::make_unique<SinkKafkaStage>(cfg.id, ctx.publisher);

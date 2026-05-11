@@ -800,6 +800,35 @@ YAML `with` 字段：
 - 输入在 CPU 上由 BGR 转为 **NV12**。VENC 路径将宽高 **向上对齐到 16 的倍数**（H.264 宏块栅格；例如 7680×1144 → 7680×1152），`packSingleBgrToNv12Contiguous` 会按对齐后的尺寸缩放，略有竖直拉伸。**首期建议固定分辨率**；若芯片/文档不支持目标宽高，应退回 `ffmpeg_x264` 或调整分辨率。
 - 与推理共用进程时，ACL 由 **`AscendProcessRuntime`** 进程级引用计数管理；纯推流任务也会在 writer `open()` 时 acquire ACL。
 
+### SAHI 全景流 MVP（全量 + ROI 增量）
+
+适用场景：超宽全景流（例如 `7680x1870` / `7680x1144`）需要提升远距离小目标召回，同时控制整体推理时延。
+
+新增 stage：
+
+| stage type | 作用 | 关键参数 |
+|----|------|------|
+| `infer.sahiScheduler` | 切片调度（全量 + ROI）并下发 tile 帧 | `tile_width` `tile_height` `overlap_ratio` `y_overlap_ratio` `full_interval` `roi_expand_ratio` |
+| `post.sahiMerge` | tile 结果回映射 + 全局 NMS 融合 | `merge_iou` `stale_timeout_ms` |
+
+推荐链路：
+
+```text
+source.rtsp -> infer.sahiScheduler -> infer.engine -> post.sahiMerge -> track.bytetrack -> sink.stream
+```
+
+MVP 建议参数：
+
+- `tile_width=960`
+- `tile_height=1144`（两路流都可先做横向切片）
+- `overlap_ratio=0.25`
+- `y_overlap_ratio=0`
+- `full_interval=5`
+- `roi_expand_ratio=1.3`
+- `merge_iou=0.55`
+
+配置示例见：`config/config.npu.sahi.mvp.yaml`（按实际 `source.url`、`model_id`、`output_url` 修改）。
+
 ### 环境检查清单
 
 在运行容器前，宿主机确认：

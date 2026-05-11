@@ -206,6 +206,32 @@ TEST(StageFactory, CreatesSourceRtspStageWithTaskScopedDvppContext) {
     });
 }
 
+TEST(StageFactory, CreatesSahiSchedulerStage) {
+    StageConfig cfg;
+    cfg.id = "sahi_sched_1";
+    cfg.type = "infer.sahiScheduler";
+    cfg.with["tile_width"] = "960";
+    cfg.with["tile_height"] = "1144";
+    cfg.with["full_interval"] = "5";
+
+    auto ctx = makeContext();
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, ctx);
+        ASSERT_NE(stage, nullptr);
+        EXPECT_EQ(stage->id(), "sahi_sched_1");
+    });
+}
+
+TEST(StageFactory, RejectsInvalidSahiMergeIou) {
+    StageConfig cfg;
+    cfg.id = "sahi_merge_1";
+    cfg.type = "post.sahiMerge";
+    cfg.with["merge_iou"] = "1.2";
+
+    auto ctx = makeContext();
+    EXPECT_THROW((void)StageFactory::create(cfg, ctx), std::runtime_error);
+}
+
 #if defined(BUILD_ONNX_BACKEND)
 TEST(StageFactory, InferEngineCreatesInferEngineWorkerStage) {
     StageConfig cfg;

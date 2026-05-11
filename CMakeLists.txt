@@ -151,6 +151,9 @@ set(PIPELINE_SOURCES
     src/pipeline/stages/InferEngineStage.cpp
     src/pipeline/stages/InferEngineWorkerStage.cpp
     src/pipeline/stages/JoinByFrameStage.cpp
+    src/pipeline/stages/SahiMergeStage.cpp
+    src/pipeline/stages/SahiRoiRegistry.cpp
+    src/pipeline/stages/SahiSchedulerStage.cpp
     src/pipeline/stages/SinkKafkaStage.cpp
     src/pipeline/stages/SourceFileStage.cpp
     src/pipeline/stages/SourceRtspStage.cpp
