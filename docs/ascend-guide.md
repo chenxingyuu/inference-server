@@ -788,6 +788,11 @@ YAML `with` 字段：
 |----|------|
 | `encoder` | `ffmpeg_x264`（默认）或 `ascend_venc` |
 | `ascend_device_id` | 可选；**≥0** 时绑定该 NPU；**省略或 -1** 时使用任务级 `ingest_ascend_device_id`（与 ingest / source 侧 DVPP 等设备上下文一致） |
+| `draw_timestamp` | 是否在左上角叠加时间戳（默认 `false`） |
+| `draw_timestamp_with_stream_id` | 时间戳前是否追加 `stream_id`（默认 `false`） |
+| `timestamp_x` / `timestamp_y` | 时间戳锚点位置（默认 `10` / `28`） |
+| `timestamp_font_scale` | 字体缩放（默认 `0.6`） |
+| `timestamp_thickness` | 字体线宽（默认 `1`） |
 
 约束与取舍：
 

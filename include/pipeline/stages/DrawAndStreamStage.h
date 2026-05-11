@@ -34,6 +34,12 @@ struct DrawAndStreamConfig {
     int reconnect_max_ms{15000};
     float draw_conf_thresh{0.0f};
     int line_thickness{2};
+    bool draw_timestamp{false};
+    bool draw_timestamp_with_stream_id{false};
+    int timestamp_x{10};
+    int timestamp_y{28};
+    float timestamp_font_scale{0.6f};
+    int timestamp_thickness{1};
     StreamDropPolicy drop_policy{StreamDropPolicy::DropOldest};
     StreamVideoEncoder video_encoder{StreamVideoEncoder::FfmpegLibx264};
     /// Used when video_encoder == AscendVenc; if < 0, StageFactory uses Context::ingest_ascend_device_id.

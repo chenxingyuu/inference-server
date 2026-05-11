@@ -21,6 +21,13 @@ void mapDetectionsFromModelToFrame(
 namespace overlay {
 
 void drawDetections(cv::Mat& frame, const std::optional<InferResult>& result, float draw_conf_thresh, int line_thickness);
+void drawTimestamp(cv::Mat& frame,
+                   const std::string& stream_id,
+                   bool include_stream_id,
+                   int pos_x,
+                   int pos_y,
+                   float font_scale,
+                   int font_thickness);
 
 } // namespace overlay
 } // namespace infer

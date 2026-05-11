@@ -60,6 +60,15 @@ std::string getStringWithDefault(
     return it->second;
 }
 
+bool getBoolWithDefault(const std::map<std::string, std::string>& kv, const std::string& key, bool default_value) {
+    auto it = kv.find(key);
+    if (it == kv.end()) return default_value;
+    const std::string& raw = it->second;
+    if (raw == "true" || raw == "1" || raw == "yes" || raw == "on") return true;
+    if (raw == "false" || raw == "0" || raw == "no" || raw == "off") return false;
+    throw std::runtime_error("invalid bool value for '" + key + "': " + raw);
+}
+
 } // namespace
 
 std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Context& ctx) {
@@ -75,7 +84,7 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
             ctx.ingest_ascend_device_id);
     }
     if (cfg.type == "source.file") {
-        bool loop = getStringWithDefault(cfg.with, "loop", "false") == "true";
+        bool loop = getBoolWithDefault(cfg.with, "loop", false);
         return std::make_unique<SourceFileStage>(cfg.id, ctx.source, ctx.ingest_sample_fps, ctx.ingest_sampling_mode, ctx.ingest_use_hwdec, loop);
     }
     if (cfg.type == "decode.ffmpeg" || cfg.type == "preprocess.yolo" || cfg.type == "postprocess.yolo") {
@@ -121,6 +130,13 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         ff_cfg.reconnect_max_ms = getIntWithDefault(cfg.with, "reconnect_max_ms", ff_cfg.reconnect_max_ms);
         ff_cfg.draw_conf_thresh = getFloatWithDefault(cfg.with, "draw_conf_thresh", ff_cfg.draw_conf_thresh);
         ff_cfg.line_thickness = getIntWithDefault(cfg.with, "line_thickness", ff_cfg.line_thickness);
+        ff_cfg.draw_timestamp = getBoolWithDefault(cfg.with, "draw_timestamp", ff_cfg.draw_timestamp);
+        ff_cfg.draw_timestamp_with_stream_id = getBoolWithDefault(
+            cfg.with, "draw_timestamp_with_stream_id", ff_cfg.draw_timestamp_with_stream_id);
+        ff_cfg.timestamp_x = getIntWithDefault(cfg.with, "timestamp_x", ff_cfg.timestamp_x);
+        ff_cfg.timestamp_y = getIntWithDefault(cfg.with, "timestamp_y", ff_cfg.timestamp_y);
+        ff_cfg.timestamp_font_scale = getFloatWithDefault(cfg.with, "timestamp_font_scale", ff_cfg.timestamp_font_scale);
+        ff_cfg.timestamp_thickness = getIntWithDefault(cfg.with, "timestamp_thickness", ff_cfg.timestamp_thickness);
         const auto drop_policy = getStringWithDefault(cfg.with, "drop_policy", "drop_oldest");
         if (drop_policy == "drop_oldest") {
             ff_cfg.drop_policy = StreamDropPolicy::DropOldest;
@@ -159,6 +175,14 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         stream_cfg.reconnect_max_ms = getIntWithDefault(cfg.with, "reconnect_max_ms", stream_cfg.reconnect_max_ms);
         stream_cfg.draw_conf_thresh = getFloatWithDefault(cfg.with, "draw_conf_thresh", stream_cfg.draw_conf_thresh);
         stream_cfg.line_thickness = getIntWithDefault(cfg.with, "line_thickness", stream_cfg.line_thickness);
+        stream_cfg.draw_timestamp = getBoolWithDefault(cfg.with, "draw_timestamp", stream_cfg.draw_timestamp);
+        stream_cfg.draw_timestamp_with_stream_id = getBoolWithDefault(
+            cfg.with, "draw_timestamp_with_stream_id", stream_cfg.draw_timestamp_with_stream_id);
+        stream_cfg.timestamp_x = getIntWithDefault(cfg.with, "timestamp_x", stream_cfg.timestamp_x);
+        stream_cfg.timestamp_y = getIntWithDefault(cfg.with, "timestamp_y", stream_cfg.timestamp_y);
+        stream_cfg.timestamp_font_scale = getFloatWithDefault(
+            cfg.with, "timestamp_font_scale", stream_cfg.timestamp_font_scale);
+        stream_cfg.timestamp_thickness = getIntWithDefault(cfg.with, "timestamp_thickness", stream_cfg.timestamp_thickness);
         stream_cfg.ascend_device_id = getIntWithDefault(cfg.with, "ascend_device_id", stream_cfg.ascend_device_id);
         const auto encoder = getStringWithDefault(cfg.with, "encoder", "ffmpeg_x264");
         if (encoder == "ffmpeg_x264") {
