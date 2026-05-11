@@ -1,4 +1,5 @@
 #include "common/RuntimeState.h"
+#include "common/Config.h"
 #include "common/Logger.h"
 
 #include <nlohmann/json.hpp>
@@ -56,15 +57,34 @@ static StageConfig stageFromJson(const json& j) {
     return n;
 }
 
+static std::string edgeDropPolicyToJson(EdgeDropPolicy p) {
+    switch (p) {
+        case EdgeDropPolicy::DropOldest: return "drop_oldest";
+        case EdgeDropPolicy::DropNewest: return "drop_newest";
+        default:                         return "block";
+    }
+}
+
 static json toJson(const EdgeConfig& e) {
     return {{"from", e.from}, {"to", e.to},
-            {"capacity", e.capacity}};
+            {"capacity", e.capacity},
+            {"drop_policy", edgeDropPolicyToJson(e.drop_policy)}};
 }
 static EdgeConfig edgeFromJson(const json& j) {
     EdgeConfig e;
     e.from     = j.value("from",     std::string{});
     e.to       = j.value("to",       std::string{});
     e.capacity = j.value("capacity", e.capacity);
+    if (const auto it = j.find("drop_policy"); it != j.end() && it->is_string()) {
+        const std::string s = it->get<std::string>();
+        if (!s.empty()) {
+            try {
+                e.drop_policy = parseEdgeDropPolicy(s);
+            } catch (const std::exception& ex) {
+                LOG_WARN("RuntimeState: invalid drop_policy '{}': {}", s, ex.what());
+            }
+        }
+    }
     return e;
 }
 
