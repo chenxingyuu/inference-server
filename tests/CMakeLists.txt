@@ -124,6 +124,16 @@ target_link_libraries(test_draw_and_stream_stage PRIVATE
 add_test(NAME test_draw_and_stream_stage COMMAND test_draw_and_stream_stage
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+add_executable(test_bgr_to_nv12 test_bgr_to_nv12.cpp
+    ${CMAKE_SOURCE_DIR}/src/infer/BgrToNv12.cpp
+)
+target_link_libraries(test_bgr_to_nv12 PRIVATE
+    infer_testable
+    GTest::gtest_main
+)
+add_test(NAME test_bgr_to_nv12 COMMAND test_bgr_to_nv12
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
 add_executable(test_archive_raw_stage test_archive_raw_stage.cpp
     ${CMAKE_SOURCE_DIR}/src/pipeline/stages/ArchiveRawStage.cpp
     ${CMAKE_SOURCE_DIR}/src/archive/FrameArchiver.cpp

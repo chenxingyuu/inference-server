@@ -18,6 +18,11 @@
 
 namespace infer {
 
+enum class StreamVideoEncoder {
+    FfmpegLibx264,
+    AscendVenc,
+};
+
 struct DrawAndStreamConfig {
     std::string output_url;
     std::string protocol{"rtsp"};
@@ -30,6 +35,9 @@ struct DrawAndStreamConfig {
     float draw_conf_thresh{0.0f};
     int line_thickness{2};
     StreamDropPolicy drop_policy{StreamDropPolicy::DropOldest};
+    StreamVideoEncoder video_encoder{StreamVideoEncoder::FfmpegLibx264};
+    /// Used when video_encoder == AscendVenc; if < 0, StageFactory uses Context::ingest_ascend_device_id.
+    int ascend_device_id{-1};
 };
 
 class IStreamWriter {
@@ -45,6 +53,7 @@ class DrawAndStreamStage final : public IStage {
 public:
     DrawAndStreamStage(std::string id, DrawAndStreamConfig cfg);
     DrawAndStreamStage(std::string id, DrawAndStreamConfig cfg, std::unique_ptr<IStreamWriter> writer);
+    DrawAndStreamStage(std::string id, DrawAndStreamConfig cfg, int ctx_ascend_device_id);
     ~DrawAndStreamStage() override;
 
     std::string id() const override;
@@ -52,13 +61,6 @@ public:
     void stop() override;
     void onGraphExecutorDraining() noexcept override;
     void process(const EventEnvelope& input, const EmitFn& emit) override;
-
-private:
-    struct StreamItem {
-        std::shared_ptr<Frame> frame;
-        std::optional<InferResult> infer_result;
-        std::string stream_id;
-    };
 
     class OpenCvStreamWriter final : public IStreamWriter {
     public:
@@ -71,10 +73,19 @@ private:
         FILE* pipe_{nullptr};
     };
 
+private:
+    struct StreamItem {
+        std::shared_ptr<Frame> frame;
+        std::optional<InferResult> infer_result;
+        std::string stream_id;
+    };
+
     void runWorker();
     void enqueue(StreamItem item);
-    bool ensureWriterOpened(const cv::Mat& frame);
-    void onWriteFailure();
+    /// @param out_skip_reason if non-null and return false, set to a short static reason string.
+    /// @param out_reconnect_wait_ms if non-null and in backoff, set to ms until the next open attempt.
+    bool ensureWriterOpened(const cv::Mat& frame, const char** out_skip_reason = nullptr, int* out_reconnect_wait_ms = nullptr);
+    void onStreamFailure(const char* phase); // phase: "open" or "write"
 
     std::string id_;
     DrawAndStreamConfig cfg_;
@@ -87,6 +98,8 @@ private:
     std::deque<StreamItem> queue_;
     int reconnect_delay_ms_{1000};
     std::chrono::steady_clock::time_point next_reconnect_at_{};
+    /// Throttle per-frame DEBUG while waiting for reconnect (avoid log floods at video rate).
+    std::chrono::steady_clock::time_point last_backoff_timing_debug_log_{};
 
     std::atomic<uint64_t> frames_written_{0};
     std::atomic<uint64_t> frames_dropped_{0};

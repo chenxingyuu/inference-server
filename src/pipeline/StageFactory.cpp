@@ -159,6 +159,15 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         stream_cfg.reconnect_max_ms = getIntWithDefault(cfg.with, "reconnect_max_ms", stream_cfg.reconnect_max_ms);
         stream_cfg.draw_conf_thresh = getFloatWithDefault(cfg.with, "draw_conf_thresh", stream_cfg.draw_conf_thresh);
         stream_cfg.line_thickness = getIntWithDefault(cfg.with, "line_thickness", stream_cfg.line_thickness);
+        stream_cfg.ascend_device_id = getIntWithDefault(cfg.with, "ascend_device_id", stream_cfg.ascend_device_id);
+        const auto encoder = getStringWithDefault(cfg.with, "encoder", "ffmpeg_x264");
+        if (encoder == "ffmpeg_x264") {
+            stream_cfg.video_encoder = StreamVideoEncoder::FfmpegLibx264;
+        } else if (encoder == "ascend_venc") {
+            stream_cfg.video_encoder = StreamVideoEncoder::AscendVenc;
+        } else {
+            throw std::runtime_error("sink.stream encoder must be one of: ffmpeg_x264, ascend_venc");
+        }
         const auto drop_policy = getStringWithDefault(cfg.with, "drop_policy", "drop_oldest");
         if (drop_policy == "drop_oldest") {
             stream_cfg.drop_policy = StreamDropPolicy::DropOldest;
@@ -179,7 +188,7 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         if (stream_cfg.reconnect_initial_ms < 1 || stream_cfg.reconnect_max_ms < stream_cfg.reconnect_initial_ms) {
             throw std::runtime_error("sink.stream reconnect settings invalid");
         }
-        return std::make_unique<DrawAndStreamStage>(cfg.id, stream_cfg);
+        return std::make_unique<DrawAndStreamStage>(cfg.id, stream_cfg, ctx.ingest_ascend_device_id);
     }
     throw std::runtime_error("unsupported stage type: " + cfg.type);
 }

@@ -1,12 +1,19 @@
 #include "pipeline/stages/DrawAndStreamStage.h"
 
+#ifdef BUILD_ASCEND_BACKEND
+#include "pipeline/stages/AscendVencFfmpegMuxWriter.h"
+#endif
+
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
 #include "pipeline/stages/DetectionOverlay.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <stdexcept>
 #include <utility>
 
 namespace infer {
@@ -37,10 +44,36 @@ uint64_t nowSteadyNs() {
 
 double nsToMs(uint64_t ns) { return static_cast<double>(ns) / 1e6; }
 
+double steadyMsBetween(std::chrono::steady_clock::time_point a, std::chrono::steady_clock::time_point b) {
+    using namespace std::chrono;
+    return duration_cast<duration<double, std::milli>>(b - a).count();
+}
+
+} // namespace
+
+namespace {
+
+std::unique_ptr<IStreamWriter> makeSinkStreamWriter(const DrawAndStreamConfig& cfg, int ctx_ascend_device_id) {
+#ifdef BUILD_ASCEND_BACKEND
+    if (cfg.video_encoder == StreamVideoEncoder::AscendVenc) {
+        const int dev = cfg.ascend_device_id >= 0 ? cfg.ascend_device_id : ctx_ascend_device_id;
+        return std::make_unique<AscendVencFfmpegMuxWriter>(dev);
+    }
+#else
+    if (cfg.video_encoder == StreamVideoEncoder::AscendVenc) {
+        throw std::runtime_error("sink.stream encoder ascend_venc requires BUILD_ASCEND_BACKEND=ON");
+    }
+#endif
+    return std::make_unique<DrawAndStreamStage::OpenCvStreamWriter>();
+}
+
 } // namespace
 
 DrawAndStreamStage::DrawAndStreamStage(std::string id, DrawAndStreamConfig cfg)
-    : DrawAndStreamStage(std::move(id), std::move(cfg), std::make_unique<OpenCvStreamWriter>()) {}
+    : DrawAndStreamStage(std::move(id), std::move(cfg), std::make_unique<DrawAndStreamStage::OpenCvStreamWriter>()) {}
+
+DrawAndStreamStage::DrawAndStreamStage(std::string id, DrawAndStreamConfig cfg, int ctx_ascend_device_id)
+    : DrawAndStreamStage(std::move(id), std::move(cfg), makeSinkStreamWriter(cfg, ctx_ascend_device_id)) {}
 
 DrawAndStreamStage::DrawAndStreamStage(std::string id, DrawAndStreamConfig cfg, std::unique_ptr<IStreamWriter> writer)
     : id_(std::move(id))
@@ -122,17 +155,68 @@ void DrawAndStreamStage::runWorker() {
             continue;
         }
 
+        const auto t0 = std::chrono::steady_clock::now();
         cv::Mat output = item.frame->image.clone();
+        const auto t1 = std::chrono::steady_clock::now();
         overlay::drawDetections(output, item.infer_result, cfg_.draw_conf_thresh, cfg_.line_thickness);
+        const auto t2 = std::chrono::steady_clock::now();
 
-        if (!ensureWriterOpened(output)) {
+        const char* skip_reason = nullptr;
+        int         reconnect_wait_ms = 0;
+        if (!ensureWriterOpened(output, &skip_reason, &reconnect_wait_ms)) {
+            const auto t_fail = std::chrono::steady_clock::now();
+            const bool in_backoff =
+                skip_reason && std::strcmp(skip_reason, "reconnect_backoff") == 0;
+            if (in_backoff) {
+                using namespace std::chrono;
+                if (t_fail - last_backoff_timing_debug_log_ < seconds(3)) {
+                    continue;
+                }
+                last_backoff_timing_debug_log_ = t_fail;
+            }
+            const std::size_t dets = item.infer_result.has_value() ? item.infer_result->detections.size() : 0;
+            const uint64_t frame_seq = item.infer_result.has_value() ? item.infer_result->frame_seq : 0;
+            LOG_DEBUG(
+                "DrawAndStreamStage[{}]: timing stream={} frame_seq={} size={}x{} dets={} "
+                "clone_ms={:.2f} draw_ms={:.2f} ensure_open_ms={:.2f} skip={} reconnect_wait_ms={} total_ms={:.2f}",
+                id_,
+                item.stream_id,
+                frame_seq,
+                output.cols,
+                output.rows,
+                dets,
+                steadyMsBetween(t0, t1),
+                steadyMsBetween(t1, t2),
+                steadyMsBetween(t2, t_fail),
+                skip_reason ? skip_reason : "?",
+                reconnect_wait_ms,
+                steadyMsBetween(t0, t_fail));
             continue;
         }
+        const auto t3 = std::chrono::steady_clock::now();
 
         if (!writer_->write(output)) {
-            onWriteFailure();
+            const auto t_fail = std::chrono::steady_clock::now();
+            const std::size_t dets = item.infer_result.has_value() ? item.infer_result->detections.size() : 0;
+            const uint64_t frame_seq = item.infer_result.has_value() ? item.infer_result->frame_seq : 0;
+            LOG_DEBUG(
+                "DrawAndStreamStage[{}]: timing stream={} frame_seq={} size={}x{} dets={} "
+                "clone_ms={:.2f} draw_ms={:.2f} ensure_open_ms={:.2f} write_ms={:.2f} (write failed) total_ms={:.2f}",
+                id_,
+                item.stream_id,
+                frame_seq,
+                output.cols,
+                output.rows,
+                dets,
+                steadyMsBetween(t0, t1),
+                steadyMsBetween(t1, t2),
+                steadyMsBetween(t2, t3),
+                steadyMsBetween(t3, t_fail),
+                steadyMsBetween(t0, t_fail));
+            onStreamFailure("write");
             continue;
         }
+        const auto t4 = std::chrono::steady_clock::now();
         frames_written_.fetch_add(1, std::memory_order_relaxed);
         if (item.infer_result.has_value() && item.infer_result->frame_mono_ns != 0) {
             const uint64_t now_ns = nowSteadyNs();
@@ -145,12 +229,21 @@ void DrawAndStreamStage::runWorker() {
         const double latency_ms = item.infer_result.has_value() ? item.infer_result->latency_ms : -1.0;
         const std::size_t dets = item.infer_result.has_value() ? item.infer_result->detections.size() : 0;
         const uint64_t frame_seq = item.infer_result.has_value() ? item.infer_result->frame_seq : 0;
-        LOG_DEBUG("DrawAndStreamStage[{}]: streamed stream={} frame_seq={} dets={} latency_ms={:.1f}",
-                  id_,
-                  item.stream_id,
-                  frame_seq,
-                  dets,
-                  latency_ms);
+        LOG_DEBUG(
+            "DrawAndStreamStage[{}]: timing stream={} frame_seq={} size={}x{} dets={} "
+            "clone_ms={:.2f} draw_ms={:.2f} ensure_open_ms={:.2f} write_ms={:.2f} total_ms={:.2f} infer_latency_ms={:.1f}",
+            id_,
+            item.stream_id,
+            frame_seq,
+            output.cols,
+            output.rows,
+            dets,
+            steadyMsBetween(t0, t1),
+            steadyMsBetween(t1, t2),
+            steadyMsBetween(t2, t3),
+            steadyMsBetween(t3, t4),
+            steadyMsBetween(t0, t4),
+            latency_ms);
         consecutive_failures_.store(0, std::memory_order_relaxed);
     }
     // writer_ is exclusively owned by this thread: close it here so stop() never
@@ -158,11 +251,22 @@ void DrawAndStreamStage::runWorker() {
     writer_->close();
 }
 
-bool DrawAndStreamStage::ensureWriterOpened(const cv::Mat& frame) {
+bool DrawAndStreamStage::ensureWriterOpened(const cv::Mat& frame, const char** out_skip_reason, int* out_reconnect_wait_ms) {
     if (writer_->isOpened()) return true;
-    if (suppress_output_reopen_.load(std::memory_order_relaxed)) return false;
+    if (suppress_output_reopen_.load(std::memory_order_relaxed)) {
+        if (out_skip_reason) *out_skip_reason = "suppressed_graph_draining";
+        if (out_reconnect_wait_ms) *out_reconnect_wait_ms = 0;
+        return false;
+    }
     const auto now = std::chrono::steady_clock::now();
-    if (now < next_reconnect_at_) return false;
+    if (now < next_reconnect_at_) {
+        if (out_skip_reason) *out_skip_reason = "reconnect_backoff";
+        if (out_reconnect_wait_ms) {
+            *out_reconnect_wait_ms = static_cast<int>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(next_reconnect_at_ - now).count());
+        }
+        return false;
+    }
 
     reconnect_attempts_.fetch_add(1, std::memory_order_relaxed);
     const int gop = (cfg_.gop > 0) ? cfg_.gop : std::max(1, static_cast<int>(std::lround(cfg_.fps)));
@@ -171,22 +275,30 @@ bool DrawAndStreamStage::ensureWriterOpened(const cv::Mat& frame) {
                  id_, cfg_.output_url, cfg_.protocol, frame.cols, frame.rows, cfg_.fps);
         reconnect_delay_ms_ = cfg_.reconnect_initial_ms;
         consecutive_failures_.store(0, std::memory_order_relaxed);
+        last_backoff_timing_debug_log_ = {};
         return true;
     }
     LOG_WARN("DrawAndStreamStage[{}]: stream open failed url={} protocol={} (attempt={})",
              id_, cfg_.output_url, cfg_.protocol, reconnect_attempts_.load(std::memory_order_relaxed));
-    onWriteFailure();
+    if (out_skip_reason) *out_skip_reason = "open_failed";
+    if (out_reconnect_wait_ms) *out_reconnect_wait_ms = 0;
+    onStreamFailure("open");
     return false;
 }
 
-void DrawAndStreamStage::onWriteFailure() {
+void DrawAndStreamStage::onStreamFailure(const char* phase) {
     writer_->close();
     if (suppress_output_reopen_.load(std::memory_order_relaxed)) return;
     const auto failures = consecutive_failures_.fetch_add(1, std::memory_order_relaxed) + 1;
-    next_reconnect_at_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(reconnect_delay_ms_);
+    const int  backoff_ms = reconnect_delay_ms_;
+    next_reconnect_at_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(backoff_ms);
     reconnect_delay_ms_ = std::min(reconnect_delay_ms_ * 2, std::max(cfg_.reconnect_max_ms, cfg_.reconnect_initial_ms));
-    LOG_WARN("DrawAndStreamStage[{}]: stream write failed, failures={}, next_reconnect_in_ms={}",
-             id_, failures, reconnect_delay_ms_);
+    LOG_WARN("DrawAndStreamStage[{}]: stream {} failed, failures={}, scheduled_backoff_ms={}, next_backoff_ms={}",
+             id_,
+             phase,
+             failures,
+             backoff_ms,
+             reconnect_delay_ms_);
 }
 
 bool DrawAndStreamStage::OpenCvStreamWriter::open(

@@ -3,6 +3,8 @@
 #include "pipeline/StageFactory.h"
 #include "pipeline/stages/InferEngineWorkerStage.h"
 
+#include <stdexcept>
+
 namespace infer {
 namespace {
 
@@ -116,6 +118,36 @@ TEST(StageFactory, AcceptsZeroSinkStreamGopForAutoMode) {
         ASSERT_NE(stage, nullptr);
         EXPECT_EQ(stage->id(), "stream_sink_auto_gop");
     });
+}
+
+TEST(StageFactory, RejectsInvalidSinkStreamEncoder) {
+    StageConfig cfg;
+    cfg.id = "stream_bad_enc";
+    cfg.type = "sink.stream";
+    cfg.with["output_url"] = "rtsp://localhost:8554/live/test";
+    cfg.with["protocol"] = "rtsp";
+    cfg.with["encoder"] = "libx264";
+
+    EXPECT_THROW((void)StageFactory::create(cfg, makeContext()), std::runtime_error);
+}
+
+TEST(StageFactory, SinkStreamAscendVencRequiresAscendBuild) {
+    StageConfig cfg;
+    cfg.id = "stream_venc";
+    cfg.type = "sink.stream";
+    cfg.with["output_url"] = "rtsp://localhost:8554/live/test";
+    cfg.with["protocol"] = "rtsp";
+    cfg.with["encoder"] = "ascend_venc";
+    cfg.with["ascend_device_id"] = "1";
+
+#ifdef BUILD_ASCEND_BACKEND
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, makeContext());
+        ASSERT_NE(stage, nullptr);
+    });
+#else
+    EXPECT_THROW((void)StageFactory::create(cfg, makeContext()), std::runtime_error);
+#endif
 }
 
 TEST(StageFactory, CreatesSinkFfplayStage) {

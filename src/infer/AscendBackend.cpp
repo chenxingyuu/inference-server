@@ -1,40 +1,21 @@
 #ifdef BUILD_ASCEND_BACKEND
 
 #include "infer/AscendBackend.h"
+
+#include "infer/AscendProcessRuntime.h"
+#include "infer/BgrToNv12.h"
+
 #include "common/Logger.h"
 
 #include <acl/acl.h>
 #include <stdexcept>
 #include <algorithm>
-#include <cstdlib>
 #include <mutex>
 #include <opencv2/imgproc.hpp>
 
 namespace infer {
 
-// Process-wide ACL refcount definition.
-std::atomic<int> AscendBackend::s_acl_refcount_{0};
-
 namespace {
-
-// CANN may return ACL_ERROR_GE_EXEC_NOT_INIT (145001) on aclmdlLoadFromFile after a
-// full aclFinalize → aclInit cycle in the same process. Keep the runtime alive for
-// the process lifetime and pair a single aclFinalize with std::atexit instead.
-std::atomic<bool> g_acl_runtime_initialized{false};
-std::once_flag    g_acl_atexit_registered;
-
-static void aclProcessAtExit() noexcept {
-    if (g_acl_runtime_initialized.load(std::memory_order_acquire)) {
-        aclFinalize();
-        g_acl_runtime_initialized.store(false, std::memory_order_release);
-    }
-}
-
-static void registerAclProcessTeardown() {
-    std::call_once(g_acl_atexit_registered, [] {
-        std::atexit(aclProcessAtExit);
-    });
-}
 
 #define ACL_CHECK(call) do { \
     aclError _err = (call); \
@@ -44,49 +25,10 @@ static void registerAclProcessTeardown() {
     } \
 } while(0)
 
-// 100002: ACL_ERROR_REPEAT_INITIALIZE (already inited in same process)
-// 507008: ACL_ERROR_RT_CONTEXT_NULL_PTR (CANN 6 emits this instead of 100002 on repeat aclInit)
-constexpr aclError kAclRepeatInitCode     = static_cast<aclError>(100002);
-constexpr aclError kAclRepeatInitCodeCann6 = static_cast<aclError>(507008);
-
 int yoloAnchorCount(int h, int w) {
     return (h / 8) * (w / 8)
          + (h / 16) * (w / 16)
          + (h / 32) * (w / 32);
-}
-
-void packBgrToNv12(const Batch& input, uint8_t* dst,
-                   int batch_size, int h, int w) {
-    // CPU-side conversion for AIPP models that take NV12 (YUV420SP) input.
-    // Layout: [Y plane (h*w)] + [UV interleaved (h*w/2)].
-    const size_t y_bytes  = static_cast<size_t>(h) * w;
-    const size_t uv_bytes = y_bytes / 2;
-    const size_t frame_bytes = y_bytes + uv_bytes; // h*w*3/2
-
-    for (int b = 0; b < batch_size; ++b) {
-        cv::Mat resized;
-        cv::resize(input.frames[b], resized, {w, h});
-
-        cv::Mat i420;
-        cv::cvtColor(resized, i420, cv::COLOR_BGR2YUV_I420);
-        const uint8_t* i420_ptr = i420.ptr<uint8_t>(0);
-
-        uint8_t* out = dst + static_cast<size_t>(b) * frame_bytes;
-
-        // Y
-        std::memcpy(out, i420_ptr, y_bytes);
-
-        // U and V planes in I420 are quarter size each (h/2 * w/2).
-        const uint8_t* u = i420_ptr + y_bytes;
-        const uint8_t* v = u + (y_bytes / 4);
-
-        // NV12 interleaves UV.
-        uint8_t* uv = out + y_bytes;
-        for (size_t i = 0; i < (y_bytes / 4); ++i) {
-            uv[2 * i + 0] = u[i];
-            uv[2 * i + 1] = v[i];
-        }
-    }
 }
 
 // RAII guard that releases an AscendPooledBuffer on scope exit.
@@ -113,28 +55,7 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     input_w_        = cfg.input_shape.width;
     num_classes_    = cfg.num_classes;
 
-    // Increment process-wide refcount. First init in the process calls aclInit; after
-    // all backends have unloaded we keep ACL initialized until process exit (see
-    // unloadModel) so a later pipeline rebuild does not hit GE_EXEC_NOT_INIT.
-    const int prev_ref = s_acl_refcount_.fetch_add(1, std::memory_order_acq_rel);
-    if (prev_ref == 0) {
-        if (!g_acl_runtime_initialized.load(std::memory_order_acquire)) {
-            const aclError init_rc = aclInit(nullptr);
-            if (init_rc != ACL_SUCCESS && init_rc != kAclRepeatInitCode && init_rc != kAclRepeatInitCodeCann6) {
-                s_acl_refcount_.fetch_sub(1, std::memory_order_release);
-                throw std::runtime_error(std::string("[ACL] aclInit error ") + std::to_string(init_rc)
-                                         + " at " + __FILE__ + ":" + std::to_string(__LINE__));
-            }
-            g_acl_runtime_initialized.store(true, std::memory_order_release);
-            registerAclProcessTeardown();
-            LOG_INFO("AscendBackend: aclInit succeeded (refcount=1)");
-        } else {
-            LOG_INFO("AscendBackend: reusing ACL runtime after hot unload (refcount=1)");
-        }
-    } else {
-        LOG_INFO("AscendBackend: reusing ACL runtime (refcount={})",
-                 s_acl_refcount_.load(std::memory_order_relaxed));
-    }
+    AscendProcessRuntime::acquire();
     ACL_CHECK(aclrtSetDevice(device_id_));
     // CANN 6 does not auto-create a default context; explicit creation is
     // required for correct multi-threaded operation on all CANN versions.
@@ -194,12 +115,7 @@ void AscendBackend::unloadModel() {
     // that destroys all ACL resources on the device, including those held by
     // sibling AscendBackend instances on the same device_id.
     //
-    // Decrement refcount. Do not aclFinalize here: CANN GE may not re-init cleanly
-    // in-process after finalize (aclmdlLoadFromFile → 145001). Teardown runs via
-    // std::atexit once the process exits.
-    if (s_acl_refcount_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        LOG_INFO("AscendBackend: last backend stopped (ACL runtime kept until process exit)");
-    }
+    AscendProcessRuntime::release();
     loaded_ = false;
 }
 
@@ -365,7 +281,7 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
         // slot->input_device is NPU HBM memory, so we must stage on host first.
         in_bytes = static_cast<size_t>(model_bs) * input_h_ * input_w_ * 3 / 2;
         std::vector<uint8_t> host_input(in_bytes, 0);
-        packBgrToNv12(input, host_input.data(), req_bs, input_h_, input_w_);
+        packBgrBatchToNv12(input, host_input.data(), req_bs, input_h_, input_w_);
         ACL_CHECK(do_memcpy(slot->input_device, input_bytes_, host_input.data(), in_bytes,
                             ACL_MEMCPY_HOST_TO_DEVICE));
         input_ptr = slot->input_device;
