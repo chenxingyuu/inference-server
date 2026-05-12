@@ -12,6 +12,7 @@ namespace infer {
 
 struct SahiMergeConfig {
     float merge_iou{0.55f};
+    float merge_ios{0.8f};
     int stale_timeout_ms{2000};
 };
 
@@ -37,6 +38,7 @@ private:
     using PendingKey = std::pair<std::string, uint64_t>;
 
     static float iou(const BBox& a, const BBox& b);
+    static float ios(const BBox& a, const BBox& b);
     std::vector<Detection> runNms(const std::vector<Detection>& detections) const;
     void sweepStale();
 

@@ -24,6 +24,18 @@ float SahiMergeStage::iou(const BBox& a, const BBox& b) {
     return uni <= 0.0f ? 0.0f : (inter / uni);
 }
 
+float SahiMergeStage::ios(const BBox& a, const BBox& b) {
+    const float x1 = std::max(a.x1, b.x1);
+    const float y1 = std::max(a.y1, b.y1);
+    const float x2 = std::min(a.x2, b.x2);
+    const float y2 = std::min(a.y2, b.y2);
+    const float w = std::max(0.0f, x2 - x1);
+    const float h = std::max(0.0f, y2 - y1);
+    const float inter = w * h;
+    const float smaller = std::min(a.area(), b.area());
+    return smaller <= 0.0f ? 0.0f : (inter / smaller);
+}
+
 std::vector<Detection> SahiMergeStage::runNms(const std::vector<Detection>& detections) const {
     std::vector<Detection> sorted = detections;
     std::sort(sorted.begin(), sorted.end(), [](const Detection& lhs, const Detection& rhs) {
@@ -38,7 +50,12 @@ std::vector<Detection> SahiMergeStage::runNms(const std::vector<Detection>& dete
         for (std::size_t j = i + 1; j < sorted.size(); ++j) {
             if (removed[j]) continue;
             if (sorted[i].class_id != sorted[j].class_id) continue;
-            if (iou(sorted[i].bbox, sorted[j].bbox) >= cfg_.merge_iou) {
+            // Suppress if standard IoU is high, OR if the smaller box is
+            // largely contained within the larger one (IoS).  The IoS check
+            // catches truncated detections at tile boundaries where IoU alone
+            // is too low due to the area asymmetry.
+            if (iou(sorted[i].bbox, sorted[j].bbox) >= cfg_.merge_iou ||
+                ios(sorted[i].bbox, sorted[j].bbox) >= cfg_.merge_ios) {
                 removed[j] = true;
             }
         }

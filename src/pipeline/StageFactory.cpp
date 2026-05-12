@@ -149,9 +149,13 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
     if (cfg.type == "post.sahiMerge") {
         SahiMergeConfig merge_cfg;
         merge_cfg.merge_iou = getFloatWithDefault(cfg.with, "merge_iou", merge_cfg.merge_iou);
+        merge_cfg.merge_ios = getFloatWithDefault(cfg.with, "merge_ios", merge_cfg.merge_ios);
         merge_cfg.stale_timeout_ms = getIntWithDefault(cfg.with, "stale_timeout_ms", merge_cfg.stale_timeout_ms);
         if (merge_cfg.merge_iou <= 0.0f || merge_cfg.merge_iou > 1.0f) {
             throw std::runtime_error("post.sahiMerge merge_iou must be in (0, 1]");
+        }
+        if (merge_cfg.merge_ios <= 0.0f || merge_cfg.merge_ios > 1.0f) {
+            throw std::runtime_error("post.sahiMerge merge_ios must be in (0, 1]");
         }
         if (merge_cfg.stale_timeout_ms < 1) {
             throw std::runtime_error("post.sahiMerge stale_timeout_ms must be >= 1");

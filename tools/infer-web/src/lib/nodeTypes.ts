@@ -20,6 +20,7 @@ export const NODE_TYPE_DEFS: NodeTypeDef[] = [
   { type: 'infer.engine',      category: 'infer',       withTemplate: [{ k: 'model_id', v: '' }] },
   { type: 'post.sahiMerge',    category: 'postprocess', withTemplate: [
     { k: 'merge_iou',         v: '0.55' },
+    { k: 'merge_ios',         v: '0.8'  },
     { k: 'stale_timeout_ms',  v: '2000' },
   ]},
   { type: 'postprocess.yolo',  category: 'postprocess', withTemplate: [] },
