@@ -103,6 +103,7 @@ public:
         FrameCallback  cb;
         int            device_id{0};
         void*          bitstream_dev{nullptr};
+        std::chrono::steady_clock::time_point submit_ts;
     };
 
 private:

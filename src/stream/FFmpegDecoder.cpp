@@ -320,6 +320,8 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
                     }
 
                     if (params.shouldEmit(frame_pts, seq)) {
+                        auto convert_start = std::chrono::steady_clock::now();
+
                         Frame f;
                         f.meta.stream_id   = stream_id_;
                         f.meta.capture_ts  = nowEpoch();
@@ -366,12 +368,15 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
                             f.is_gpu = false;
                         }
 
+                        const double convert_ms = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - convert_start).count();
+
                         Metrics::get().incFramesDecoded(stream_id_);
                         StreamHealthRegistry::get().onFrameDecoded(stream_id_, f.meta.capture_ts);
                         if (f.meta.frame_seq % 30 == 0) {
-                            LOG_DEBUG("[{}] frame_seq={} ts={:.3f} {}x{}",
+                            LOG_DEBUG("[{}] frame_seq={} ts={:.3f} {}x{} convert_ms={:.1f}",
                                       stream_id_, f.meta.frame_seq, f.meta.capture_ts,
-                                      f.meta.orig_width, f.meta.orig_height);
+                                      f.meta.orig_width, f.meta.orig_height, convert_ms);
                         }
                         cb(std::move(f));
                     }
