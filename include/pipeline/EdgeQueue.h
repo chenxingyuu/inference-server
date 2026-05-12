@@ -13,6 +13,7 @@ public:
     explicit EdgeQueue(const EdgeConfig& cfg) : cfg_(cfg) {}
 
     bool push(const EventEnvelope& event);
+    bool push(EventEnvelope&& event);
     bool pop(EventEnvelope& event, int wait_ms);
     void stop();
     void reopen();

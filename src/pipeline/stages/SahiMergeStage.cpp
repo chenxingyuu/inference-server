@@ -46,7 +46,30 @@ std::vector<Detection> SahiMergeStage::runNms(const std::vector<Detection>& dete
     return kept;
 }
 
+void SahiMergeStage::sweepStale() {
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = pending_.begin(); it != pending_.end();) {
+        const auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second.created_at).count();
+        if (age_ms > cfg_.stale_timeout_ms) {
+            LOG_WARN("SahiMergeStage[{}]: drop stale pending stream={} parent_frame_seq={} received={}/{}",
+                     id_,
+                     it->second.stream_id,
+                     it->second.parent_frame_seq,
+                     it->second.received_tiles,
+                     it->second.expected_tiles);
+            it = pending_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void SahiMergeStage::process(const EventEnvelope& input, const EmitFn& emit) {
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        sweepStale();
+    }
+
     if (!input.sahi_tile.has_value()) {
         if (input.infer_result.has_value()) {
             SahiRoiRegistry::update(input.stream_id, input.infer_result->frame_seq, input.infer_result->detections);
@@ -61,26 +84,10 @@ void SahiMergeStage::process(const EventEnvelope& input, const EmitFn& emit) {
     std::optional<EventEnvelope> completed;
     {
         std::lock_guard<std::mutex> lock(mu_);
-        const auto now = std::chrono::steady_clock::now();
-        for (auto it = pending_.begin(); it != pending_.end();) {
-            const auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second.created_at).count();
-            if (age_ms > cfg_.stale_timeout_ms) {
-                LOG_WARN("SahiMergeStage[{}]: drop stale pending stream={} parent_frame_seq={} received={}/{}",
-                         id_,
-                         it->second.stream_id,
-                         it->second.parent_frame_seq,
-                         it->second.received_tiles,
-                         it->second.expected_tiles);
-                it = pending_.erase(it);
-            } else {
-                ++it;
-            }
-        }
 
         auto& state = pending_[key];
         if (state.received_tiles == 0) {
-            state.created_at = now;
-            state.parent_frame = tile.parent_frame;
+            state.created_at = std::chrono::steady_clock::now();
             state.template_result = input.infer_result;
             state.expected_tiles = std::max(1, tile.expected_tile_count);
             state.parent_frame_seq = tile.parent_frame_seq;
@@ -92,6 +99,9 @@ void SahiMergeStage::process(const EventEnvelope& input, const EmitFn& emit) {
                       tile.parent_frame_seq,
                       state.expected_tiles,
                       tile.is_full_pass ? "full" : "roi");
+        }
+        if (tile.parent_frame && !state.parent_frame) {
+            state.parent_frame = tile.parent_frame;
         }
         const std::size_t tile_det_count = input.infer_result->detections.size();
         for (const auto& det : input.infer_result->detections) {

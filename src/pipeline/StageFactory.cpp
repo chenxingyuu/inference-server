@@ -134,6 +134,7 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         sahi_cfg.min_roi_width = getIntWithDefault(cfg.with, "min_roi_width", sahi_cfg.min_roi_width);
         sahi_cfg.min_roi_height = getIntWithDefault(cfg.with, "min_roi_height", sahi_cfg.min_roi_height);
         sahi_cfg.roi_max_age_frames = getIntWithDefault(cfg.with, "roi_max_age_frames", sahi_cfg.roi_max_age_frames);
+        sahi_cfg.fallback_full_min_gap_frames = getIntWithDefault(cfg.with, "fallback_full_min_gap_frames", sahi_cfg.fallback_full_min_gap_frames);
         if (sahi_cfg.tile_width < 1 || sahi_cfg.tile_height < 1) {
             throw std::runtime_error("infer.sahiScheduler tile_width/tile_height must be >= 1");
         }

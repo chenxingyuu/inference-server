@@ -38,6 +38,7 @@ private:
 
     static float iou(const BBox& a, const BBox& b);
     std::vector<Detection> runNms(const std::vector<Detection>& detections) const;
+    void sweepStale();
 
     std::string id_;
     SahiMergeConfig cfg_;

@@ -124,6 +124,18 @@ target_link_libraries(test_draw_and_stream_stage PRIVATE
 add_test(NAME test_draw_and_stream_stage COMMAND test_draw_and_stream_stage
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+add_executable(test_sahi_scheduler test_sahi_scheduler.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/SahiSchedulerStage.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/SahiMergeStage.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/SahiRoiRegistry.cpp
+)
+target_link_libraries(test_sahi_scheduler PRIVATE
+    infer_testable
+    GTest::gtest_main
+)
+add_test(NAME test_sahi_scheduler COMMAND test_sahi_scheduler
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
 add_executable(test_bgr_to_nv12 test_bgr_to_nv12.cpp
     ${CMAKE_SOURCE_DIR}/src/infer/BgrToNv12.cpp
 )

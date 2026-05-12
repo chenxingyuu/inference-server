@@ -117,9 +117,15 @@ void GraphExecutor::runNodeWorker(const std::string& node_id) {
 void GraphExecutor::emitToDownstream(const std::string& from, const EventEnvelope& event) {
     auto out_it = outgoing_.find(from);
     if (out_it == outgoing_.end()) return;
-    for (const auto& to : out_it->second) {
-        auto q = edges_.at(edgeKey(from, to));
-        q->push(event);
+    const auto& targets = out_it->second;
+    for (std::size_t i = 0; i < targets.size(); ++i) {
+        auto q = edges_.at(edgeKey(from, targets[i]));
+        if (i + 1 == targets.size()) {
+            EventEnvelope moved = event;
+            q->push(std::move(moved));
+        } else {
+            q->push(event);
+        }
     }
 }
 

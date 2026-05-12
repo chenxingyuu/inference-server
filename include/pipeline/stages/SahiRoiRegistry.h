@@ -17,6 +17,7 @@ class SahiRoiRegistry {
 public:
     static void update(const std::string& stream_id, uint64_t frame_seq, const std::vector<Detection>& detections);
     static std::optional<SahiRoiSnapshot> get(const std::string& stream_id);
+    static void remove(const std::string& stream_id);
 };
 
 } // namespace infer

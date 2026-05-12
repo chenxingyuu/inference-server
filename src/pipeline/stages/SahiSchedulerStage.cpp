@@ -83,6 +83,20 @@ uint64_t SahiSchedulerStage::nextTileSeqLocked(const std::string& stream_id) {
     return s.next_tile_seq++;
 }
 
+void SahiSchedulerStage::sweepStaleStreamsLocked() {
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_sweep_ < std::chrono::seconds(10)) return;
+    last_sweep_ = now;
+    for (auto it = stream_state_.begin(); it != stream_state_.end();) {
+        if (now - it->second.last_seen > std::chrono::seconds(60)) {
+            SahiRoiRegistry::remove(it->first);
+            it = stream_state_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void SahiSchedulerStage::process(const EventEnvelope& input, const EmitFn& emit) {
     if (!input.frame || input.sahi_tile.has_value()) {
         emit(input);
@@ -103,33 +117,49 @@ void SahiSchedulerStage::process(const EventEnvelope& input, const EmitFn& emit)
     bool use_full_pass = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
+        sweepStaleStreamsLocked();
         auto& s = stream_state_[input.stream_id];
         s.frame_count++;
+        s.last_seen = std::chrono::steady_clock::now();
         const int interval = std::max(1, cfg_.full_interval);
-        use_full_pass = ((s.frame_count % static_cast<uint64_t>(interval)) == 1);
+        use_full_pass = (interval <= 1) || ((s.frame_count % static_cast<uint64_t>(interval)) == 1);
     }
 
+    bool fallback_single_tile = false;
     if (!use_full_pass) {
         const auto roi_snapshot = SahiRoiRegistry::get(input.stream_id);
-        if (!roi_snapshot.has_value() ||
+        const bool roi_missing_or_stale =
+            !roi_snapshot.has_value() ||
             (input.frame->meta.frame_seq > roi_snapshot->frame_seq &&
-             (input.frame->meta.frame_seq - roi_snapshot->frame_seq) > static_cast<uint64_t>(std::max(1, cfg_.roi_max_age_frames)))) {
-            LOG_DEBUG("SahiSchedulerStage[{}]: stream={} frame_seq={} ROI snapshot missing/stale, fallback to full pass",
-                      id_,
-                      input.stream_id,
-                      input.frame->meta.frame_seq);
-            use_full_pass = true;
+             (input.frame->meta.frame_seq - roi_snapshot->frame_seq) > static_cast<uint64_t>(std::max(1, cfg_.roi_max_age_frames)));
+
+        if (roi_missing_or_stale) {
+            std::lock_guard<std::mutex> lock(mu_);
+            auto& s = stream_state_[input.stream_id];
+            const uint64_t gap = std::max(1, cfg_.fallback_full_min_gap_frames);
+            if (s.frame_count - s.last_fallback_full_frame >= gap) {
+                use_full_pass = true;
+                s.last_fallback_full_frame = s.frame_count;
+                LOG_DEBUG("SahiSchedulerStage[{}]: stream={} frame_seq={} ROI missing/stale, fallback full pass",
+                          id_, input.stream_id, input.frame->meta.frame_seq);
+            } else {
+                fallback_single_tile = true;
+                LOG_DEBUG("SahiSchedulerStage[{}]: stream={} frame_seq={} ROI missing/stale, throttled single tile",
+                          id_, input.stream_id, input.frame->meta.frame_seq);
+            }
         }
     }
 
-    std::vector<cv::Rect> tiles = use_full_pass ? makeFullTiles(full_w, full_h) : makeRoiTiles(full_w, full_h, input.stream_id);
-    if (tiles.empty()) {
-        tiles = makeFullTiles(full_w, full_h);
-        use_full_pass = true;
-        LOG_DEBUG("SahiSchedulerStage[{}]: stream={} frame_seq={} empty ROI tiles, fallback to full pass",
-                  id_,
-                  input.stream_id,
-                  input.frame->meta.frame_seq);
+    std::vector<cv::Rect> tiles;
+    if (fallback_single_tile) {
+        tiles.emplace_back(0, 0, full_w, full_h);
+    } else {
+        tiles = use_full_pass ? makeFullTiles(full_w, full_h) : makeRoiTiles(full_w, full_h, input.stream_id);
+        if (tiles.empty()) {
+            tiles.emplace_back(0, 0, full_w, full_h);
+            LOG_DEBUG("SahiSchedulerStage[{}]: stream={} frame_seq={} empty ROI tiles, single tile fallback",
+                      id_, input.stream_id, input.frame->meta.frame_seq);
+        }
     }
     if (static_cast<int>(tiles.size()) > cfg_.max_tiles_per_frame) {
         tiles.resize(static_cast<std::size_t>(cfg_.max_tiles_per_frame));
@@ -149,7 +179,7 @@ void SahiSchedulerStage::process(const EventEnvelope& input, const EmitFn& emit)
         const auto& rect = tiles[static_cast<std::size_t>(i)];
         EventEnvelope out = input;
         auto tile_frame = std::make_shared<Frame>();
-        tile_frame->image = input.frame->image(rect).clone();
+        tile_frame->image = input.frame->image(rect);
         tile_frame->meta = input.frame->meta;
         tile_frame->meta.orig_width = rect.width;
         tile_frame->meta.orig_height = rect.height;
@@ -172,7 +202,7 @@ void SahiSchedulerStage::process(const EventEnvelope& input, const EmitFn& emit)
             full_h,
             use_full_pass,
             expected_tiles,
-            input.frame};
+            (i == 0) ? input.frame : nullptr};
         LOG_DEBUG("SahiSchedulerStage[{}]: stream={} parent_frame_seq={} emit_tile={}/{} rect=({},{} {}x{}) tile_frame_seq={}",
                   id_,
                   input.stream_id,

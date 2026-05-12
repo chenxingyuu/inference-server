@@ -31,4 +31,9 @@ std::optional<SahiRoiSnapshot> SahiRoiRegistry::get(const std::string& stream_id
     return it->second;
 }
 
+void SahiRoiRegistry::remove(const std::string& stream_id) {
+    std::lock_guard<std::mutex> lock(registryMutex());
+    registryData().erase(stream_id);
+}
+
 } // namespace infer
