@@ -122,19 +122,56 @@ void DrawAndStreamStage::process(const EventEnvelope& input, const EmitFn& emit)
 }
 
 void DrawAndStreamStage::enqueue(StreamItem item) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (!running_.load(std::memory_order_relaxed)) return; // stage is stopped, discard
-    if (queue_.size() >= static_cast<std::size_t>(std::max(1, cfg_.queue_capacity))) {
-        if (cfg_.drop_policy == StreamDropPolicy::DropOldest) {
-            queue_.pop_front();
-            frames_dropped_.fetch_add(1, std::memory_order_relaxed);
-        } else {
-            frames_dropped_.fetch_add(1, std::memory_order_relaxed);
-            return;
+    const std::size_t capacity = static_cast<std::size_t>(std::max(1, cfg_.queue_capacity));
+    const uint64_t frame_seq = item.infer_result.has_value()
+        ? item.infer_result->frame_seq
+        : (item.frame ? item.frame->meta.frame_seq : 0);
+    const std::size_t dets = item.infer_result.has_value()
+        ? item.infer_result->detections.size()
+        : 0;
+    const std::string stream_id = item.stream_id;
+    const char* action = "enqueue";
+    std::size_t queue_size = 0;
+    uint64_t dropped_total = 0;
+    bool notify_worker = false;
+    bool drop_newest = false;
+
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (!running_.load(std::memory_order_relaxed)) return; // stage is stopped, discard
+        if (queue_.size() >= capacity) {
+            if (cfg_.drop_policy == StreamDropPolicy::DropOldest) {
+                queue_.pop_front();
+                frames_dropped_.fetch_add(1, std::memory_order_relaxed);
+                action = "drop_oldest_then_enqueue";
+            } else {
+                dropped_total = frames_dropped_.fetch_add(1, std::memory_order_relaxed) + 1;
+                action = "drop_newest";
+                queue_size = queue_.size();
+                drop_newest = true;
+            }
+        }
+
+        if (!drop_newest) {
+            queue_.push_back(std::move(item));
+            queue_size = queue_.size();
+            dropped_total = frames_dropped_.load(std::memory_order_relaxed);
+            notify_worker = true;
         }
     }
-    queue_.push_back(std::move(item));
-    cv_.notify_one();
+
+    if (notify_worker) cv_.notify_one();
+    LOG_DEBUG(
+        "DrawAndStreamStage[{}]: enqueue stream={} frame_seq={} dets={} action={} "
+        "queue_size={} queue_capacity={} dropped_total={}",
+        id_,
+        stream_id,
+        frame_seq,
+        dets,
+        action,
+        queue_size,
+        capacity,
+        dropped_total);
 }
 
 void DrawAndStreamStage::runWorker() {
