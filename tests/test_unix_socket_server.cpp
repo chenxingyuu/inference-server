@@ -16,6 +16,40 @@
 using json = nlohmann::json;
 using namespace infer;
 
+namespace {
+
+PipelineInfo pipelineWithId(std::string id) {
+    PipelineInfo p;
+    p.id = std::move(id);
+    return p;
+}
+
+PipelineInfo pipelineWithNodes(std::string id, std::initializer_list<std::pair<const char*, const char*>> node_id_types) {
+    PipelineInfo p;
+    p.id = std::move(id);
+    for (const auto& [nid, ntype] : node_id_types) {
+        PipelineNodeInfo n;
+        n.id   = nid;
+        n.type = ntype;
+        p.nodes.push_back(std::move(n));
+    }
+    return p;
+}
+
+ModelInfo modelInfo(std::string id, std::string backend, std::string version,
+                    std::string input_shape, int batch_size, int instance_count) {
+    ModelInfo m;
+    m.id = std::move(id);
+    m.backend = std::move(backend);
+    m.version = std::move(version);
+    m.input_shape = std::move(input_shape);
+    m.batch_size = batch_size;
+    m.instance_count = instance_count;
+    return m;
+}
+
+} // namespace
+
 // ── Fake TaskManager ──────────────────────────────────────────────────────────
 
 struct FakeTaskManager : ITaskManager {
@@ -55,6 +89,9 @@ struct FakeTaskManager : ITaskManager {
     bool removeTask(const std::string&)          override { return remove_task_result; }
     bool loadModel(const ModelConfig&)           override { return load_model_result; }
     bool unloadModel(const std::string&)         override { return unload_model_result; }
+
+    std::vector<RepositoryModelInfo> listRepositoryModels() const override { return {}; }
+    bool loadFromRepository(const std::string&) override { return true; }
 };
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
@@ -219,15 +256,18 @@ TEST_F(UnixSocketServerTest, ListPipelinesEmpty) {
 }
 
 TEST_F(UnixSocketServerTest, ListPipelinesWithItems) {
-    fake_tm_.pipelines = {{"pipe0", {"decode", "infer", "kafka"}, 2}};
+    PipelineInfo p = pipelineWithNodes("pipe0", {{"n0", "decode"}, {"n1", "infer"}, {"n2", "kafka"}});
+    p.edges.push_back(PipelineEdgeInfo{"n0", "n1", 256, "block"});
+    p.edges.push_back(PipelineEdgeInfo{"n1", "n2", 256, "block"});
+    fake_tm_.pipelines = {std::move(p)};
     auto resp = roundtrip({{"cmd", "list_pipelines"}});
     ASSERT_EQ(resp["data"].size(), 1u);
-    EXPECT_EQ(resp["data"][0]["id"],         "pipe0");
-    EXPECT_EQ(resp["data"][0]["edge_count"], 2);
+    EXPECT_EQ(resp["data"][0]["id"], "pipe0");
+    EXPECT_EQ(resp["data"][0]["edges"].size(), 2u);
 }
 
 TEST_F(UnixSocketServerTest, ListPipelinesNodesIsArray) {
-    fake_tm_.pipelines = {{"pipe0", {"a", "b"}, 1}};
+    fake_tm_.pipelines = {pipelineWithNodes("pipe0", {{"n0", "a"}, {"n1", "b"}})};
     auto resp = roundtrip({{"cmd", "list_pipelines"}});
     EXPECT_TRUE(resp["data"][0]["nodes"].is_array());
     EXPECT_EQ(resp["data"][0]["nodes"].size(), 2u);
@@ -243,17 +283,34 @@ TEST_F(UnixSocketServerTest, ListModelsEmpty) {
 }
 
 TEST_F(UnixSocketServerTest, ListModelsWithItems) {
-    fake_tm_.models = {{"yolov8n", "tensorrt", "v8", "3x640x640", 16, 1}};
+    auto model = modelInfo("yolov8n", "tensorrt", "v8", "3x640x640", 16, 2);
+    model.model_type = "detector";
+    model.num_classes = 80;
+    model.conf_thresh = 0.25f;
+    model.nms_thresh = 0.45f;
+    model.device_id = 1;
+    model.preferred_batch_sizes = {1, 8, 16};
+    model.max_queue_delay_us = 20000;
+    model.class_names = {"person", "car"};
+    fake_tm_.models = {model};
     auto resp = roundtrip({{"cmd", "list_models"}});
     ASSERT_EQ(resp["data"].size(), 1u);
-    EXPECT_EQ(resp["data"][0]["id"],             "yolov8n");
-    EXPECT_EQ(resp["data"][0]["backend"],        "tensorrt");
-    EXPECT_EQ(resp["data"][0]["batch_size"],     16);
-    EXPECT_EQ(resp["data"][0]["instance_count"], 1);
+    EXPECT_EQ(resp["data"][0]["id"],                     "yolov8n");
+    EXPECT_EQ(resp["data"][0]["backend"],                "tensorrt");
+    EXPECT_EQ(resp["data"][0]["batch_size"],             16);
+    EXPECT_EQ(resp["data"][0]["instance_count"],         2);
+    EXPECT_EQ(resp["data"][0]["model_type"],             "detector");
+    EXPECT_EQ(resp["data"][0]["num_classes"],            80);
+    EXPECT_EQ(resp["data"][0]["conf_thresh"],            0.25f);
+    EXPECT_EQ(resp["data"][0]["nms_thresh"],             0.45f);
+    EXPECT_EQ(resp["data"][0]["device_id"],              1);
+    EXPECT_EQ(resp["data"][0]["preferred_batch_sizes"],  json::array({1, 8, 16}));
+    EXPECT_EQ(resp["data"][0]["max_queue_delay_us"],     20000);
+    EXPECT_EQ(resp["data"][0]["class_names"],            json::array({"person", "car"}));
 }
 
 TEST_F(UnixSocketServerTest, ListModelsInputShapeFormat) {
-    fake_tm_.models = {{"m0", "onnx_cpu", "v8", "3x640x640", 1, 1}};
+    fake_tm_.models = {modelInfo("m0", "onnx_cpu", "v8", "3x640x640", 1, 1)};
     auto resp = roundtrip({{"cmd", "list_models"}});
     const std::string shape = resp["data"][0]["input_shape"];
     EXPECT_NE(shape.find('x'), std::string::npos);
@@ -318,7 +375,7 @@ TEST_F(UnixSocketServerTest, AddPipelineDuplicate) {
 }
 
 TEST_F(UnixSocketServerTest, RemovePipelineSuccess) {
-    fake_tm_.pipelines = {{"pipeline_default", {}, 0}};
+    fake_tm_.pipelines = {pipelineWithId("pipeline_default")};
     auto resp = roundtrip({{"cmd", "remove_pipeline"}, {"id", "pipeline_default"}});
     EXPECT_EQ(resp["status"], "ok");
     EXPECT_EQ(resp["id"],     "pipeline_default");
@@ -333,11 +390,70 @@ TEST_F(UnixSocketServerTest, RemovePipelineNotFound) {
 
 TEST_F(UnixSocketServerTest, RemovePipelineInUse) {
     // pipeline exists but removePipeline returns false (a task references it)
-    fake_tm_.pipelines = {{"pipeline_default", {}, 0}};
+    fake_tm_.pipelines = {pipelineWithId("pipeline_default")};
     fake_tm_.remove_pipeline_result = false;
     auto resp = roundtrip({{"cmd", "remove_pipeline"}, {"id", "pipeline_default"}});
     EXPECT_EQ(resp["status"], "error");
     EXPECT_EQ(resp["code"],   "in_use");
+}
+
+TEST_F(UnixSocketServerTest, UpdatePipelineNotFound) {
+    auto resp = roundtrip({
+        {"cmd", "update_pipeline"},
+        {"id",  "missing"},
+        {"nodes", json::array()},
+        {"edges", json::array()},
+    });
+    EXPECT_EQ(resp["status"], "error");
+    EXPECT_EQ(resp["code"],   "not_found");
+}
+
+TEST_F(UnixSocketServerTest, UpdatePipelineInUseRunning) {
+    fake_tm_.pipelines = {pipelineWithId("pipe0")};
+    fake_tm_.update_pipeline_result = false;
+    TaskConfig tc;
+    tc.id          = "t1";
+    tc.source_id   = "src";
+    tc.pipeline_id = "pipe0";
+    fake_tm_.tasks = {ITaskManager::TaskRuntimeInfo{tc, ITaskManager::State::Running}};
+    auto resp = roundtrip({
+        {"cmd", "update_pipeline"},
+        {"id",  "pipe0"},
+        {"nodes", json::array()},
+        {"edges", json::array()},
+    });
+    EXPECT_EQ(resp["status"], "error");
+    EXPECT_EQ(resp["code"],   "in_use");
+}
+
+TEST_F(UnixSocketServerTest, UpdatePipelineInvalidGraph) {
+    fake_tm_.pipelines = {pipelineWithId("pipe0")};
+    fake_tm_.update_pipeline_result = false;
+    TaskConfig tc;
+    tc.id          = "t1";
+    tc.source_id   = "src";
+    tc.pipeline_id = "pipe0";
+    fake_tm_.tasks = {ITaskManager::TaskRuntimeInfo{tc, ITaskManager::State::Stopped}};
+    auto resp = roundtrip({
+        {"cmd", "update_pipeline"},
+        {"id",  "pipe0"},
+        {"nodes", json::array()},
+        {"edges", json::array()},
+    });
+    EXPECT_EQ(resp["status"], "error");
+    EXPECT_EQ(resp["code"],   "invalid_pipeline");
+}
+
+TEST_F(UnixSocketServerTest, UpdatePipelineSuccess) {
+    fake_tm_.pipelines = {pipelineWithId("pipe0")};
+    auto resp = roundtrip({
+        {"cmd", "update_pipeline"},
+        {"id",  "pipe0"},
+        {"nodes", json::array()},
+        {"edges", json::array()},
+    });
+    EXPECT_EQ(resp["status"], "ok");
+    EXPECT_EQ(resp["id"],     "pipe0");
 }
 
 // ── add_task / remove_task ────────────────────────────────────────────────────
@@ -396,7 +512,7 @@ TEST_F(UnixSocketServerTest, LoadModelDuplicate) {
 }
 
 TEST_F(UnixSocketServerTest, UnloadModelSuccess) {
-    fake_tm_.models = {{"yolov8n", "tensorrt", "v8", "3x640x640", 16, 1}};
+    fake_tm_.models = {modelInfo("yolov8n", "tensorrt", "v8", "3x640x640", 16, 1)};
     auto resp = roundtrip({{"cmd", "unload_model"}, {"id", "yolov8n"}});
     EXPECT_EQ(resp["status"], "ok");
     EXPECT_EQ(resp["id"],     "yolov8n");
@@ -411,7 +527,7 @@ TEST_F(UnixSocketServerTest, UnloadModelNotFound) {
 
 TEST_F(UnixSocketServerTest, UnloadModelInUse) {
     // model exists but unloadModel returns false (running task uses it)
-    fake_tm_.models = {{"yolov8n", "tensorrt", "v8", "3x640x640", 16, 1}};
+    fake_tm_.models = {modelInfo("yolov8n", "tensorrt", "v8", "3x640x640", 16, 1)};
     fake_tm_.unload_model_result = false;
     auto resp = roundtrip({{"cmd", "unload_model"}, {"id", "yolov8n"}});
     EXPECT_EQ(resp["status"], "error");

@@ -73,6 +73,7 @@ const en = {
   'models.col.input_shape':        'Input Shape',
   'models.col.batch':              'Batch',
   'models.col.instances':          'Instances',
+  'models.col.summary':            'Summary',
   'models.field.id':               'Model ID',
   'models.field.backend':          'Backend',
   'models.field.version':          'Version',
@@ -86,6 +87,11 @@ const en = {
   'models.field.num_classes':      'Num Classes',
   'models.field.conf_thresh':      'Conf Thresh',
   'models.field.nms_thresh':       'NMS Thresh',
+  'models.field.device_id':        'Device ID',
+  'models.field.preferred_batch_sizes': 'Preferred Batches',
+  'models.field.max_queue_delay_us': 'Max Queue Delay (us)',
+  'models.field.class_names':      'Class Names',
+  'models.section.details':        'Details',
   'models.empty':                  'No models loaded. Load a model to enable inference.',
   'models.loading':                'Loading…',
   'models.repo_title':             'Model Repository',
@@ -167,6 +173,8 @@ const en = {
   'tasks.edit':                'Edit',
   'tasks.saving':              'Saving…',
   'tasks.save':                'Save',
+  'tasks.section.binding':     'Binding',
+  'tasks.section.settings':    'Settings',
 } as const
 
 const zh: Record<keyof typeof en, string> = {
@@ -238,6 +246,7 @@ const zh: Record<keyof typeof en, string> = {
   'models.col.input_shape':        '输入形状',
   'models.col.batch':              '批次',
   'models.col.instances':          '实例数',
+  'models.col.summary':            '摘要',
   'models.field.id':               '模型 ID',
   'models.field.backend':          '后端',
   'models.field.version':          '版本',
@@ -251,6 +260,11 @@ const zh: Record<keyof typeof en, string> = {
   'models.field.num_classes':      '类别数',
   'models.field.conf_thresh':      '置信度阈值',
   'models.field.nms_thresh':       'NMS 阈值',
+  'models.field.device_id':        '设备 ID',
+  'models.field.preferred_batch_sizes': '首选批次',
+  'models.field.max_queue_delay_us': '最大排队延迟 (us)',
+  'models.field.class_names':      '类别名称',
+  'models.section.details':        '详情',
   'models.empty':                  '暂无模型，加载一个以启用推理。',
   'models.loading':                '加载中…',
   'models.repo_title':             '模型仓库',
@@ -332,6 +346,8 @@ const zh: Record<keyof typeof en, string> = {
   'tasks.edit':                '编辑',
   'tasks.saving':              '保存中…',
   'tasks.save':                '保存',
+  'tasks.section.binding':     '绑定',
+  'tasks.section.settings':    '参数',
 }
 
 // ─── Context & Hook ────────────────────────────────────────────────────────

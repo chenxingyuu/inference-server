@@ -105,6 +105,16 @@ void SinkFfplayStage::runWorker() {
 
         cv::Mat output = item.frame->image.clone();
         overlay::drawDetections(output, item.infer_result, cfg_.draw_conf_thresh, cfg_.line_thickness);
+        if (cfg_.draw_timestamp) {
+            overlay::drawTimestamp(
+                output,
+                item.stream_id,
+                cfg_.draw_timestamp_with_stream_id,
+                cfg_.timestamp_x,
+                cfg_.timestamp_y,
+                cfg_.timestamp_font_scale,
+                cfg_.timestamp_thickness);
+        }
 
         if (!ensureFfplayOpened(output)) {
             continue;

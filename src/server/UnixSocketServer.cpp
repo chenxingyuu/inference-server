@@ -190,7 +190,12 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         for (const auto& m : task_manager_.listModels()) {
             arr.push_back({{"id", m.id}, {"backend", m.backend}, {"version", m.version},
                            {"input_shape", m.input_shape}, {"batch_size", m.batch_size},
-                           {"instance_count", m.instance_count}});
+                           {"instance_count", m.instance_count}, {"model_type", m.model_type},
+                           {"num_classes", m.num_classes}, {"conf_thresh", m.conf_thresh},
+                           {"nms_thresh", m.nms_thresh}, {"device_id", m.device_id},
+                           {"preferred_batch_sizes", m.preferred_batch_sizes},
+                           {"max_queue_delay_us", m.max_queue_delay_us},
+                           {"class_names", m.class_names}});
         }
         return json({{"status", "ok"}, {"data", arr}}).dump();
     }
@@ -293,8 +298,24 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
             ec.drop_policy = parseEdgeDropPolicy(e.value("drop_policy", std::string{"block"}));
             p.edges.push_back(std::move(ec));
         }
-        if (!task_manager_.updatePipeline(p))
-            return json({{"status", "error"}, {"message", "not found or in use: " + id}}).dump();
+        const auto pipes = task_manager_.listPipelines();
+        const bool exists =
+            std::any_of(pipes.begin(), pipes.end(), [&](const auto& pi) { return pi.id == id; });
+        if (!exists)
+            return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();
+        if (!task_manager_.updatePipeline(p)) {
+            for (const auto& tri : task_manager_.listTasks()) {
+                if (tri.config.pipeline_id == id && tri.state == ITaskManager::State::Running)
+                    return json({{"status", "error"},
+                                  {"code", "in_use"},
+                                  {"message", "pipeline in use by a running task: " + id}})
+                        .dump();
+            }
+            return json({{"status", "error"},
+                         {"code", "invalid_pipeline"},
+                         {"message", "failed to apply pipeline update: " + id}})
+                .dump();
+        }
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 

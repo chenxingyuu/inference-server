@@ -69,6 +69,14 @@ export interface ModelInfo {
   input_shape: string
   batch_size: number
   instance_count: number
+  model_type?: string
+  num_classes?: number
+  conf_thresh?: number
+  nms_thresh?: number
+  device_id?: number
+  preferred_batch_sizes?: number[]
+  max_queue_delay_us?: number
+  class_names?: string[]
 }
 
 export interface ModelLoad {

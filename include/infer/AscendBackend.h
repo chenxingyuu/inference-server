@@ -117,12 +117,6 @@ private:
     aclrtStream  stream_{nullptr};
     std::mutex   infer_mu_;
 
-    // Process-wide ACL init reference count.
-    // aclInit on first backend (0→1) when the process has not initialized ACL yet;
-    // aclFinalize once at process exit (not when the last backend unloads) so CANN
-    // can reload models after a hot pipeline stop without GE_EXEC_NOT_INIT (145001).
-    static std::atomic<int> s_acl_refcount_;
-
     // Pre-allocated NPU buffer pool (replaces per-inference aclrtMalloc)
     AscendBufferPool buffer_pool_;
     size_t input_bytes_{0};

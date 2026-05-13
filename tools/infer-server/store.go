@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -232,8 +233,21 @@ func replayOnce(state AppState, callFn func(map[string]any) (map[string]any, err
 	for _, p := range state.Pipelines {
 		cmd := mustToMap(p)
 		cmd["cmd"] = "add_pipeline"
-		if _, err := callFn(cmd); err != nil {
+		resp, err := callFn(cmd)
+		if err != nil {
 			return err
+		}
+		if resp != nil && resp["status"] != "ok" {
+			msg, _ := resp["message"].(string)
+			// C++ may already have this pipeline (e.g. merged from config.runtime.json before replay).
+			// Apply persisted state so edge capacity/drop_policy match state.json.
+			if strings.Contains(msg, "already exists") {
+				up := mustToMap(p)
+				up["cmd"] = "update_pipeline"
+				if _, err := callFn(up); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	for _, entry := range state.Tasks {

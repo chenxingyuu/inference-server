@@ -1,7 +1,11 @@
 #include "pipeline/stages/DetectionOverlay.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -50,6 +54,30 @@ std::string detectionLabel(const Detection& det) {
     return label;
 }
 
+std::string currentTimestampText(const std::string& stream_id, bool include_stream_id) {
+    using clock = std::chrono::system_clock;
+    const auto now = clock::now();
+    const auto tt = clock::to_time_t(now);
+    std::tm tm_buf{};
+#if defined(_WIN32)
+    localtime_s(&tm_buf, &tt);
+#else
+    localtime_r(&tt, &tm_buf);
+#endif
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+    std::ostringstream oss;
+    if (include_stream_id && !stream_id.empty()) {
+        oss << stream_id << " ";
+    }
+    oss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S")
+        << "."
+        << std::setw(3)
+        << std::setfill('0')
+        << millis.count();
+    return oss.str();
+}
+
 } // namespace
 
 void drawDetections(cv::Mat& frame, const std::optional<InferResult>& result, float draw_conf_thresh, int line_thickness) {
@@ -68,6 +96,32 @@ void drawDetections(cv::Mat& frame, const std::optional<InferResult>& result, fl
         cv::rectangle(frame, bg, cv::Scalar(0, 255, 0), cv::FILLED);
         cv::putText(frame, label, cv::Point(rect.x + 3, text_y + text_size.height + 1), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 1);
     }
+}
+
+void drawTimestamp(cv::Mat& frame,
+                   const std::string& stream_id,
+                   bool include_stream_id,
+                   int pos_x,
+                   int pos_y,
+                   float font_scale,
+                   int font_thickness) {
+    if (frame.empty()) return;
+
+    const std::string label = currentTimestampText(stream_id, include_stream_id);
+    const float scale = std::max(0.3f, font_scale);
+    const int thickness = std::max(1, font_thickness);
+
+    int baseline = 0;
+    const cv::Size text_size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, scale, thickness, &baseline);
+
+    const int x = std::max(0, std::min(pos_x, std::max(0, frame.cols - text_size.width - 6)));
+    const int y = std::max(text_size.height + baseline + 2, std::min(pos_y, std::max(0, frame.rows - 2)));
+    const int bg_h = text_size.height + baseline + 4;
+    const int bg_w = std::min(frame.cols - x, text_size.width + 6);
+    if (bg_w <= 0 || bg_h <= 0) return;
+
+    cv::rectangle(frame, cv::Rect(x, y - text_size.height - baseline - 2, bg_w, bg_h), cv::Scalar(0, 0, 0), cv::FILLED);
+    cv::putText(frame, label, cv::Point(x + 3, y - 2), cv::FONT_HERSHEY_SIMPLEX, scale, cv::Scalar(255, 255, 255), thickness);
 }
 
 } // namespace overlay

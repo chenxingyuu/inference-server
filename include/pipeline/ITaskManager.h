@@ -41,6 +41,14 @@ struct ModelInfo {
     std::string input_shape;  // "CxHxW"
     int         batch_size{1};
     int         instance_count{1};
+    std::string model_type;   // "detector" | "classifier"
+    int         num_classes{80};
+    float       conf_thresh{0.4f};
+    float       nms_thresh{0.45f};
+    int         device_id{0};
+    std::vector<int> preferred_batch_sizes;
+    int         max_queue_delay_us{10000};
+    std::vector<std::string> class_names;
 };
 
 struct RepositoryModelInfo {

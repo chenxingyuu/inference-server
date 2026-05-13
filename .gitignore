@@ -35,8 +35,7 @@ cmake-build-release-tsan
 cmake-build-release-ubsan
 cmake-build-release-msan
 
-build_tests/
-build_agent/
+build_*/
 
 __pycache__/
 .venv/

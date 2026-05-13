@@ -767,16 +767,67 @@ NAME=$2
 SOC=${3:-Ascend310P3}
 
 for BS in 1 4 8 16; do
-    atc \
-      --model="$ONNX" \
-      --framework=5 \
-      --output="${NAME}_bs${BS}" \
-      --input_shape="images:${BS},3,640,640" \
-      --input_format=NCHW \
-      --soc_version="$SOC" \
-      --precision_mode=allow_fp32_to_fp16
+  atc \
+    --model="$ONNX" \
+    --framework=5 \
+    --output="${NAME}_bs${BS}" \
+    --input_shape="images:${BS},3,640,640" \
+    --input_format=NCHW \
+    --soc_version="$SOC" \
+    --precision_mode=allow_fp32_to_fp16
 done
 ```
+
+### `sink.stream` 硬件编码（可选，CANN 6 + 310P）
+
+默认 `sink.stream` 仍使用 **OpenCV 画框 + raw BGR → ffmpeg + libx264** 软编。可选开启 **昇腾 VENC（H.264 ES）+ ffmpeg 仅封装**（`-f h264` 从 stdin 读 Annex-B，`-c:v copy` 推 RTSP/RTMP），减轻 CPU 编码负载。
+
+YAML `with` 字段：
+
+| 键 | 说明 |
+|----|------|
+| `encoder` | `ffmpeg_x264`（默认）或 `ascend_venc` |
+| `ascend_device_id` | 可选；**≥0** 时绑定该 NPU；**省略或 -1** 时使用任务级 `ingest_ascend_device_id`（与 ingest / source 侧 DVPP 等设备上下文一致） |
+| `draw_timestamp` | 是否在左上角叠加时间戳（默认 `false`） |
+| `draw_timestamp_with_stream_id` | 时间戳前是否追加 `stream_id`（默认 `false`） |
+| `timestamp_x` / `timestamp_y` | 时间戳锚点位置（默认 `10` / `28`） |
+| `timestamp_font_scale` | 字体缩放（默认 `0.6`） |
+| `timestamp_thickness` | 字体线宽（默认 `1`） |
+
+约束与取舍：
+
+- 需要 **`BUILD_ASCEND_BACKEND=ON`** 且运行环境具备对应 **CANN 6 `aclvenc*`** 与驱动；否则配置 `ascend_venc` 会在阶段构造时失败。
+- 输入在 CPU 上由 BGR 转为 **NV12**。VENC 路径将宽高 **向上对齐到 16 的倍数**（H.264 宏块栅格；例如 7680×1144 → 7680×1152），`packSingleBgrToNv12Contiguous` 会按对齐后的尺寸缩放，略有竖直拉伸。**首期建议固定分辨率**；若芯片/文档不支持目标宽高，应退回 `ffmpeg_x264` 或调整分辨率。
+- 与推理共用进程时，ACL 由 **`AscendProcessRuntime`** 进程级引用计数管理；纯推流任务也会在 writer `open()` 时 acquire ACL。
+
+### SAHI 全景流 MVP（全量 + ROI 增量）
+
+适用场景：超宽全景流（例如 `7680x1870` / `7680x1144`）需要提升远距离小目标召回，同时控制整体推理时延。
+
+新增 stage：
+
+| stage type | 作用 | 关键参数 |
+|----|------|------|
+| `infer.sahiScheduler` | 切片调度（全量 + ROI）并下发 tile 帧 | `tile_width` `tile_height` `overlap_ratio` `y_overlap_ratio` `full_interval` `roi_expand_ratio` |
+| `post.sahiMerge` | tile 结果回映射 + 全局 NMS 融合 | `merge_iou` `stale_timeout_ms` |
+
+推荐链路：
+
+```text
+source.rtsp -> infer.sahiScheduler -> infer.engine -> post.sahiMerge -> track.bytetrack -> sink.stream
+```
+
+MVP 建议参数：
+
+- `tile_width=960`
+- `tile_height=1144`（两路流都可先做横向切片）
+- `overlap_ratio=0.25`
+- `y_overlap_ratio=0`
+- `full_interval=5`
+- `roi_expand_ratio=1.3`
+- `merge_iou=0.55`
+
+配置示例见：`config/config.npu.sahi.mvp.yaml`（按实际 `source.url`、`model_id`、`output_url` 修改）。
 
 ### 环境检查清单
 

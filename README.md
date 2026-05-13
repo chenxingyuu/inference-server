@@ -151,8 +151,21 @@ curl -X POST http://localhost:8080/tasks/task_cam_001/stop
 - `track.bytetrack`：ByteTrack 追踪
 - `join.byFrameId`：归档信息回填到推理结果（按 frame id join）
 - `sink.kafka`：结果输出；通过 `publishers:` 配置可同时扇出到 Kafka / gRPC / Redis（见下方配置示例）
-- `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`，需 `output_url`）
+- `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`，需 `output_url`）。`output_url` 支持占位符 `{task_id}` / `{source_id}`，在每个 task 构图时插值；未知占位符会报错。
 - `sink.ffplay`：叠加检测框后通过管道喂给本机 `ffplay`（BGR rawvideo，需已安装 ffmpeg/ffplay）
+
+`sink.stream` 占位符示例（多 task 复用同一 pipeline 时为每路生成不同推流地址）：
+
+```yaml
+pipelines:
+  - id: pipe_stream
+    nodes:
+      - id: sink_stream
+        type: sink.stream
+        with:
+          output_url: "rtsp://push/live/{source_id}/{task_id}"
+          protocol: rtsp
+```
 
 ### 多路发布配置（publishers:）
 
@@ -185,6 +198,8 @@ publishers:
 | --- | --- | --- | --- |
 | `infer_latency_ms` | histogram | `model_id` | 单批推理耗时 |
 | `e2e_latency_ms` | histogram | `stream_id` | 端到端延迟 |
+| `sink_publish_latency_ms` | histogram | `stream_id` | 帧到达 `sink.publish` 的延迟 |
+| `sink_stream_latency_ms` | histogram | `stream_id` | 帧在 `sink.stream` 写流成功时的延迟 |
 | `frames_decoded_total` | counter | `stream_id` | 解码帧数 |
 | `frames_dropped_total` | counter | `stream_id` | 解码丢帧数 |
 | `kafka_published_total` | counter | 无 | Kafka 成功发布数 |

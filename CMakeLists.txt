@@ -113,6 +113,7 @@ set(STREAM_SOURCES
 
 set(INFER_SOURCES
     src/infer/BackendFactory.cpp
+    src/infer/BgrToNv12.cpp
 )
 if(BUILD_TRT_BACKEND)
     list(APPEND INFER_SOURCES src/infer/TRTBackend.cpp)
@@ -120,9 +121,10 @@ if(BUILD_TRT_BACKEND)
     list(APPEND INFER_SOURCES src/cuda/CudaPreprocess.cu)
 endif()
 if(BUILD_ASCEND_BACKEND)
+    list(APPEND INFER_SOURCES src/infer/AscendProcessRuntime.cpp)
     list(APPEND INFER_SOURCES src/infer/AscendBackend.cpp)
     list(APPEND INFER_SOURCES src/infer/AscendBufferPool.cpp)
-    list(APPEND STREAM_SOURCES src/stream/DVPPDecoder.cpp)
+    list(APPEND INFER_SOURCES src/stream/DVPPDecoder.cpp)
 endif()
 if(BUILD_ONNX_BACKEND)
     list(APPEND INFER_SOURCES src/infer/OnnxBackend.cpp)
@@ -149,6 +151,9 @@ set(PIPELINE_SOURCES
     src/pipeline/stages/InferEngineStage.cpp
     src/pipeline/stages/InferEngineWorkerStage.cpp
     src/pipeline/stages/JoinByFrameStage.cpp
+    src/pipeline/stages/SahiMergeStage.cpp
+    src/pipeline/stages/SahiRoiRegistry.cpp
+    src/pipeline/stages/SahiSchedulerStage.cpp
     src/pipeline/stages/SinkKafkaStage.cpp
     src/pipeline/stages/SourceFileStage.cpp
     src/pipeline/stages/SourceRtspStage.cpp
@@ -161,6 +166,9 @@ set(PIPELINE_SOURCES
     src/pipeline/ResultMerger.cpp
     src/pipeline/ModelManager.cpp
 )
+if(BUILD_ASCEND_BACKEND)
+    list(APPEND PIPELINE_SOURCES src/pipeline/stages/AscendVencFfmpegMuxWriter.cpp)
+endif()
 
 set(TRACKER_SOURCES
     src/tracker/ByteTrackTracker.cpp

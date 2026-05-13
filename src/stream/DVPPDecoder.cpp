@@ -239,6 +239,11 @@ void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
         );
     }
 
+    const double decode_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - fctx->submit_ts).count();
+    LOG_DEBUG("DVPPDecoder: hw decode done {}x{} decode_ms={:.1f}",
+              buf.width, buf.height, decode_ms);
+
     Frame f;
     f.ascend_buf = std::move(buf);
     f.is_ascend  = true;
@@ -427,7 +432,8 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         FrameCtx* fctx;
         {
             std::lock_guard<std::mutex> lk(ctx_mu_);
-            fctx = new FrameCtx{ctx_.cb, ctx_.device_id, bitstream_dev};
+            fctx = new FrameCtx{ctx_.cb, ctx_.device_id, bitstream_dev,
+                                std::chrono::steady_clock::now()};
         }
 
         aclError send_rc = ACL_ERROR_FAILURE;

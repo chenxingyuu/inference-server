@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <set>
+#include <string_view>
 
 namespace infer {
 
@@ -30,6 +31,57 @@ std::string findInferModelId(const PipelineConfig& pipeline) {
         if (it != node.with.end()) return it->second;
     }
     return {};
+}
+
+std::string interpolateOutputUrlPlaceholders(
+    std::string_view raw,
+    const TaskConfig& task,
+    const std::string& pipeline_id,
+    const std::string& stage_id) {
+    std::string out;
+    out.reserve(raw.size() + 16);
+
+    std::size_t pos = 0;
+    while (pos < raw.size()) {
+        const std::size_t open = raw.find('{', pos);
+        if (open == std::string_view::npos) {
+            out.append(raw.substr(pos));
+            break;
+        }
+        out.append(raw.substr(pos, open - pos));
+        const std::size_t close = raw.find('}', open + 1);
+        if (close == std::string_view::npos) {
+            throw std::runtime_error(
+                "TaskManager: task '" + task.id + "' pipeline '" + pipeline_id + "' stage '" + stage_id +
+                "' has unterminated placeholder in sink.stream output_url: " + std::string(raw));
+        }
+        const std::string token(raw.substr(open + 1, close - open - 1));
+        if (token == "task_id") {
+            out += task.id;
+        } else if (token == "source_id") {
+            out += task.source_id;
+        } else {
+            throw std::runtime_error(
+                "TaskManager: task '" + task.id + "' pipeline '" + pipeline_id + "' stage '" + stage_id +
+                "' has unsupported placeholder '{" + token +
+                "}' in sink.stream output_url (supported: {task_id}, {source_id})");
+        }
+        pos = close + 1;
+    }
+    return out;
+}
+
+void interpolatePipelineForTask(PipelineConfig& runtime_cfg, const TaskConfig& task, const std::string& pipeline_id) {
+    for (auto& node : runtime_cfg.nodes) {
+        if (node.type != "sink.stream") continue;
+        auto output_url_it = node.with.find("output_url");
+        if (output_url_it == node.with.end()) continue;
+        const std::string_view raw(output_url_it->second);
+        if (raw.find('{') == std::string_view::npos && raw.find('}') == std::string_view::npos) {
+            continue;
+        }
+        output_url_it->second = interpolateOutputUrlPlaceholders(raw, task, pipeline_id, node.id);
+    }
 }
 
 } // namespace
@@ -96,6 +148,7 @@ bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
 
     PipelineConfig runtime_cfg = *pipeline_tpl;
     runtime_cfg.id = task.id;
+    interpolatePipelineForTask(runtime_cfg, task, pipeline_tpl->id);
     auto executor = std::make_shared<GraphExecutor>(runtime_cfg);
     StageFactory::Context ctx{
         cfg_,
@@ -249,8 +302,22 @@ std::vector<ModelInfo> TaskManager::listModels() const {
         std::string shape = std::to_string(s.channels) + "x"
                           + std::to_string(s.height)   + "x"
                           + std::to_string(s.width);
-        out.push_back({m.id, deviceTypeToStr(m.backend), yoloVersionStr(m.version),
-                       std::move(shape), m.batch_size, m.instance_count});
+        ModelInfo info;
+        info.id                     = m.id;
+        info.backend                = deviceTypeToStr(m.backend);
+        info.version                = yoloVersionStr(m.version);
+        info.input_shape            = std::move(shape);
+        info.batch_size             = m.batch_size;
+        info.instance_count         = m.instance_count;
+        info.model_type             = (m.model_type == ModelType::Classifier) ? "classifier" : "detector";
+        info.num_classes            = m.num_classes;
+        info.conf_thresh            = m.conf_thresh;
+        info.nms_thresh             = m.nms_thresh;
+        info.device_id              = m.device_id;
+        info.preferred_batch_sizes  = m.preferred_batch_sizes;
+        info.max_queue_delay_us     = m.max_queue_delay_us;
+        info.class_names            = m.class_names;
+        out.push_back(std::move(info));
     }
     return out;
 }
@@ -320,13 +387,53 @@ bool TaskManager::removePipeline(const std::string& id) {
 
 bool TaskManager::updatePipeline(const PipelineConfig& pipeline) {
     std::lock_guard<std::mutex> lock(mu_);
-    if (!cfg_.findPipeline(pipeline.id)) return false;
-    for (const auto& t : cfg_.tasks)
-        if (t.pipeline_id == pipeline.id) return false;
+    const auto* old_ptr = cfg_.findPipeline(pipeline.id);
+    if (!old_ptr) return false;
+
+    // Block only while a task is actually running this pipeline; stopped tasks keep a
+    // snapshot GraphExecutor and must be rebuilt after the template changes.
+    for (const auto& t : cfg_.tasks) {
+        if (t.pipeline_id != pipeline.id) continue;
+        auto it = entries_.find(t.id);
+        if (it != entries_.end() && it->second.state == State::Running) return false;
+    }
+
+    const PipelineConfig backup = *old_ptr;
+
     for (auto& p : cfg_.pipelines)
         if (p.id == pipeline.id) { p = pipeline; break; }
     for (auto& p : runtime_state_.added_pipelines)
         if (p.id == pipeline.id) { p = pipeline; break; }
+
+    std::vector<TaskConfig> affected;
+    for (const auto& t : cfg_.tasks) {
+        if (t.pipeline_id == pipeline.id) affected.push_back(t);
+    }
+    for (const auto& t : affected) {
+        entries_.erase(t.id);
+    }
+
+    for (const auto& t : affected) {
+        if (!buildEntry(t, false)) {
+            LOG_ERROR(
+                "TaskManager: updatePipeline failed to rebuild stopped task '{}' after template change; restoring previous pipeline",
+                t.id);
+            for (auto& p : cfg_.pipelines)
+                if (p.id == pipeline.id) { p = backup; break; }
+            for (auto& p : runtime_state_.added_pipelines)
+                if (p.id == pipeline.id) { p = backup; break; }
+            for (const auto& t2 : affected) {
+                entries_.erase(t2.id);
+            }
+            for (const auto& t2 : affected) {
+                if (!buildEntry(t2, false)) {
+                    LOG_ERROR("TaskManager: updatePipeline failed to restore task '{}' to previous graph", t2.id);
+                }
+            }
+            return false;
+        }
+    }
+
     persist();
     return true;
 }

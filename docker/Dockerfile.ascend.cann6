@@ -60,6 +60,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     libssl1.1 \
     libcurl4 \
     libavcodec58 libavformat58 libavutil56 libswscale5 libavdevice58 libavfilter7 \
