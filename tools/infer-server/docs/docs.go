@@ -793,6 +793,18 @@ const docTemplate = `{
                 "batch_size": {
                     "type": "integer"
                 },
+                "class_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "conf_thresh": {
+                    "type": "number"
+                },
+                "device_id": {
+                    "type": "integer"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -802,6 +814,28 @@ const docTemplate = `{
                 },
                 "instance_count": {
                     "type": "integer"
+                },
+                "max_queue_delay_us": {
+                    "type": "integer"
+                },
+                "model_type": {
+                    "type": "string",
+                    "enum": [
+                        "detector",
+                        "classifier"
+                    ]
+                },
+                "nms_thresh": {
+                    "type": "number"
+                },
+                "num_classes": {
+                    "type": "integer"
+                },
+                "preferred_batch_sizes": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 },
                 "version": {
                     "type": "string"

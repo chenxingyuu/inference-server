@@ -48,6 +48,14 @@ definitions:
         type: string
       batch_size:
         type: integer
+      class_names:
+        items:
+          type: string
+        type: array
+      conf_thresh:
+        type: number
+      device_id:
+        type: integer
       id:
         type: string
       input_shape:
@@ -55,6 +63,21 @@ definitions:
         type: string
       instance_count:
         type: integer
+      max_queue_delay_us:
+        type: integer
+      model_type:
+        enum:
+        - detector
+        - classifier
+        type: string
+      nms_thresh:
+        type: number
+      num_classes:
+        type: integer
+      preferred_batch_sizes:
+        items:
+          type: integer
+        type: array
       version:
         type: string
     type: object

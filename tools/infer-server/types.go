@@ -66,12 +66,20 @@ type PipelineCreate struct {
 
 // ModelInfo describes a loaded model.
 type ModelInfo struct {
-	ID            string `json:"id"`
-	Backend       string `json:"backend"`
-	Version       string `json:"version"`
-	InputShape    string `json:"input_shape" example:"3x640x640"`
-	BatchSize     int    `json:"batch_size"`
-	InstanceCount int    `json:"instance_count"`
+	ID                  string   `json:"id"`
+	Backend             string   `json:"backend"`
+	Version             string   `json:"version"`
+	InputShape          string   `json:"input_shape" example:"3x640x640"`
+	BatchSize           int      `json:"batch_size"`
+	InstanceCount       int      `json:"instance_count"`
+	ModelType           string   `json:"model_type" enums:"detector,classifier"`
+	NumClasses          int      `json:"num_classes"`
+	ConfThresh          float64  `json:"conf_thresh"`
+	NmsThresh           float64  `json:"nms_thresh"`
+	DeviceID            int      `json:"device_id"`
+	PreferredBatchSizes []int    `json:"preferred_batch_sizes,omitempty"`
+	MaxQueueDelayUs     int      `json:"max_queue_delay_us"`
+	ClassNames          []string `json:"class_names,omitempty"`
 }
 
 // InputShape specifies model input dimensions.
@@ -131,14 +139,14 @@ type TaskInfo struct {
 
 // TaskCreate is the request body for POST /tasks.
 type TaskCreate struct {
-	ID              string  `json:"id"                         binding:"required"`
-	SourceID        string  `json:"source_id"                  binding:"required"`
-	PipelineID      string  `json:"pipeline_id"                binding:"required"`
-	SampleFPS       float64 `json:"sample_fps,omitempty"`
-	SamplingMode    string  `json:"sampling_mode,omitempty"    enums:"frame_count,time_based"`
-	UseHwdec        bool    `json:"use_hwdec"`
-	UseAscendDvpp   bool    `json:"use_ascend_dvpp"`
-	AscendDeviceID  int     `json:"ascend_device_id"`
+	ID             string  `json:"id"                         binding:"required"`
+	SourceID       string  `json:"source_id"                  binding:"required"`
+	PipelineID     string  `json:"pipeline_id"                binding:"required"`
+	SampleFPS      float64 `json:"sample_fps,omitempty"`
+	SamplingMode   string  `json:"sampling_mode,omitempty"    enums:"frame_count,time_based"`
+	UseHwdec       bool    `json:"use_hwdec"`
+	UseAscendDvpp  bool    `json:"use_ascend_dvpp"`
+	AscendDeviceID int     `json:"ascend_device_id"`
 }
 
 // OkResponse is returned on successful write operations.

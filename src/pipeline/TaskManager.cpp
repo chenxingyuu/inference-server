@@ -302,8 +302,22 @@ std::vector<ModelInfo> TaskManager::listModels() const {
         std::string shape = std::to_string(s.channels) + "x"
                           + std::to_string(s.height)   + "x"
                           + std::to_string(s.width);
-        out.push_back({m.id, deviceTypeToStr(m.backend), yoloVersionStr(m.version),
-                       std::move(shape), m.batch_size, m.instance_count});
+        ModelInfo info;
+        info.id                     = m.id;
+        info.backend                = deviceTypeToStr(m.backend);
+        info.version                = yoloVersionStr(m.version);
+        info.input_shape            = std::move(shape);
+        info.batch_size             = m.batch_size;
+        info.instance_count         = m.instance_count;
+        info.model_type             = (m.model_type == ModelType::Classifier) ? "classifier" : "detector";
+        info.num_classes            = m.num_classes;
+        info.conf_thresh            = m.conf_thresh;
+        info.nms_thresh             = m.nms_thresh;
+        info.device_id              = m.device_id;
+        info.preferred_batch_sizes  = m.preferred_batch_sizes;
+        info.max_queue_delay_us     = m.max_queue_delay_us;
+        info.class_names            = m.class_names;
+        out.push_back(std::move(info));
     }
     return out;
 }
