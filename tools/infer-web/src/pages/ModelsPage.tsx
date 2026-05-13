@@ -45,6 +45,10 @@ function formatList(values?: Array<string | number>) {
   return values && values.length > 0 ? values.join(', ') : undefined
 }
 
+function formatThreshold(value?: number) {
+  return value === undefined ? undefined : Number(value.toFixed(4)).toString()
+}
+
 interface UploadForm {
   id: string
   backend: BackendType
@@ -483,8 +487,8 @@ export function ModelsPage() {
                             <DetailItem label={t('models.field.batch_size')} value={batchSize} />
                             <DetailItem label={t('models.field.instances')} value={instanceCount} />
                             <DetailItem label={t('models.field.num_classes')} value={numClasses} />
-                            <DetailItem label={t('models.field.conf_thresh')} value={confThresh} />
-                            <DetailItem label={t('models.field.nms_thresh')} value={nmsThresh} />
+                            <DetailItem label={t('models.field.conf_thresh')} value={formatThreshold(confThresh)} />
+                            <DetailItem label={t('models.field.nms_thresh')} value={formatThreshold(nmsThresh)} />
                             <DetailItem label={t('models.field.device_id')} value={m.device_id} />
                             <DetailItem label={t('models.field.preferred_batch_sizes')} value={formatList(m.preferred_batch_sizes)} />
                             <DetailItem label={t('models.field.max_queue_delay_us')} value={m.max_queue_delay_us} />
@@ -559,8 +563,8 @@ export function ModelsPage() {
                           <DetailItem label={t('models.field.batch_size')} value={m.batch_size} />
                           <DetailItem label={t('models.field.instances')} value={m.instance_count} />
                           <DetailItem label={t('models.field.num_classes')} value={m.num_classes} />
-                          <DetailItem label={t('models.field.conf_thresh')} value={m.conf_thresh} />
-                          <DetailItem label={t('models.field.nms_thresh')} value={m.nms_thresh} />
+                          <DetailItem label={t('models.field.conf_thresh')} value={formatThreshold(m.conf_thresh)} />
+                          <DetailItem label={t('models.field.nms_thresh')} value={formatThreshold(m.nms_thresh)} />
                         </div>
                       </td>
                     </tr>
