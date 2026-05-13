@@ -756,6 +756,96 @@ tasks:
 
 ---
 
+## Phase 31 — Ascend VENC 硬编码推流 + 时间戳叠图 + 管道更新增强
+
+**完成**：2026-05-11
+
+**目标**：在 Ascend NPU 上实现 DVPP VENC 硬件编码推流（替代 FFmpeg 软编码），补齐视频帧时间戳叠图功能，同时增强运行期管道更新与错误处理能力。
+
+**新增**：
+
+- **`AscendVencFfmpegMuxWriter`**（`include/pipeline/stages/AscendVencFfmpegMuxWriter.h` + `src/pipeline/stages/AscendVencFfmpegMuxWriter.cpp`，~500 行）：实现 `IStreamWriter`，DVPP VENC 硬件编码 BGR→NV12→H.264 Annex-B，通过 `popen` 将裸 H.264 流送入 ffmpeg（`-f h264 -c:v copy`）推 RTSP/RTMP；回调模式异步接收编码帧写管道；VENC 资源完整 RAII 管理（channel/stream/context/buffer）
+- **`AscendProcessRuntime`**（`include/infer/AscendProcessRuntime.h` + `src/infer/AscendProcessRuntime.cpp`）：ACL runtime 进程级 acquire/release，VENC 与推理后端共享同一 ACL 生命周期
+- **`BgrToNv12`**（`include/infer/BgrToNv12.h` + `src/infer/BgrToNv12.cpp`）：CPU 侧 BGR→NV12 颜色空间转换，供 VENC 输入使用
+- **`DrawAndStreamStage`** 重构：新增 `encoder` 配置项（`ffmpeg` / `ascend_venc`），Ascend 编码器路径自动选择 `AscendVencFfmpegMuxWriter`；`IStreamWriter` 抽象接口使两种编码器可插拔
+- **时间戳叠图**（`bf2e80b`）：`DetectionOverlay` 新增 `drawTimestamp()` 函数，在帧上叠加当前时间（精确到毫秒）+ 可选 stream_id；`DrawAndStreamStage` / `SinkFfplayStage` 均支持 `show_timestamp` / `include_stream_id` / `timestamp_pos_x/y` / `timestamp_font_scale/thickness` 配置项；`StageFactory` 从 `with` 参数透传
+- **VENC 回调健壮性**（`f9df4a7`）：增强错误日志（WARN + ERROR 双级别），对 CANN 507018（`ACL_ERROR_RT_AICPU_EXCEPTION`）给出 DVPP+VENC 资源竞争的诊断提示；回调内 pipe 写入加锁保护
+- **管道更新增强**（`9129f8d`）：`TaskManager` 支持 `update_pipeline` 命令，运行期更新 pipeline 的 nodes/edges；`UnixSocketServer` 新增对应端点与错误处理；补充 10+ 测试覆盖命令正确性与异常路径
+- **Edge drop policy 序列化**（`d72403e`）：`RuntimeState` 序列化/反序列化 edge 的 `capacity` + `drop_policy`；Go Store 回放 pipeline 时正确恢复 edge 配置；新增 Go 侧测试
+
+**配置示例**（`sink.stream` 节点 `with` 参数）：
+```yaml
+encoder: ascend_venc       # ffmpeg | ascend_venc
+show_timestamp: "true"
+include_stream_id: "true"
+timestamp_pos_x: "10"
+timestamp_pos_y: "30"
+```
+
+**测试**：`test_bgr_to_nv12.cpp`（3 个）、`test_stage_factory.cpp`（VENC writer 创建路径）、`test_unix_socket_server.cpp`（10+ 更新/错误用例）、Go `store_replay_pipeline_test.go` 全绿。
+
+---
+
+## Phase 32 — SAHI 切片推理管道（全景/高分辨率场景）
+
+**完成**：2026-05-12
+
+**目标**：为 7680×1870 等全景/超高分辨率视频引入 Slicing Aided Hyper Inference（SAHI）管道，将大图切片为可推理尺寸的 tile，推理后回拼为完整帧检测结果，大幅提升小目标召回率。
+
+**架构**：
+```
+source.rtsp → infer.sahiScheduler → infer.engine → post.sahiMerge → track.bytetrack → sink.stream
+```
+
+**新增**：
+
+- **`SahiSchedulerStage`**（`infer.sahiScheduler`）：
+  - 两种切片模式：**full pass**（按 `full_interval` 周期执行全图网格切片）和 **ROI pass**（利用上一轮检测结果，仅对有目标的区域做局部切片）
+  - 网格切片算法：`makeAxisStarts(full, tile, overlap)` 按水平/垂直方向独立计算起始位置，支持非对称重叠率（`x_overlap_ratio` / `y_overlap_ratio`）
+  - ROI 切片：从 `SahiRoiRegistry` 读取上一轮检测结果，按 `roi_expand_ratio` 扩展 bbox 为切片窗口，保证最小尺寸 `min_roi_width × min_roi_height`；去重排序后输出
+  - 切片限流：`max_tiles_per_frame` 防止超大帧产生过多 tile 压垮推理队列
+  - ROI 缺失/过期时自动 fallback：`roi_max_age_frames` 超龄或 ROI 为空时退回 full pass，`fallback_full_min_gap_frames` 节流防止连续 fallback 风暴
+  - 每帧输出 N 个 `EventEnvelope`，携带 `SahiTileInfo`（parent_frame_seq / tile 坐标 / full_w/h / expected_tiles / parent_frame 引用）
+  - 流级状态管理：每个 stream_id 独立计数与 tile_seq；60s 无帧自动清理过期流状态
+
+- **`SahiMergeStage`**（`post.sahiMerge`）：
+  - 按 `(stream_id, parent_frame_seq)` 聚合所有 tile 的推理结果
+  - tile 坐标到原图坐标的映射：`det.bbox += tile_offset`
+  - 双策略 NMS：IoU（交并比 > `merge_iou`）+ IoS（intersection over smaller area > `merge_ios`），解决大小框重叠时 IoU 偏低但实际冗余的问题
+  - 所有 tile 到齐后执行 NMS，输出完整帧检测结果，同时将结果写入 `SahiRoiRegistry` 供下一轮 ROI 切片使用
+  - `stale_timeout_ms` 超时清理：tile 未全部到齐时强制输出已有结果，防止丢帧导致内存泄漏
+
+- **`SahiRoiRegistry`**（`include/pipeline/stages/SahiRoiRegistry.h`）：全局线程安全注册表，存储每路流最近一次合并后的检测结果（`frame_seq` + `detections`），供 `SahiSchedulerStage` ROI 模式查询
+
+- **`SahiTileInfo`**（`include/pipeline/Event.h`）：tile 元数据结构体，贯穿 scheduler→infer→merge 完整链路
+
+- **`EdgeQueue` 增强**：新增 `currentSize()` 接口，`GraphExecutor` 支持 `infer.sahiScheduler` 与 `post.sahiMerge` stage 类型注册
+
+- **infer-web 前端**：`nodeTypes.ts` 新增 `infer.sahiScheduler` 与 `post.sahiMerge` 节点类型定义（含全部可配置参数），Pipeline 编辑器支持可视化配置 SAHI 参数
+
+**测试**：`test_sahi_scheduler.cpp` 12 个测试（makeAxisStarts 边界、重叠率、单 tile/多 tile、max_tiles 限流、ROI 切片路径）全绿；`test_stage_factory.cpp` 新增 SAHI stage 创建验证。
+
+**配置模板**：`config/config.npu.sahi.mvp.yaml`（双路全景流 SAHI MVP 配置）
+
+**关键决策**：
+- tile 共享原帧 `cv::Mat` 内存（`image(rect)` 是 ROI 引用，不做深拷贝），首个 tile 持有 `parent_frame` 引用保证原帧生命周期
+- IoS 补充 IoU：大目标框包含小目标框时 IoU 可能仅 0.3，但 IoS > 0.9，双策略避免漏合并
+- ROI 模式下 `min_roi_width/height` 保证切片不小于模型输入尺寸，避免无效推理
+
+---
+
+## 解码器时间戳诊断
+
+**完成**：2026-05-12
+
+**目标**：为解码器补充帧级时间戳追踪，便于定位端到端延迟瓶颈。
+
+**新增**：
+- **`DVPPDecoder`**：新增 `submit_ts_ns` 字段记录帧提交时间戳，解码回调中可计算单帧解码耗时
+- **`FFmpegDecoder`**：新增 `submit_mono_ns`，在 `avcodec_send_packet` 前记录，`avcodec_receive_frame` 后计算 `decode_duration_ms` 并输出 debug 日志，覆盖软解与硬解（NVDEC/CUVID）路径
+
+---
+
 ## 待办
 
 - [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
