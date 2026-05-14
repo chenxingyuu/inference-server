@@ -41,10 +41,15 @@ void DVPPDecoder::start(const StreamConfig& cfg, FrameCallback cb) {
         ctx_.cb        = std::move(cb);
     }
 
+    startup_done_ = false;
+    startup_ok_   = false;
     thread_ = std::thread(&DVPPDecoder::decodeLoop, this, cfg);
-    for (int i = 0; i < 1000 && !running_.load(); ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+
+    // Wait until decodeLoop signals its startup result (success or permanent failure).
+    // 15 s accommodates slow RTSP connections (stimeout=5s) plus DVPP channel init.
+    std::unique_lock<std::mutex> lk(startup_mu_);
+    startup_cv_.wait_for(lk, std::chrono::seconds(15),
+                         [this] { return startup_done_; });
 }
 
 void DVPPDecoder::startForTest(FrameCallback cb) {
@@ -271,6 +276,20 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         ~RuntimeGuard() { AscendProcessRuntime::release(); }
     } runtime_guard;
 
+    // On any early return, signal startup failure so start() doesn't wait forever.
+    // Cancelled (set to true) once we successfully enter the packet decode loop.
+    struct StartupFailGuard {
+        DVPPDecoder& dec;
+        bool cancelled{false};
+        ~StartupFailGuard() {
+            if (cancelled) return;
+            std::lock_guard<std::mutex> lk(dec.startup_mu_);
+            dec.startup_done_ = true;
+            dec.startup_ok_   = false;
+            dec.startup_cv_.notify_one();
+        }
+    } startup_guard{*this};
+
     aclError rc = aclrtSetDevice(device_id_);
     if (rc != ACL_SUCCESS) {
         LOG_ERROR("DVPPDecoder: aclrtSetDevice({}) failed: {}", device_id_,
@@ -386,6 +405,13 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     }
 
     running_.store(true, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lk(startup_mu_);
+        startup_done_ = true;
+        startup_ok_   = true;
+        startup_cv_.notify_one();
+    }
+    startup_guard.cancelled = true;
 
     // ── Single-packet DVPP submit helper ─────────────────────────────────
     //

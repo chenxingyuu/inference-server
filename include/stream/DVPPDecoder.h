@@ -7,6 +7,7 @@
 #include <acl/acl.h>
 #include <acl/ops/acl_dvpp.h>
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -145,6 +146,14 @@ private:
     };
     std::mutex               ctx_mu_;
     CallbackCtx              ctx_;
+
+    // Startup synchronization: decodeLoop signals once it knows it will produce
+    // frames (startup_ok_=true) or has given up (startup_ok_=false).
+    // Lets start() wait for the actual result instead of a fixed timeout.
+    std::mutex               startup_mu_;
+    std::condition_variable  startup_cv_;
+    bool                     startup_done_{false};
+    bool                     startup_ok_{false};
 
     // Process-wide channel counter — each DVPPDecoder gets a unique channel ID.
     static std::atomic<uint32_t> s_channel_counter_;
