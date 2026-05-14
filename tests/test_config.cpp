@@ -111,7 +111,7 @@ TEST(LoadConfig, ParsesFullYaml) {
     // server
     EXPECT_EQ(cfg.server.stream_pool_threads, 4);
     EXPECT_EQ(cfg.server.max_streams,         10);
-    EXPECT_EQ(cfg.server.management_port,     9090);
+    EXPECT_EQ(cfg.server.socket_path,         "/var/run/infer.sock");
     EXPECT_EQ(cfg.server.ffmpeg_log_level,    "fatal");
     EXPECT_EQ(cfg.server.log_level,           "debug");
 
@@ -662,9 +662,6 @@ TEST(LoadConfig, ParsePublishersBlock) {
     EXPECT_EQ(cfg.publishers.kafka.linger_ms, 15);
     EXPECT_EQ(cfg.publishers.kafka.compression, "gzip");
     EXPECT_EQ(cfg.publishers.kafka.queue_capacity, 5000);
-    EXPECT_EQ(cfg.publishers.kafka.heartbeat_topic, "pub-heartbeat");
-    EXPECT_EQ(cfg.publishers.kafka.heartbeat_interval_ms, 3000);
-    EXPECT_EQ(cfg.publishers.kafka.control_topic, "pub-control");
     EXPECT_TRUE(cfg.publishers.grpc.enabled);
     EXPECT_EQ(cfg.publishers.grpc.port, 50052);
     EXPECT_EQ(cfg.publishers.grpc.max_connections, 50);

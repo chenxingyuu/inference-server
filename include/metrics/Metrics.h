@@ -50,8 +50,7 @@ public:
     void incSinkFfplayFramesWritten(const std::string& stage_id);
     void incSinkFfplayFramesDropped(const std::string& stage_id);
 
-    // ── Phase 10: stream-level health gauges ──────────────────────────────────
-    // Updated by HeartbeatPublisher on each heartbeat interval (not on hot path).
+    // ── Stream-level health gauges (updated on each health poll) ─────────────
     void setStreamState(const std::string& stream_id, uint32_t state);
     void setStreamReconnectCount(const std::string& stream_id, uint32_t n);
     void setStreamConsecutiveFailures(const std::string& stream_id, uint32_t n);

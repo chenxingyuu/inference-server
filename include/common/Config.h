@@ -146,9 +146,6 @@ struct KafkaConfig {
     int         linger_ms{5};
     std::string compression{"lz4"};
     int         queue_capacity{10000};
-    std::string heartbeat_topic{"inference-heartbeat"};
-    int         heartbeat_interval_ms{5000};
-    std::string control_topic{"inference-control"};
 };
 
 struct GrpcConfig {

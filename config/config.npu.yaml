@@ -27,9 +27,6 @@ publishers:
     linger_ms: 5
     compression: "lz4"
     queue_capacity: 10000
-    heartbeat_topic: "inference-heartbeat"
-    heartbeat_interval_ms: 5000
-    control_topic: "inference-control"
   grpc:
     enabled: true
     port: 50051

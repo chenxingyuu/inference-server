@@ -37,9 +37,6 @@ publishers:
     linger_ms: 15
     compression: "gzip"
     queue_capacity: 5000
-    heartbeat_topic: "pub-heartbeat"
-    heartbeat_interval_ms: 3000
-    control_topic: "pub-control"
   grpc:
     enabled: true
     port: 50052

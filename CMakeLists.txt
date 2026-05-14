@@ -178,9 +178,6 @@ set(TRACKER_SOURCES
 set(PUBLISHER_SOURCES
     src/publisher/KafkaPublisher.cpp
     src/publisher/AttributePublisher.cpp
-    src/publisher/HeartbeatPublisher.cpp
-    src/publisher/ControlPublisher.cpp
-    src/publisher/ControlEventBus.cpp
     src/publisher/MultiPublisher.cpp
     $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:${CMAKE_SOURCE_DIR}/src/publisher/GrpcPublisher.cpp>
     $<$<BOOL:${BUILD_REDIS_PUBLISHER}>:${CMAKE_SOURCE_DIR}/src/publisher/RedisPublisher.cpp>
