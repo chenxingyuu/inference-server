@@ -2,6 +2,7 @@
 
 #include "stream/DVPPDecoder.h"
 #include "common/Logger.h"
+#include "infer/AscendProcessRuntime.h"
 
 #include <acl/acl.h>
 #include <acl/ops/acl_dvpp.h>
@@ -210,12 +211,14 @@ void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
     }
 
     AscendBuffer buf;
-    buf.device_id = fctx->device_id;
+    buf.device_id     = fctx->device_id;
+    buf.aligned_width  = static_cast<int>(fctx->aligned_width);
+    buf.aligned_height = static_cast<int>(fctx->aligned_height);
 
     if (output) {
         buf.yuv_device = acldvppGetPicDescData(output);
-        buf.width      = static_cast<int>(acldvppGetPicDescWidth(output));
-        buf.height     = static_cast<int>(acldvppGetPicDescHeight(output));
+        buf.width      = fctx->codec_width;
+        buf.height     = fctx->codec_height;
 
         // frame_ref deleter returns the YUV buffer and destroys the pic desc.
         acldvppPicDesc* desc_copy = output;
@@ -245,8 +248,14 @@ void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
               buf.width, buf.height, decode_ms);
 
     Frame f;
-    f.ascend_buf = std::move(buf);
-    f.is_ascend  = true;
+    f.ascend_buf          = std::move(buf);
+    f.is_ascend           = true;
+    f.meta.stream_id      = fctx->stream_id;
+    f.meta.frame_seq      = fctx->frame_seq;
+    f.meta.capture_ts     = fctx->capture_ts;
+    f.meta.capture_mono_ns = fctx->capture_mono_ns;
+    f.meta.orig_width     = fctx->codec_width;
+    f.meta.orig_height    = fctx->codec_height;
 
     if (fctx->cb) fctx->cb(std::move(f));
 
@@ -256,6 +265,12 @@ void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
 // ── Decode loop ────────────────────────────────────────────────────────────
 
 void DVPPDecoder::decodeLoop(StreamConfig cfg) {
+    // Ensure aclInit() has been called before any ACL API usage.
+    AscendProcessRuntime::acquire();
+    struct RuntimeGuard {
+        ~RuntimeGuard() { AscendProcessRuntime::release(); }
+    } runtime_guard;
+
     aclError rc = aclrtSetDevice(device_id_);
     if (rc != ACL_SUCCESS) {
         LOG_ERROR("DVPPDecoder: aclrtSetDevice({}) failed: {}", device_id_,
@@ -306,18 +321,34 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     aligned_width_  = (codec_width_  + 15u) & ~15u;
     aligned_height_ = (codec_height_ +  1u) & ~1u;
 
-    const AVCodecID codec_id = fmt_ctx->streams[video_idx]->codecpar->codec_id;
-    const bool is_h265 = (codec_id == AV_CODEC_ID_HEVC);
-    if (codec_id != AV_CODEC_ID_H264 && codec_id != AV_CODEC_ID_HEVC) {
-        LOG_ERROR("DVPPDecoder: unsupported codec {} (only H.264/H.265 supported)",
-                  static_cast<int>(codec_id));
+    // Ascend 310P VDEC hardware limits: [128, 4096] for both dimensions.
+    // Check after alignment so the error message reflects what DVPP actually sees.
+    static constexpr uint32_t kDvppMinDim = 128u;
+    static constexpr uint32_t kDvppMaxDim = 4096u;
+    if (aligned_width_  < kDvppMinDim || aligned_width_  > kDvppMaxDim ||
+        aligned_height_ < kDvppMinDim || aligned_height_ > kDvppMaxDim) {
+        LOG_ERROR("DVPPDecoder [{}]: resolution {}x{} (aligned {}x{}) out of DVPP range "
+                  "[{}–{}] × [{}–{}] — stream cannot use hardware decode",
+                  stream_id_, codec_width_, codec_height_,
+                  aligned_width_, aligned_height_,
+                  kDvppMinDim, kDvppMaxDim, kDvppMinDim, kDvppMaxDim);
         avformat_close_input(&fmt_ctx);
         aclrtDestroyContext(ctx_handle);
         return;
     }
 
-    LOG_INFO("DVPPDecoder: stream {}x{} (aligned {}x{}) codec={}",
-             codec_width_, codec_height_, aligned_width_, aligned_height_,
+    const AVCodecID codec_id = fmt_ctx->streams[video_idx]->codecpar->codec_id;
+    const bool is_h265 = (codec_id == AV_CODEC_ID_HEVC);
+    if (codec_id != AV_CODEC_ID_H264 && codec_id != AV_CODEC_ID_HEVC) {
+        LOG_ERROR("DVPPDecoder [{}]: unsupported codec {} (only H.264/H.265 supported)",
+                  stream_id_, static_cast<int>(codec_id));
+        avformat_close_input(&fmt_ctx);
+        aclrtDestroyContext(ctx_handle);
+        return;
+    }
+
+    LOG_INFO("DVPPDecoder [{}]: stream {}x{} (aligned {}x{}) codec={}",
+             stream_id_, codec_width_, codec_height_, aligned_width_, aligned_height_,
              is_h265 ? "H265" : "H264");
 
     if (!initChannel(device_id_, aligned_width_, aligned_height_, is_h265)) {
@@ -432,8 +463,23 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         FrameCtx* fctx;
         {
             std::lock_guard<std::mutex> lk(ctx_mu_);
-            fctx = new FrameCtx{ctx_.cb, ctx_.device_id, bitstream_dev,
-                                std::chrono::steady_clock::now()};
+            const auto now_steady = std::chrono::steady_clock::now();
+            fctx = new FrameCtx{};
+            fctx->cb              = ctx_.cb;
+            fctx->device_id       = ctx_.device_id;
+            fctx->bitstream_dev   = bitstream_dev;
+            fctx->submit_ts       = now_steady;
+            fctx->stream_id       = stream_id_;
+            fctx->frame_seq       = frame_seq_++;
+            fctx->aligned_width   = aligned_width_;
+            fctx->aligned_height  = aligned_height_;
+            fctx->codec_width     = static_cast<int>(codec_width_);
+            fctx->codec_height    = static_cast<int>(codec_height_);
+            fctx->capture_ts      = std::chrono::duration<double>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            fctx->capture_mono_ns = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    now_steady.time_since_epoch()).count());
         }
 
         aclError send_rc = ACL_ERROR_FAILURE;

@@ -96,14 +96,21 @@ public:
     }
 
     // Per-frame context heap-allocated for each aclvdecSendFrame call.
-    // Carries the bitstream device pointer so onDecoded can free it after DVPP
-    // has consumed the compressed data (async callback fires on DVPP worker thread).
+    // Carries everything onDecoded() needs to build a complete Frame with meta.
     // Exposed in public so unit tests can heap-allocate and pass to onDecoded().
     struct FrameCtx {
         FrameCallback  cb;
         int            device_id{0};
         void*          bitstream_dev{nullptr};
         std::chrono::steady_clock::time_point submit_ts;
+        std::string    stream_id;
+        uint64_t       frame_seq{0};
+        uint32_t       aligned_width{0};
+        uint32_t       aligned_height{0};
+        int            codec_width{0};
+        int            codec_height{0};
+        double         capture_ts{0.0};      // epoch seconds at submission
+        uint64_t       capture_mono_ns{0};   // steady_clock ns at submission
     };
 
 private:
@@ -141,6 +148,8 @@ private:
 
     // Process-wide channel counter — each DVPPDecoder gets a unique channel ID.
     static std::atomic<uint32_t> s_channel_counter_;
+
+    uint64_t                 frame_seq_{0};   // monotonic per-stream frame counter
 
     static constexpr int kOutputPoolSize = 4;
 };
