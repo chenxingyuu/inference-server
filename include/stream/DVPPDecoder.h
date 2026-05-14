@@ -112,6 +112,12 @@ public:
         int            codec_height{0};
         double         capture_ts{0.0};      // epoch seconds at submission
         uint64_t       capture_mono_ns{0};   // steady_clock ns at submission
+
+        // Output buffer pool slot management.
+        // pool_release: shared_ptr whose deleter returns the slot to the pool.
+        // slot_yuv_buf: device pointer inside the slot (written by DVPP, read by NPU).
+        std::shared_ptr<void> pool_release;
+        void*                 slot_yuv_buf{nullptr};
     };
 
 private:

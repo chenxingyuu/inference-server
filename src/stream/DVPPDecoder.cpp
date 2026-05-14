@@ -17,6 +17,87 @@ extern "C" {
 
 namespace infer {
 
+// ── Output buffer pool ─────────────────────────────────────────────────────
+//
+// CANN 6 requirement (hiascend.com/developer/techArticles/20231215-1):
+//   When a frame decode fails, DVPP resets the output acldvppPicDesc parameters
+//   to 0 (format=0 → YUV400, which VDEC doesn't support). All subsequent frames
+//   then fail with error 507018.
+//
+// Fix: pre-allocate a fixed pool of output slots. Before each aclvdecSendFrame,
+// explicitly reset format/width/height/stride on the slot's acldvppPicDesc.
+// On callback, the slot is returned to the pool (not freed) and reset again.
+// This bounds DVPP memory and prevents descriptor parameter corruption.
+struct OutputPool {
+    struct Slot {
+        void*           yuv_buf{nullptr};
+        acldvppPicDesc* pic_desc{nullptr};
+        bool            in_use{false};
+    };
+
+    static constexpr int kSize = 4;
+    std::array<Slot, kSize> slots{};
+    std::mutex              mu;
+    std::condition_variable cv;
+
+    uint32_t yuv_size{0};
+    uint32_t codec_w{0}, codec_h{0};
+    uint32_t aligned_w{0}, aligned_h{0};
+
+    bool init(uint32_t ys, uint32_t cw, uint32_t ch, uint32_t aw, uint32_t ah) {
+        yuv_size = ys; codec_w = cw; codec_h = ch; aligned_w = aw; aligned_h = ah;
+        for (auto& s : slots) {
+            if (acldvppMalloc(&s.yuv_buf, yuv_size) != ACL_SUCCESS || !s.yuv_buf)
+                return false;
+            s.pic_desc = acldvppCreatePicDesc();
+            if (!s.pic_desc) return false;
+            resetDesc(s);
+        }
+        return true;
+    }
+
+    void resetDesc(Slot& s) {
+        acldvppSetPicDescData(s.pic_desc, s.yuv_buf);
+        acldvppSetPicDescSize(s.pic_desc, yuv_size);
+        acldvppSetPicDescFormat(s.pic_desc, PIXEL_FORMAT_YUV_SEMIPLANAR_420);
+        acldvppSetPicDescWidth(s.pic_desc, codec_w);
+        acldvppSetPicDescHeight(s.pic_desc, codec_h);
+        acldvppSetPicDescWidthStride(s.pic_desc, aligned_w);
+        acldvppSetPicDescHeightStride(s.pic_desc, aligned_h);
+    }
+
+    // Block until a slot is available (up to timeout_ms). Returns nullptr on timeout.
+    Slot* acquire(int timeout_ms = 200) {
+        std::unique_lock<std::mutex> lk(mu);
+        cv.wait_for(lk, std::chrono::milliseconds(timeout_ms), [this] {
+            for (auto& s : slots) if (!s.in_use) return true;
+            return false;
+        });
+        for (auto& s : slots) {
+            if (!s.in_use) { s.in_use = true; return &s; }
+        }
+        return nullptr;
+    }
+
+    // Return slot to pool; reset desc params (mandatory per CANN 6 docs).
+    void release(Slot* s) {
+        resetDesc(*s);
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            s->in_use = false;
+        }
+        cv.notify_one();
+    }
+
+    void destroy() {
+        for (auto& s : slots) {
+            if (s.pic_desc) { acldvppDestroyPicDesc(s.pic_desc); s.pic_desc = nullptr; }
+            if (s.yuv_buf)  { acldvppFree(s.yuv_buf);            s.yuv_buf  = nullptr; }
+            s.in_use = false;
+        }
+    }
+};
+
 // Process-wide channel ID counter definition.
 std::atomic<uint32_t> DVPPDecoder::s_channel_counter_{0};
 
@@ -192,8 +273,8 @@ void DVPPDecoder::destroyChannel() {
 // internal thread when the hardware decode completes. Lifetime rules:
 //   - stream_desc (input): owned by DVPP until this callback; destroyed HERE.
 //   - bitstream_dev: device memory for compressed data; freed HERE via FrameCtx.
-//   - output YUV buffer (yuv_buf): owned by frame_ref; freed when Frame is dropped.
-//   - pic_desc (output): destroyed in the frame_ref deleter.
+//   - output pic_desc + yuv_buf: owned by the OutputPool slot; NOT freed here.
+//     frame_ref deleter calls pool_release (returns slot to pool and resets desc).
 //
 // user_data = heap-allocated FrameCtx* (deleted here after callback returns).
 
@@ -204,10 +285,7 @@ void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
     auto* fctx = static_cast<FrameCtx*>(user_data);
 
     // Destroy the stream descriptor — DVPP passes it back here after decode completes.
-    // This MUST happen here, not immediately after aclvdecSendFrame (the call is async).
-    if (input) {
-        acldvppDestroyStreamDesc(input);
-    }
+    if (input) acldvppDestroyStreamDesc(input);
 
     // Release the compressed bitstream device memory.
     if (fctx->bitstream_dev) {
@@ -216,35 +294,19 @@ void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
     }
 
     AscendBuffer buf;
-    buf.device_id     = fctx->device_id;
+    buf.device_id      = fctx->device_id;
     buf.aligned_width  = static_cast<int>(fctx->aligned_width);
     buf.aligned_height = static_cast<int>(fctx->aligned_height);
 
-    if (output) {
-        buf.yuv_device = acldvppGetPicDescData(output);
+    // output != nullptr means DVPP wrote decoded YUV into slot->yuv_buf.
+    // slot_yuv_buf is the pool slot's device memory; pool_release returns the
+    // slot to the pool (and resets its desc params) when the Frame is released.
+    // We do NOT call acldvppFree or acldvppDestroyPicDesc here — the pool owns them.
+    if (output && fctx->slot_yuv_buf) {
+        buf.yuv_device = fctx->slot_yuv_buf;
         buf.width      = fctx->codec_width;
         buf.height     = fctx->codec_height;
-
-        // frame_ref deleter returns the YUV buffer and destroys the pic desc.
-        acldvppPicDesc* desc_copy = output;
-        buf.frame_ref = std::shared_ptr<void>(
-            reinterpret_cast<void*>(1),
-            [desc_copy](void*) {
-                void* data = acldvppGetPicDescData(desc_copy);
-                if (data) {
-                    aclError rc = acldvppFree(data);
-                    if (rc != ACL_SUCCESS) {
-                        LOG_WARN("DVPPDecoder: acldvppFree in callback failed ({})",
-                                 static_cast<int>(rc));
-                    }
-                }
-                aclError rc = acldvppDestroyPicDesc(desc_copy);
-                if (rc != ACL_SUCCESS) {
-                    LOG_WARN("DVPPDecoder: acldvppDestroyPicDesc in callback failed ({})",
-                             static_cast<int>(rc));
-                }
-            }
-        );
+        buf.frame_ref  = std::move(fctx->pool_release);
     }
 
     const double decode_ms = std::chrono::duration<double, std::milli>(
@@ -253,14 +315,14 @@ void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
               buf.width, buf.height, decode_ms);
 
     Frame f;
-    f.ascend_buf          = std::move(buf);
-    f.is_ascend           = true;
-    f.meta.stream_id      = fctx->stream_id;
-    f.meta.frame_seq      = fctx->frame_seq;
-    f.meta.capture_ts     = fctx->capture_ts;
+    f.ascend_buf           = std::move(buf);
+    f.is_ascend            = true;
+    f.meta.stream_id       = fctx->stream_id;
+    f.meta.frame_seq       = fctx->frame_seq;
+    f.meta.capture_ts      = fctx->capture_ts;
     f.meta.capture_mono_ns = fctx->capture_mono_ns;
-    f.meta.orig_width     = fctx->codec_width;
-    f.meta.orig_height    = fctx->codec_height;
+    f.meta.orig_width      = fctx->codec_width;
+    f.meta.orig_height     = fctx->codec_height;
 
     if (fctx->cb) fctx->cb(std::move(f));
 
@@ -434,21 +496,49 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     }
     LOG_INFO("DVPPDecoder [{}]: starting packet decode loop", stream_id_);
 
+    // ── Pre-allocate output buffer pool ──────────────────────────────────
+    // CANN 6 requires output acldvppPicDesc params to be explicitly reset before
+    // each aclvdecSendFrame. Reusing pool slots (rather than malloc/free per frame)
+    // ensures params are always reset and bounds DVPP memory usage.
+    const uint32_t yuv_size = alignedYuvSize(codec_width_, codec_height_);
+    auto output_pool = std::make_shared<OutputPool>();
+    if (!output_pool->init(yuv_size, codec_width_, codec_height_,
+                           aligned_width_, aligned_height_)) {
+        LOG_ERROR("DVPPDecoder [{}]: failed to allocate output buffer pool", stream_id_);
+        if (bsf_ctx) av_bsf_free(&bsf_ctx);
+        avformat_close_input(&fmt_ctx);
+        destroyChannel();
+        if (first_connect) { aclrtDestroyContext(ctx_handle); return; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
+        continue;
+    }
+    LOG_INFO("DVPPDecoder [{}]: output pool allocated ({} slots, {} bytes each)",
+             stream_id_, OutputPool::kSize, yuv_size);
+
     // ── Single-packet DVPP submit helper ─────────────────────────────────
     //
     // CANN6 aclvdecSendFrame is ASYNCHRONOUS: the call returns as soon as the
     // frame is queued; the decode callback fires on a DVPP worker thread when
-    // the hardware finishes. Therefore:
-    //   - bitstream_dev lifetime: managed by FrameCtx, freed inside onDecoded
-    //   - yuv_buf lifetime: managed by frame_ref deleter in onDecoded
-    //   - NO aclrtSynchronizeDevice() needed here (it would not wait for VDEC callbacks)
+    // the hardware finishes. Lifetime rules:
+    //   - bitstream_dev: freed inside onDecoded (per-frame allocation)
+    //   - yuv_buf / pic_desc: owned by the output pool; returned via frame_ref deleter
     auto submitToDvpp = [&](AVPacket* raw_pkt) -> bool {
+        // Acquire a free output slot (blocks up to 200 ms if pool is full).
+        OutputPool::Slot* slot = output_pool->acquire(200);
+        if (!slot) {
+            LOG_WARN("DVPPDecoder [{}]: output pool exhausted, dropping frame", stream_id_);
+            return true;  // not a channel error — treat as soft drop
+        }
+        // Always reset desc params before use (mandatory per CANN 6 docs).
+        output_pool->resetDesc(*slot);
+
         void* bitstream_dev = nullptr;
         aclError bitstream_rc = acldvppMalloc(&bitstream_dev,
                                                static_cast<size_t>(raw_pkt->size));
         if (bitstream_rc != ACL_SUCCESS || !bitstream_dev) {
             LOG_ERROR("DVPPDecoder: bitstream acldvppMalloc failed (rc={}, size={})",
                       static_cast<int>(bitstream_rc), raw_pkt->size);
+            output_pool->release(slot);
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             return false;
         }
@@ -462,6 +552,7 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
             LOG_ERROR("DVPPDecoder: bitstream H2D copy failed (rc={}, size={})",
                       static_cast<int>(copy_rc), raw_pkt->size);
             acldvppFree(bitstream_dev);
+            output_pool->release(slot);
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             return false;
         }
@@ -470,6 +561,7 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         if (!stream_desc) {
             LOG_ERROR("DVPPDecoder: acldvppCreateStreamDesc returned null");
             acldvppFree(bitstream_dev);
+            output_pool->release(slot);
             return false;
         }
         acldvppSetStreamDescData(stream_desc, bitstream_dev);
@@ -477,35 +569,6 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         // EOS=0: explicitly mark each frame as not end-of-stream.
         // Some CANN6 driver builds treat the default (unset) as EOS, causing stalls.
         acldvppSetStreamDescEos(stream_desc, 0);
-
-        acldvppPicDesc* pic_desc = acldvppCreatePicDesc();
-        if (!pic_desc) {
-            LOG_ERROR("DVPPDecoder: acldvppCreatePicDesc returned null");
-            acldvppFree(bitstream_dev);
-            acldvppDestroyStreamDesc(stream_desc);
-            return false;
-        }
-
-        const uint32_t yuv_size = alignedYuvSize(codec_width_, codec_height_);
-        void* yuv_buf = nullptr;
-        aclError malloc_rc = acldvppMalloc(&yuv_buf, yuv_size);
-        if (malloc_rc != ACL_SUCCESS || !yuv_buf) {
-            LOG_ERROR("DVPPDecoder: acldvppMalloc for YUV failed (rc={}, size={})",
-                      static_cast<int>(malloc_rc), yuv_size);
-            acldvppDestroyPicDesc(pic_desc);
-            acldvppFree(bitstream_dev);
-            acldvppDestroyStreamDesc(stream_desc);
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            return false;
-        }
-
-        acldvppSetPicDescData(pic_desc, yuv_buf);
-        acldvppSetPicDescSize(pic_desc, yuv_size);
-        acldvppSetPicDescWidth(pic_desc, codec_width_);
-        acldvppSetPicDescHeight(pic_desc, codec_height_);
-        acldvppSetPicDescWidthStride(pic_desc, aligned_width_);
-        acldvppSetPicDescHeightStride(pic_desc, aligned_height_);
-        acldvppSetPicDescFormat(pic_desc, PIXEL_FORMAT_YUV_SEMIPLANAR_420);
 
         FrameCtx* fctx;
         {
@@ -529,6 +592,14 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
                     now_steady.time_since_epoch()).count());
         }
 
+        // pool_release: returned to pool (with desc reset) when the Frame is released.
+        fctx->slot_yuv_buf = slot->yuv_buf;
+        auto pool_sp = output_pool;
+        fctx->pool_release = std::shared_ptr<void>(
+            reinterpret_cast<void*>(1),
+            [pool_sp, slot](void*) { pool_sp->release(slot); }
+        );
+
         aclError send_rc = ACL_ERROR_FAILURE;
 #if CANN_VERSION_MAJOR >= 7
         auto vdec = dvpp_api_.vdecProcess ? dvpp_api_.vdecProcess
@@ -537,7 +608,7 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
                  AclVdecCb fn, void* ud) -> aclError {
                 return acldvppVdecProcess(ch, sd, pd, s, fn, ud);
             });
-        send_rc = vdec(channel_desc_, stream_desc, pic_desc, dvpp_stream_,
+        send_rc = vdec(channel_desc_, stream_desc, slot->pic_desc, dvpp_stream_,
                        &DVPPDecoder::onDecoded, fctx);
 #else
         auto vdec = dvpp_api_.vdecProcess ? dvpp_api_.vdecProcess
@@ -550,29 +621,27 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
             LOG_ERROR("DVPPDecoder: aclvdecCreateFrameConfig returned null");
             delete fctx;
             acldvppFree(bitstream_dev);
-            acldvppFree(yuv_buf);
-            acldvppDestroyPicDesc(pic_desc);
             acldvppDestroyStreamDesc(stream_desc);
+            output_pool->release(slot);
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             return false;
         }
-        send_rc = vdec(channel_desc_, stream_desc, pic_desc, frame_cfg, fctx);
+        send_rc = vdec(channel_desc_, stream_desc, slot->pic_desc, frame_cfg, fctx);
         aclvdecDestroyFrameConfig(frame_cfg);
 #endif
         if (send_rc != ACL_SUCCESS) {
             LOG_ERROR("DVPPDecoder: sendFrame failed (rc={})",
                       static_cast<int>(send_rc));
-            // On failure DVPP will NOT invoke the callback, so we own all resources.
+            // On failure DVPP will NOT invoke the callback — we own all resources.
             acldvppDestroyStreamDesc(stream_desc);
             acldvppFree(bitstream_dev);
             delete fctx;
-            acldvppFree(yuv_buf);
-            acldvppDestroyPicDesc(pic_desc);
+            output_pool->release(slot);
             return false;
         }
         // On success: stream_desc is owned by DVPP until the callback fires.
         //   onDecoded() destroys stream_desc via its `input` parameter.
-        //   bitstream_dev and yuv_buf/pic_desc are owned by FrameCtx / onDecoded.
+        //   slot is returned to the pool via fctx->pool_release when Frame is released.
         return true;
     };
 
@@ -633,7 +702,11 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     if (bsf_ctx) av_bsf_free(&bsf_ctx);
     avformat_close_input(&fmt_ctx);
     // aclvdecDestroyChannel blocks until all in-flight callbacks complete (CANN6 guarantee).
+    // Destroy channel first so no more callbacks can fire before we reset the pool.
     destroyChannel();
+    // Reset pool ownership here. Any frames still in the downstream pipeline keep the
+    // shared_ptr alive; their frame_ref deleter will call pool->release() safely.
+    output_pool.reset();
 
     if (!channel_poisoned || stop_flag_.load(std::memory_order_acquire)) {
         break;  // EOF or graceful stop — exit reconnect loop
