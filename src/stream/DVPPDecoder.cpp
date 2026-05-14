@@ -648,10 +648,17 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     // ── Packet decode loop ────────────────────────────────────────────────
     // On 5 consecutive sendFrame failures the channel is poisoned; break out
     // so the outer reconnect loop can tear down and recreate everything.
+    //
+    // Keyframe-first: DVPP cannot decode P/B frames without a prior reference
+    // frame. If non-IDR frames are submitted before the first IDR, DVPP
+    // silently discards them WITHOUT calling the decode callback. Since each
+    // submitted frame holds an output pool slot, a stream that starts mid-GOP
+    // will exhaust the pool instantly. Skip all packets until the first IDR.
     AVPacket* pkt = av_packet_alloc();
     int consecutive_failures = 0;
     constexpr int kMaxConsecutiveFailures = 5;
     bool channel_poisoned = false;
+    bool got_keyframe = false;
 
     while (!stop_flag_.load(std::memory_order_acquire)) {
         int ret = av_read_frame(fmt_ctx, pkt);
@@ -676,10 +683,30 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
             }
             // One input packet may yield one or more Annex-B output packets.
             while (av_bsf_receive_packet(bsf_ctx, pkt) == 0) {
+                if (!got_keyframe) {
+                    if (pkt->flags & AV_PKT_FLAG_KEY) {
+                        got_keyframe = true;
+                        LOG_INFO("DVPPDecoder [{}]: first keyframe seen, starting submission",
+                                 stream_id_);
+                    } else {
+                        av_packet_unref(pkt);
+                        continue;
+                    }
+                }
                 if (submitToDvpp(pkt)) send_ok = true;
                 av_packet_unref(pkt);
             }
         } else {
+            if (!got_keyframe) {
+                if (pkt->flags & AV_PKT_FLAG_KEY) {
+                    got_keyframe = true;
+                    LOG_INFO("DVPPDecoder [{}]: first keyframe seen, starting submission",
+                             stream_id_);
+                } else {
+                    av_packet_unref(pkt);
+                    continue;
+                }
+            }
             send_ok = submitToDvpp(pkt);
             av_packet_unref(pkt);
         }

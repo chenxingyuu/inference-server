@@ -105,20 +105,22 @@ static PipelineConfig pipelineFromJson(const json& j) {
 
 static json toJson(const TaskConfig& t) {
     return {
-        {"id",           t.id},
-        {"source_id",    t.source_id},
-        {"pipeline_id",  t.pipeline_id},
-        {"sample_fps",   t.sample_fps},
-        {"use_hwdec",    t.use_hwdec},
+        {"id",               t.id},
+        {"source_id",        t.source_id},
+        {"pipeline_id",      t.pipeline_id},
+        {"sample_fps",       t.sample_fps},
+        {"use_hwdec",        t.use_hwdec},
+        {"use_ascend_dvpp",  t.use_ascend_dvpp},
     };
 }
 static TaskConfig taskFromJson(const json& j) {
     TaskConfig t;
-    t.id          = j.value("id",          t.id);
-    t.source_id   = j.value("source_id",   t.source_id);
-    t.pipeline_id = j.value("pipeline_id", t.pipeline_id);
-    t.sample_fps  = j.value("sample_fps",  t.sample_fps);
-    t.use_hwdec   = j.value("use_hwdec",   t.use_hwdec);
+    t.id               = j.value("id",               t.id);
+    t.source_id        = j.value("source_id",        t.source_id);
+    t.pipeline_id      = j.value("pipeline_id",      t.pipeline_id);
+    t.sample_fps       = j.value("sample_fps",       t.sample_fps);
+    t.use_hwdec        = j.value("use_hwdec",        t.use_hwdec);
+    t.use_ascend_dvpp  = j.value("use_ascend_dvpp",  t.use_ascend_dvpp);
     return t;
 }
 
