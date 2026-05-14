@@ -166,7 +166,7 @@ private:
 
     uint64_t                 frame_seq_{0};   // monotonic per-stream frame counter
 
-    static constexpr int kOutputPoolSize = 8;
+    static constexpr int kOutputPoolSize = 32;
 };
 
 } // namespace infer

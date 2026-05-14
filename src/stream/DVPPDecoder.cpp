@@ -35,7 +35,7 @@ struct OutputPool {
         bool            in_use{false};
     };
 
-    static constexpr int kSize = 8;
+    static constexpr int kSize = 32;
     std::array<Slot, kSize> slots{};
     std::mutex              mu;
     std::condition_variable cv;
