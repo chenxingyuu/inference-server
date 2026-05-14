@@ -632,9 +632,8 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             return false;
         }
-        // Explicitly mark as NOT end-of-stream. The default may be 1, which
-        // signals EOS to DVPP and prevents the callback from firing.
-        aclvdecSetFrameConfigEos(frame_cfg, 0);
+        // EOS for VDEC in CANN 6 is signalled via acldvppSetStreamDescEos on the
+        // stream descriptor (set to 0 above), not via aclvdecFrameConfig.
         send_rc = vdec(channel_desc_, stream_desc, slot->pic_desc, frame_cfg, fctx);
         aclvdecDestroyFrameConfig(frame_cfg);
 #endif
