@@ -35,7 +35,7 @@ struct OutputPool {
         bool            in_use{false};
     };
 
-    static constexpr int kSize = 4;
+    static constexpr int kSize = 8;
     std::array<Slot, kSize> slots{};
     std::mutex              mu;
     std::condition_variable cv;
@@ -202,9 +202,13 @@ bool DVPPDecoder::initChannel(int device_id, uint32_t aligned_w, uint32_t aligne
     // when multiple streams run in parallel on the same device.
     aclvdecSetChannelDescChannelId(desc, channel_id_);
 
-    // Codec type: must match the actual bitstream (H.264 or H.265).
-    // CANN6 type is acldvppStreamFormat (H265_MAIN_LEVEL=0, H264_MAIN_LEVEL=2).
-    const acldvppStreamFormat en_type = is_h265 ? H265_MAIN_LEVEL : H264_MAIN_LEVEL;
+    // Codec type: must exactly match the actual bitstream profile.
+    // CANN6 silently drops frames (no callback) when the profile doesn't match.
+    // Surveillance cameras almost universally use H.264 High Profile (idc=100+).
+    // H264_HIGH_LEVEL is a superset and safely decodes Main/Baseline streams too.
+    // acldvppStreamFormat: H265_MAIN_LEVEL=0, H264_BASELINE_LEVEL=1,
+    //                       H264_MAIN_LEVEL=2, H264_HIGH_LEVEL=3.
+    const acldvppStreamFormat en_type = is_h265 ? H265_MAIN_LEVEL : H264_HIGH_LEVEL;
     aclvdecSetChannelDescEnType(desc, en_type);
 
     // Output pixel format: YUV420SP (NV12) — matches the static AIPP input_format.
@@ -283,6 +287,8 @@ void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
                              void*              user_data) {
     if (!user_data) return;
     auto* fctx = static_cast<FrameCtx*>(user_data);
+    LOG_INFO("DVPPDecoder [{}]: onDecoded fired seq={} output={}",
+             fctx->stream_id, fctx->frame_seq, output ? "ok" : "null");
 
     // Destroy the stream descriptor — DVPP passes it back here after decode completes.
     if (input) acldvppDestroyStreamDesc(input);
@@ -626,6 +632,9 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             return false;
         }
+        // Explicitly mark as NOT end-of-stream. The default may be 1, which
+        // signals EOS to DVPP and prevents the callback from firing.
+        aclvdecSetFrameConfigEos(frame_cfg, 0);
         send_rc = vdec(channel_desc_, stream_desc, slot->pic_desc, frame_cfg, fctx);
         aclvdecDestroyFrameConfig(frame_cfg);
 #endif
