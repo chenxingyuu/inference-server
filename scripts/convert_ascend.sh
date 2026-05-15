@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Convert an ONNX model to multiple Ascend .om files (one per batch size).
-# Usage: ./scripts/convert_ascend.sh <onnx_path> <model_name> [soc_version]
-# Example: ./scripts/convert_ascend.sh yolo11s.onnx yolo11s Ascend310P3
+# Embeds scripts/aipp.cfg (NV12 AIPP; default src 1920x1080, resize to 640x640).
+#
+# Run from the repository root so --insert_op_conf=aipp.cfg resolves:
+#   ./scripts/convert_ascend.sh yolo11s.onnx yolo11s Ascend310P3
 set -euo pipefail
 
 ONNX="${1:?Usage: $0 <onnx_path> <model_name> [soc_version]}"

@@ -216,12 +216,17 @@ publishers:
 
 ## Ascend 模型转换
 
+在仓库根目录执行（脚本会嵌入 `scripts/aipp.cfg`，默认 **1080p NV12 → 640×640** 模型输入，供 DVPP + AIPP 零拷贝路径使用）：
+
 ```bash
-# ONNX -> Ascend .om（自动导出 batch=1/4/8/16）
-bash scripts/convert_ascend.sh yolo11s.onnx yolo11s
+# ONNX -> Ascend .om（batch=1/4/8/16，含 NV12 AIPP）
+./scripts/convert_ascend.sh path/to/yolo11s.onnx yolo11s
 ```
 
 转换后可在 `models/` 得到 `*_b1.om / *_b4.om / *_b8.om / *_b16.om`，并在 `config/config.yaml` 的 `om_paths` 中配置。
+
+- 摄像头分辨率不是 1920×1080 时，先改 `scripts/aipp.cfg` 中的 `src_image_size_w/h`，再重新转换并替换部署中的 `.om`。
+- DVPP 硬解需 `use_ascend_dvpp: true` 且加载带 AIPP 的 om；详见 [docs/ascend-guide.md](docs/ascend-guide.md) §12–§13。
 
 ## 项目结构
 
