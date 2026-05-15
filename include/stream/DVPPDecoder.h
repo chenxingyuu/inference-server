@@ -123,7 +123,7 @@ public:
 private:
     void decodeLoop(StreamConfig cfg);
     bool initChannel(int device_id, uint32_t aligned_w, uint32_t aligned_h,
-                     bool is_h265 = false);
+                     int h264_profile, bool is_h265 = false);
     void destroyChannel();
 
     std::string              stream_id_;
