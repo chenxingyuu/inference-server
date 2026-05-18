@@ -24,6 +24,8 @@ public:
         bool         ingest_use_hwdec{false};
         bool         ingest_use_ascend_dvpp{false};
         int          ingest_ascend_device_id{0};
+        int          ingest_vpc_out_width{0};
+        int          ingest_vpc_out_height{0};
         std::shared_ptr<GpuDeviceAllocator> gpu_alloc; // null if hwdec disabled
     };
 

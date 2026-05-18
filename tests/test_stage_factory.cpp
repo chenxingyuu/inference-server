@@ -24,7 +24,9 @@ StageFactory::Context makeContext() {
     source.degraded_threshold = 5;
     source.max_reconnect_attempts = 5;
     static DummyPublisher publisher;
-    return StageFactory::Context{cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount, false, true, 2, nullptr};
+    return StageFactory::Context{
+        cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount,
+        false, true, 2, 640, 640, nullptr};
 }
 
 StageFactory::Context makeInferEngineContext() {
@@ -56,7 +58,9 @@ StageFactory::Context makeInferEngineContext() {
         m.input_shape.width = 640;
         cfg.models.push_back(m);
     }
-    return StageFactory::Context{cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount, false, false, 0, nullptr};
+    return StageFactory::Context{
+        cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount,
+        false, false, 0, 0, 0, nullptr};
 }
 
 } // namespace

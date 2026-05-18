@@ -11,7 +11,8 @@ namespace infer {
 SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src,
                                  int sample_fps, SamplingMode sampling_mode, bool use_hwdec,
                                  std::shared_ptr<GpuDeviceAllocator> gpu_alloc,
-                                 bool use_ascend_dvpp, int ascend_device_id)
+                                 bool use_ascend_dvpp, int ascend_device_id,
+                                 int vpc_out_width, int vpc_out_height)
     : id_(std::move(id))
     , source_(src)
     , sample_fps_(sample_fps)
@@ -22,10 +23,14 @@ SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src
 #ifdef BUILD_ASCEND_BACKEND
     , use_ascend_dvpp_(use_ascend_dvpp)
     , ascend_device_id_(ascend_device_id)
+    , vpc_out_width_(vpc_out_width)
+    , vpc_out_height_(vpc_out_height)
 #endif
 {
-    (void)use_ascend_dvpp;   // suppress unused-param warning when Ascend disabled
+    (void)use_ascend_dvpp;
     (void)ascend_device_id;
+    (void)vpc_out_width;
+    (void)vpc_out_height;
 }
 
 std::string SourceRtspStage::id() const { return id_; }
@@ -60,8 +65,10 @@ void SourceRtspStage::start() {
 
 #ifdef BUILD_ASCEND_BACKEND
     if (use_ascend_dvpp_) {
-        cfg.use_ascend_dvpp  = true;
-        cfg.ascend_device_id = ascend_device_id_;
+        cfg.use_ascend_dvpp       = true;
+        cfg.ascend_device_id      = ascend_device_id_;
+        cfg.ascend_vpc_out_width  = vpc_out_width_;
+        cfg.ascend_vpc_out_height = vpc_out_height_;
         dvpp_decoder_ = std::make_unique<DVPPDecoder>();
         dvpp_decoder_->start(cfg, frame_cb);
         if (dvpp_decoder_->running()) {

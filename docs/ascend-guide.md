@@ -499,10 +499,10 @@ YOLO 推理                          │
 
 ### AIPP 配置文件
 
-仓库内权威配置为 **`scripts/aipp.cfg`**（DVPP 1080p NV12 → 模型 640×640）。关键字段：
+仓库内权威配置为 **`scripts/aipp.cfg`**（默认 **640×640** NV12 输入）。关键字段：
 
-- `src_image_size_w/h`：必须与 DVPP / 摄像头输出分辨率一致
-- `resize: true` + `resize_output_w/h`：由 AIPP 硬件完成缩放（Path A 零拷贝必需）
+- `src_image_size_w/h`：必须与 **VPC 输出 / Path B pack 尺寸**一致（通常 640×640）
+- `resize: false`（CANN 6 静态 AIPP 勿开 resize；1080p→640 由 **DVPP VPC** 完成，见 §13）
 - `input_format: YUV420SP_U8`、`csc_switch: true`、`rbuv_swap_switch: true`
 
 ATC 转换时加入 `--insert_op_conf=scripts/aipp.cfg`（或从仓库根目录执行 `convert_ascend.sh`，其使用相对路径 `aipp.cfg`）。
@@ -513,14 +513,17 @@ ATC 转换时加入 `--insert_op_conf=scripts/aipp.cfg`（或从仓库根目录�
 
 ### 概述
 
-当同时启用 DVPP 硬件解码（`use_ascend_dvpp: true`）和 NV12 AIPP 模型时，推理服务器可以实现**端到端零 CPU 参与**的推理路径：
+当同时启用 DVPP 硬件解码（`use_ascend_dvpp: true`）和 NV12 AIPP 模型时，推理服务器可以实现**端到端零 CPU 参与**的推理路径（1080p 码流经 **DVPP VPC** 拉伸到模型输入尺寸，例如 640×640）：
 
 ```
 RTSP 码流
   │
   ▼  (FFmpeg 仅 demux，不解码)
-DVPP 硬件视频解码
-  │ YUV420SP (NV12) 在 HBM 设备内存
+DVPP 硬件视频解码 (VDEC)
+  │ YUV420SP (NV12) 1080p 在 HBM
+  ▼
+DVPP VPC 拉伸缩放 (1080p → 640×640，与 Path B cv::resize 语义一致)
+  │ YUV420SP (NV12) 640×640 在 HBM
   │  Frame.is_ascend = true
   ▼
 BatchScheduler / InferEngineWorkerStage
@@ -528,13 +531,13 @@ BatchScheduler / InferEngineWorkerStage
   ▼
 AscendBackend::infer() — Path A
   │
-  ├── batch=1：DVPP device ptr 直传 ACL dataset（无任何拷贝）
+  ├── batch=1：VPC 输出 device ptr 直传 ACL dataset（无 CPU 拷贝）
   │
   └── batch>1：D2D memcpy 拼接到临时 HBM buffer（仍在 NPU 侧）
          │
          ▼
-      AIPP（.om 内嵌）
-        NV12 → RGB → resize → 归一化 → NCHW
+      AIPP（.om 内嵌，src 640×640）
+        NV12 → RGB → 归一化 → NCHW
          │（NPU 硬件执行，无 CPU 参与）
          ▼
       YOLO NPU 推理
@@ -543,11 +546,13 @@ AscendBackend::infer() — Path A
       Kafka 结果发布
 ```
 
+VPC 目标尺寸由 pipeline 中 `infer.engine` 对应模型的 `input_shape.width/height` 自动注入 ingest（`TaskManager` → `StreamConfig.ascend_vpc_out_*`）。码流分辨率已与模型输入一致时跳过 VPC。
+
 ### 与原有路径对比
 
 | 路径 | CPU 操作 | 拷贝方向 | 适用场景 |
 |------|----------|----------|---------|
-| **Path A 零拷贝** | 无 | 无（batch=1）/ D2D（batch>1） | DVPP + NV12 AIPP 模型 |
+| **Path A 零拷贝** | 无 | 无（batch=1）/ D2D（batch>1） | DVPP VDEC + VPC + NV12 AIPP（src=640） |
 | Path B CPU BGR | `cv::resize` + `packBgrUint8` | H2D | AIPP 模型 + FFmpeg 软解 |
 | Path C CPU float | `cv::resize` + CHW 归一化 | H2D | 无 AIPP 模型 |
 
@@ -555,7 +560,7 @@ AscendBackend::infer() — Path A
 
 ### 模型编译（NV12 AIPP 配置）
 
-使用仓库根目录下的 **`scripts/aipp.cfg`**（默认 1920×1080 NV12 输入，AIPP 硬件缩放至 640×640）。完整内容见该文件；修改 `src_image_size_*` 后**必须重新 ATC 并替换部署中的 `.om`**。
+使用仓库根目录下的 **`scripts/aipp.cfg`**（默认 **640×640** NV12 输入，无 AIPP resize；1080p 全画面缩放由 **DVPP VPC** 完成）。修改 `src_image_size_*` 后**必须重新 ATC 并替换部署中的 `.om`**。
 
 在已 `source .../set_env.sh` 的转换机上，从仓库根目录执行：
 
@@ -581,9 +586,9 @@ for BS in 1 4 8 16; do
 done
 ```
 
-> **注意（Path A）**：`src_image_size_w/h` 必须与 DVPP 解码输出（摄像头 codec 分辨率）完全一致。`AscendBackend` 运行时不校验；不匹配时 CANN 报 `CheckUserAndModelSize: User input size is bigger than om size`，推理可继续但 **`dets` 恒为 0**（读到错位的 NV12）。
+> **注意（Path A）**：`src_image_size_w/h` 必须与 **VPC 输出**（通常 640×640）一致，而非摄像头 codec 分辨率。`AscendBackend` 在尺寸不一致时会 WARN；CANN 可能报 `CheckUserAndModelSize`，**`dets` 恒为 0**。
 >
-> **注意（Path B）**：FFmpeg 软解路径在 CPU 上 pack **640×640** NV12。若 om 的 AIPP `src` 为 1920×1080，需另编译 `src=640` 的 om，或改 pack 逻辑与 `aipp.cfg` 一致。
+> **注意（Path B）**：FFmpeg 软解在 CPU 上 pack **640×640** NV12；`aipp.cfg` 的 `src` 也应为 640×640。
 
 ### 配置（config.yaml）
 

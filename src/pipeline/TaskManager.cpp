@@ -137,12 +137,17 @@ bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
     if (!source || !pipeline_tpl) return false;
 
     bool use_ascend_dvpp = task.use_ascend_dvpp;
+    int  ingest_vpc_out_w = 0;
+    int  ingest_vpc_out_h = 0;
     if (use_ascend_dvpp) {
         const std::string infer_model_id = findInferModelId(*pipeline_tpl);
         const auto* model_cfg = infer_model_id.empty() ? nullptr : cfg_.findModel(infer_model_id);
         if (!model_cfg || model_cfg->backend != DeviceType::Ascend) {
             LOG_WARN("TaskManager: task {} use_ascend_dvpp but no Ascend model; fallback", task.id);
             use_ascend_dvpp = false;
+        } else {
+            ingest_vpc_out_w = model_cfg->input_shape.width;
+            ingest_vpc_out_h = model_cfg->input_shape.height;
         }
     }
 
@@ -160,6 +165,8 @@ bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
         task.use_hwdec,
         use_ascend_dvpp,
         task.ascend_device_id,
+        ingest_vpc_out_w,
+        ingest_vpc_out_h,
         nullptr};
     for (const auto& node : runtime_cfg.nodes)
         executor->addStage(StageFactory::create(node, ctx));

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Convert an ONNX model to multiple Ascend .om files (one per batch size).
-# Embeds scripts/aipp.cfg (NV12 AIPP; default src 1920x1080, resize to 640x640).
+# Embeds aipp.cfg (NV12 AIPP; default src 640x640). With use_ascend_dvpp, 1080p is
+# scaled on NPU via DVPP VPC before AIPP — see docs/ascend-guide.md §13.
 #
 # Run from the repository root so --insert_op_conf=aipp.cfg resolves:
 #   ./scripts/convert_ascend.sh yolo11s.onnx yolo11s Ascend310P3
