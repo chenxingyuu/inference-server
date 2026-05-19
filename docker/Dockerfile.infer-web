@@ -1,11 +1,12 @@
 # Stage 1: build
 FROM node:22-alpine AS builder
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
-COPY tools/infer-web/package.json tools/infer-web/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN corepack enable && corepack prepare pnpm@11.0.8 --activate
 COPY tools/infer-web/ .
-RUN pnpm run build
+# pnpm 11 allowBuilds (not committed; local dev uses package.json "pnpm.allowBuilds").
+RUN printf 'allowBuilds:\n  esbuild: true\n' > pnpm-workspace.yaml \
+  && pnpm install --frozen-lockfile \
+  && pnpm run build
 
 # Stage 2: serve
 FROM nginx:1.27-alpine

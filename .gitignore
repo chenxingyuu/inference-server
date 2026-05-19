@@ -43,3 +43,5 @@ tools/bin/
 
 dist/
 node_modules/
+# pnpm 11 auto-generates this on install; Docker creates a correct copy at build time.
+tools/infer-web/pnpm-workspace.yaml
