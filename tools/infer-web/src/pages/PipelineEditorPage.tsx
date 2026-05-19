@@ -19,6 +19,7 @@ import {
   createStageNode,
   fromPipelineInfo,
   loadLayout,
+  needsInitialAutoLayout,
   renameNodeId,
   saveLayout,
   toPipelineCreate,
@@ -61,6 +62,25 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<PipelineEdgeData>>([])
   const [selectedNode, setSelectedNode] = useState<Node<PipelineNodeData> | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<Edge<PipelineEdgeData> | null>(null)
+  const [fitViewRequest, setFitViewRequest] = useState(0)
+
+  const applyInitialGraph = useCallback(
+    (
+      graph: { nodes: Node<PipelineNodeData>[]; edges: Edge<PipelineEdgeData>[] },
+      layout: Record<string, { x: number; y: number }> | null,
+    ) => {
+      const nodeIds = graph.nodes.map((n) => n.id)
+      const nodes = needsInitialAutoLayout(layout, nodeIds)
+        ? applyDagreLayout(graph.nodes, graph.edges)
+        : graph.nodes
+      setNodes(nodes)
+      setEdges(graph.edges)
+      if (nodes.length > 0) {
+        setFitViewRequest((n) => n + 1)
+      }
+    },
+    [setNodes, setEdges],
+  )
 
   useEffect(() => {
     if (initialized || isLoading) return
@@ -68,9 +88,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
       const p = pipelines.find((x) => x.id === routeId)
       if (!p) return
       const layout = loadLayout(p.id)
-      const graph = fromPipelineInfo(p, layout)
-      setNodes(graph.nodes)
-      setEdges(graph.edges)
+      applyInitialGraph(fromPipelineInfo(p, layout), layout)
       setPipelineId(p.id)
       setInitialized(true)
       return
@@ -78,9 +96,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
     if (!isEdit && copyFrom) {
       const p = pipelines.find((x) => x.id === copyFrom)
       if (p) {
-        const graph = fromPipelineInfo(p, null)
-        setNodes(graph.nodes)
-        setEdges(graph.edges)
+        applyInitialGraph(fromPipelineInfo(p, null), null)
         setPipelineId(`${p.id}-copy`)
       }
       setInitialized(true)
@@ -96,8 +112,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
     routeId,
     copyFrom,
     pipelines,
-    setNodes,
-    setEdges,
+    applyInitialGraph,
   ])
 
   const validation = useMemo(
@@ -126,6 +141,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
 
   const handleAutoLayout = useCallback(() => {
     setNodes((nds) => applyDagreLayout(nds, edges))
+    setFitViewRequest((n) => n + 1)
   }, [edges, setNodes])
 
   const handleUpdateNodeData = useCallback(
@@ -255,6 +271,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
           onEdgesChange={onEdgesChange}
           setNodes={setNodes}
           setEdges={setEdges}
+          fitViewRequest={fitViewRequest}
           onSelectionChange={(node, edge) => {
             setSelectedNode(node)
             setSelectedEdge(edge)

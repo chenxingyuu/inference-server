@@ -1,8 +1,7 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import {
   ReactFlow,
   Background,
-  Controls,
   MiniMap,
   addEdge,
   useReactFlow,
@@ -19,6 +18,7 @@ import { wouldCreateCycle, createStageNode, PIPELINE_EDGE_TYPE } from '../../lib
 import { getHandleConfig } from '../../lib/pipelineHandles'
 import { getDragNodeType } from './NodePalette'
 import { pipelineEdgeTypes, pipelineNodeTypes } from './pipelineFlowTypes'
+import { PipelineFlowControls } from './PipelineFlowControls'
 import { useT } from '../../lib/i18n'
 
 interface PipelineCanvasProps {
@@ -29,6 +29,8 @@ interface PipelineCanvasProps {
   setNodes: React.Dispatch<React.SetStateAction<Node<PipelineNodeData>[]>>
   setEdges: React.Dispatch<React.SetStateAction<Edge<PipelineEdgeData>[]>>
   onSelectionChange: (node: Node<PipelineNodeData> | null, edge: Edge<PipelineEdgeData> | null) => void
+  /** Increment after pipeline graph is first loaded to fit viewport to all nodes. */
+  fitViewRequest?: number
 }
 
 export function PipelineCanvas({
@@ -39,10 +41,19 @@ export function PipelineCanvas({
   setNodes,
   setEdges,
   onSelectionChange,
+  fitViewRequest = 0,
 }: PipelineCanvasProps) {
   const { t } = useT()
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, fitView } = useReactFlow()
+
+  useEffect(() => {
+    if (!fitViewRequest || nodes.length === 0) return
+    const timer = window.setTimeout(() => {
+      void fitView({ padding: 0.2, maxZoom: 1, duration: 200 })
+    }, 50)
+    return () => window.clearTimeout(timer)
+  }, [fitViewRequest, nodes.length, fitView])
 
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
@@ -119,7 +130,6 @@ export function PipelineCanvas({
         isValidConnection={isValidConnection}
         nodeTypes={pipelineNodeTypes}
         edgeTypes={pipelineEdgeTypes}
-        fitView
         deleteKeyCode={['Backspace', 'Delete']}
         onNodesDelete={(deleted) => {
           const ids = new Set(deleted.map((n) => n.id))
@@ -131,15 +141,16 @@ export function PipelineCanvas({
             selEdges.length === 1 ? selEdges[0] : null,
           )
         }}
-        className="bg-bg-base"
+        className="pipeline-editor-flow bg-bg-base"
       >
         <Background gap={16} size={1} color="#1e2d3d" />
-        <Controls className="!bg-bg-surface !border-border !shadow-none" />
+        <PipelineFlowControls />
         <MiniMap
-          className="!bg-bg-surface !border-border"
+          className="pipeline-flow-minimap"
+          maskColor="rgba(11, 15, 20, 0.72)"
           nodeColor={(n) => {
             const d = n.data as PipelineNodeData
-            return d?.stageType?.startsWith('source') ? '#22c55e' : '#22d3ee'
+            return d?.stageType?.startsWith('source') ? '#34d399' : '#22d3ee'
           }}
         />
       </ReactFlow>

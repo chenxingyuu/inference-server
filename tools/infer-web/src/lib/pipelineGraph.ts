@@ -38,6 +38,16 @@ export function loadLayout(pipelineId: string): Record<string, { x: number; y: n
   }
 }
 
+/** True when we should run dagre instead of using saved or grid fallback positions. */
+export function needsInitialAutoLayout(
+  layout: Record<string, { x: number; y: number }> | null | undefined,
+  nodeIds: string[],
+): boolean {
+  if (nodeIds.length === 0) return false
+  if (!layout || Object.keys(layout).length === 0) return true
+  return nodeIds.some((id) => !layout[id])
+}
+
 export function saveLayout(pipelineId: string, nodes: Node<PipelineNodeData>[]): void {
   const positions: Record<string, { x: number; y: number }> = {}
   for (const n of nodes) {

@@ -23,6 +23,18 @@
     height: 100%;
   }
 
+  .pipeline-editor-flow .pipeline-flow-minimap {
+    background-color: #111720;
+    border: 1px solid #1e2d3d;
+    border-radius: 3px;
+    box-shadow: none;
+    margin: 12px;
+  }
+
+  .pipeline-editor-flow .pipeline-flow-minimap svg {
+    border-radius: 2px;
+  }
+
   .data-table { @apply w-full border-collapse; }
 
   .data-table th {
