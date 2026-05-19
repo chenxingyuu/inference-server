@@ -1,17 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import {
-  ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
-  type Edge,
-  type Node,
-} from '@xyflow/react'
+import { ReactFlowProvider, type Edge, type Node } from '@xyflow/react'
 import toast from 'react-hot-toast'
 import { Input } from '../components/ui/Field'
 import { NodePalette } from '../components/pipeline/NodePalette'
 import { PipelineCanvas } from '../components/pipeline/PipelineCanvas'
 import { PipelineInspector } from '../components/pipeline/PipelineInspector'
+import { usePipelineGraphHistory } from '../hooks/usePipelineGraphHistory'
 import { useAddPipeline, usePipelines, useUpdatePipeline } from '../hooks/queries'
 import { useT } from '../lib/i18n'
 import {
@@ -44,12 +39,44 @@ function formatValidationErrors(
     .join(' · ')
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    target.isContentEditable
+  )
+}
+
+function useDebouncedCommit(commitGraph: () => void, delayMs: number) {
+  const commitRef = useRef(commitGraph)
+  commitRef.current = commitGraph
+  const timerRef = useRef<ReturnType<typeof setTimeout>>()
+
+  const debouncedCommit = useCallback(() => {
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => commitRef.current(), delayMs)
+  }, [delayMs])
+
+  const flushCommit = useCallback(() => {
+    clearTimeout(timerRef.current)
+    commitRef.current()
+  }, [])
+
+  useEffect(() => () => clearTimeout(timerRef.current), [])
+
+  return { debouncedCommit, flushCommit }
+}
+
 function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
   const { t } = useT()
   const navigate = useNavigate()
   const { id: routeId } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const copyFrom = searchParams.get('copyFrom')
+  const editorRef = useRef<HTMLDivElement>(null)
 
   const { data: pipelines = [], isLoading } = usePipelines()
   const add = useAddPipeline()
@@ -58,11 +85,43 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
   const isEdit = mode === 'edit'
   const [pipelineId, setPipelineId] = useState('')
   const [initialized, setInitialized] = useState(false)
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<PipelineNodeData>>([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge<PipelineEdgeData>>([])
   const [selectedNode, setSelectedNode] = useState<Node<PipelineNodeData> | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<Edge<PipelineEdgeData> | null>(null)
   const [fitViewRequest, setFitViewRequest] = useState(0)
+
+  const {
+    nodes,
+    edges,
+    setNodes,
+    setEdges,
+    onNodesChange,
+    onEdgesChange,
+    setGraph,
+    resetHistory,
+    commitGraph,
+    scheduleCommit,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    onNodeDragStart,
+    onNodeDragStop,
+  } = usePipelineGraphHistory()
+
+  const { debouncedCommit, flushCommit } = useDebouncedCommit(commitGraph, 400)
+
+  useEffect(() => {
+    if (selectedNode) {
+      const next = nodes.find((n) => n.id === selectedNode.id)
+      if (!next) setSelectedNode(null)
+      else if (next !== selectedNode) setSelectedNode(next)
+    }
+    if (selectedEdge) {
+      const next = edges.find((e) => e.id === selectedEdge.id)
+      if (!next) setSelectedEdge(null)
+      else if (next !== selectedEdge) setSelectedEdge(next)
+    }
+  }, [nodes, edges, selectedNode, selectedEdge])
 
   const applyInitialGraph = useCallback(
     (
@@ -70,16 +129,16 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
       layout: Record<string, { x: number; y: number }> | null,
     ) => {
       const nodeIds = graph.nodes.map((n) => n.id)
-      const nodes = needsInitialAutoLayout(layout, nodeIds)
+      const nextNodes = needsInitialAutoLayout(layout, nodeIds)
         ? applyDagreLayout(graph.nodes, graph.edges)
         : graph.nodes
-      setNodes(nodes)
-      setEdges(graph.edges)
-      if (nodes.length > 0) {
+      setGraph(nextNodes, graph.edges)
+      resetHistory(nextNodes, graph.edges)
+      if (nextNodes.length > 0) {
         setFitViewRequest((n) => n + 1)
       }
     },
-    [setNodes, setEdges],
+    [setGraph, resetHistory],
   )
 
   useEffect(() => {
@@ -115,6 +174,36 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
     applyInitialGraph,
   ])
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!editorRef.current?.contains(document.activeElement) && document.activeElement !== document.body) {
+        return
+      }
+      if (isEditableTarget(e.target)) return
+
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+        return
+      }
+      if (e.key === 'z' && e.shiftKey) {
+        e.preventDefault()
+        redo()
+        return
+      }
+      if (e.key === 'y' && !e.shiftKey) {
+        e.preventDefault()
+        redo()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [undo, redo])
+
   const validation = useMemo(
     () => validatePipelineGraph(pipelineId, nodes, edges),
     [pipelineId, nodes, edges],
@@ -134,26 +223,44 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
         { x: 120 + (offset % 5) * 40, y: 120 + Math.floor(offset / 5) * 90 },
         existingIds,
       )
-      setNodes((nds) => [...nds, newNode])
+      setNodes((nds) => {
+        const nextNodes = [...nds, newNode]
+        commitGraph({ nodes: nextNodes, edges })
+        return nextNodes
+      })
     },
-    [nodes, setNodes],
+    [nodes, edges, setNodes, commitGraph],
   )
 
   const handleAutoLayout = useCallback(() => {
-    setNodes((nds) => applyDagreLayout(nds, edges))
+    setNodes((nds) => {
+      const nextNodes = applyDagreLayout(nds, edges)
+      commitGraph({ nodes: nextNodes, edges })
+      return nextNodes
+    })
     setFitViewRequest((n) => n + 1)
-  }, [edges, setNodes])
+  }, [edges, setNodes, commitGraph])
 
   const handleUpdateNodeData = useCallback(
-    (nodeId: string, data: PipelineNodeData) => {
-      setNodes((nds) =>
-        nds.map((n) => (n.id === nodeId ? { ...n, data } : n)),
-      )
+    (nodeId: string, data: PipelineNodeData, options?: { commit?: 'immediate' | 'debounced' }) => {
+      if (options?.commit === 'immediate') {
+        flushCommit()
+      }
+      setNodes((nds) => {
+        const nextNodes = nds.map((n) => (n.id === nodeId ? { ...n, data } : n))
+        if (options?.commit === 'immediate') {
+          commitGraph({ nodes: nextNodes, edges })
+        }
+        return nextNodes
+      })
       if (selectedNode?.id === nodeId) {
         setSelectedNode((prev) => (prev ? { ...prev, data } : null))
       }
+      if (options?.commit !== 'immediate') {
+        debouncedCommit()
+      }
     },
-    [setNodes, selectedNode?.id],
+    [setNodes, edges, selectedNode?.id, debouncedCommit, flushCommit, commitGraph],
   )
 
   const handleRenameNode = useCallback(
@@ -170,8 +277,9 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
       if (selectedNode?.id === oldId) {
         setSelectedNode(nextNodes.find((n) => n.id === trimmed) ?? null)
       }
+      commitGraph({ nodes: nextNodes, edges: nextEdges })
     },
-    [nodes, edges, setNodes, setEdges, selectedNode?.id, t],
+    [nodes, edges, setNodes, setEdges, selectedNode?.id, t, commitGraph],
   )
 
   const handleUpdateEdgeData = useCallback(
@@ -182,8 +290,9 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
       if (selectedEdge?.id === edgeId) {
         setSelectedEdge((prev) => (prev ? { ...prev, data } : null))
       }
+      debouncedCommit()
     },
-    [setEdges, selectedEdge?.id],
+    [setEdges, selectedEdge?.id, debouncedCommit],
   )
 
   const handleSave = () => {
@@ -227,7 +336,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-0px)] -m-0">
+    <div ref={editorRef} className="flex flex-col h-[calc(100vh-0px)] -m-0" tabIndex={-1}>
       <header className="flex-shrink-0 flex items-center gap-4 px-4 py-3 border-b border-border bg-bg-surface">
         <Link to="/pipelines" className="text-[12px] text-ink-muted hover:text-accent">
           ← {t('pipelines.editor.back')}
@@ -275,6 +384,13 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
           setEdges={setEdges}
           fitViewRequest={fitViewRequest}
           onAutoLayout={handleAutoLayout}
+          onGraphCommit={(snap) => (snap ? commitGraph(snap) : scheduleCommit())}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDragStop={onNodeDragStop}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={canUndo}
+          canRedo={canRedo}
           onSelectionChange={(node, edge) => {
             setSelectedNode(node)
             setSelectedEdge(edge)

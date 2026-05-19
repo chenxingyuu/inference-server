@@ -30,9 +30,20 @@ function ControlButton({
 interface PipelineFlowControlsProps {
   onAutoLayout: () => void
   layoutDisabled?: boolean
+  onUndo: () => void
+  onRedo: () => void
+  canUndo: boolean
+  canRedo: boolean
 }
 
-export function PipelineFlowControls({ onAutoLayout, layoutDisabled = false }: PipelineFlowControlsProps) {
+export function PipelineFlowControls({
+  onAutoLayout,
+  layoutDisabled = false,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+}: PipelineFlowControlsProps) {
   const { t } = useT()
   const { zoomIn, zoomOut, fitView } = useReactFlow()
 
@@ -51,7 +62,21 @@ export function PipelineFlowControls({ onAutoLayout, layoutDisabled = false }: P
         >
           <FitIcon />
         </ControlButton>
-        <div className="border-t border-border/80 pt-0.5 mt-0.5">
+        <div className="border-t border-border/80 pt-0.5 mt-0.5 flex flex-col gap-0.5">
+          <ControlButton
+            label={t('pipelines.editor.undo')}
+            onClick={onUndo}
+            disabled={!canUndo}
+          >
+            <UndoIcon />
+          </ControlButton>
+          <ControlButton
+            label={t('pipelines.editor.redo')}
+            onClick={onRedo}
+            disabled={!canRedo}
+          >
+            <RedoIcon />
+          </ControlButton>
           <ControlButton
             label={t('pipelines.editor.auto_layout')}
             onClick={onAutoLayout}
@@ -88,6 +113,36 @@ function FitIcon() {
         d="M3.5 5V3.5H5M9 3.5H10.5V5M10.5 9V10.5H9M5 10.5H3.5V9"
         stroke="currentColor"
         strokeWidth="1.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  )
+}
+
+function UndoIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden className="text-ink-secondary">
+      <path
+        d="M4 5.5H9a2.5 2.5 0 1 1 0 5H8M4 5.5L5.75 3.75M4 5.5L5.75 7.25"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  )
+}
+
+function RedoIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden className="text-ink-secondary">
+      <path
+        d="M10 5.5H5a2.5 2.5 0 1 0 0 5H6M10 5.5L8.25 3.75M10 5.5L8.25 7.25"
+        stroke="currentColor"
+        strokeWidth="1.2"
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"

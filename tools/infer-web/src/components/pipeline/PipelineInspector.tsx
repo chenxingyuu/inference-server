@@ -14,7 +14,11 @@ type WithPair = { k: string; v: string }
 interface PipelineInspectorProps {
   selectedNode: Node<PipelineNodeData> | null
   selectedEdge: Edge<PipelineEdgeData> | null
-  onUpdateNode: (nodeId: string, data: PipelineNodeData) => void
+  onUpdateNode: (
+    nodeId: string,
+    data: PipelineNodeData,
+    options?: { commit?: 'immediate' | 'debounced' },
+  ) => void
   onRenameNode: (oldId: string, newId: string) => void
   onUpdateEdge: (edgeId: string, data: PipelineEdgeData) => void
 }
@@ -103,7 +107,11 @@ function NodeInspectorForm({
   onRenameNode,
 }: {
   node: Node<PipelineNodeData>
-  onUpdateNode: (nodeId: string, data: PipelineNodeData) => void
+  onUpdateNode: (
+    nodeId: string,
+    data: PipelineNodeData,
+    options?: { commit?: 'immediate' | 'debounced' },
+  ) => void
   onRenameNode: (oldId: string, newId: string) => void
 }) {
   const { t } = useT()
@@ -124,19 +132,22 @@ function NodeInspectorForm({
 
   const selectValue = getNodeTypeDef(data.stageType) ? data.stageType : (data.stageType ? CUSTOM : '')
 
-  const applyData = (patch: Partial<PipelineNodeData>) => {
-    onUpdateNode(node.id, { ...data, ...patch })
+  const applyData = (
+    patch: Partial<PipelineNodeData>,
+    options?: { commit?: 'immediate' | 'debounced' },
+  ) => {
+    onUpdateNode(node.id, { ...data, ...patch }, options)
   }
 
   const handlePairsChange = (ps: WithPair[]) => {
     setPairs(ps)
-    applyData({ with: pairsToWith(ps) })
+    applyData({ with: pairsToWith(ps) }, { commit: 'immediate' })
   }
 
   const handleTypeSelect = (val: string) => {
     if (val === CUSTOM) {
       setCustomType('')
-      applyData({ stageType: '' })
+      applyData({ stageType: '' }, { commit: 'immediate' })
       return
     }
     const def = getNodeTypeDef(val)!
@@ -144,11 +155,14 @@ function NodeInspectorForm({
     setPairs(newPairs)
     const autoId = data.stageId || val.replaceAll('.', '_')
     setLocalId(autoId)
-    applyData({
-      stageType: val,
-      stageId: autoId,
-      with: pairsToWith(newPairs),
-    })
+    applyData(
+      {
+        stageType: val,
+        stageId: autoId,
+        with: pairsToWith(newPairs),
+      },
+      { commit: 'immediate' },
+    )
     if (autoId !== node.id) onRenameNode(node.id, autoId)
   }
 
@@ -198,7 +212,7 @@ function NodeInspectorForm({
             value={customType}
             onChange={(e) => {
               setCustomType(e.target.value)
-              applyData({ stageType: e.target.value })
+              applyData({ stageType: e.target.value }, { commit: 'debounced' })
             }}
             className="text-[11px]"
           />

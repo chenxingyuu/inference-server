@@ -13,6 +13,7 @@ import {
   type OnNodesChange,
 } from '@xyflow/react'
 import toast from 'react-hot-toast'
+import type { GraphSnapshot } from '../../lib/pipelineGraphHistory'
 import type { PipelineEdgeData, PipelineNodeData } from '../../lib/pipelineGraph'
 import { wouldCreateCycle, createStageNode, PIPELINE_EDGE_TYPE } from '../../lib/pipelineGraph'
 import { getHandleConfig } from '../../lib/pipelineHandles'
@@ -29,9 +30,15 @@ interface PipelineCanvasProps {
   setNodes: React.Dispatch<React.SetStateAction<Node<PipelineNodeData>[]>>
   setEdges: React.Dispatch<React.SetStateAction<Edge<PipelineEdgeData>[]>>
   onSelectionChange: (node: Node<PipelineNodeData> | null, edge: Edge<PipelineEdgeData> | null) => void
-  /** Increment after pipeline graph is first loaded to fit viewport to all nodes. */
   fitViewRequest?: number
   onAutoLayout: () => void
+  onGraphCommit: (snapshot?: GraphSnapshot) => void
+  onNodeDragStart: () => void
+  onNodeDragStop: () => void
+  onUndo: () => void
+  onRedo: () => void
+  canUndo: boolean
+  canRedo: boolean
 }
 
 export function PipelineCanvas({
@@ -44,6 +51,13 @@ export function PipelineCanvas({
   onSelectionChange,
   fitViewRequest = 0,
   onAutoLayout,
+  onGraphCommit,
+  onNodeDragStart,
+  onNodeDragStop,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }: PipelineCanvasProps) {
   const { t } = useT()
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
@@ -80,9 +94,13 @@ export function PipelineCanvas({
           drop_policy: 'drop_oldest',
         },
       }
-      setEdges((eds) => addEdge(newEdge, eds))
+      setEdges((eds) => {
+        const nextEdges = addEdge(newEdge, eds)
+        onGraphCommit({ nodes, edges: nextEdges })
+        return nextEdges
+      })
     },
-    [edges, setEdges, t],
+    [edges, nodes, setEdges, onGraphCommit, t],
   )
 
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -98,9 +116,13 @@ export function PipelineCanvas({
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
       const existingIds = new Set(nodes.map((n) => n.id))
       const newNode = createStageNode(nodeType, position, existingIds)
-      setNodes((nds) => [...nds, newNode])
+      setNodes((nds) => {
+        const nextNodes = [...nds, newNode]
+        onGraphCommit({ nodes: nextNodes, edges })
+        return nextNodes
+      })
     },
-    [nodes, screenToFlowPosition, setNodes],
+    [nodes, edges, screenToFlowPosition, setNodes, onGraphCommit],
   )
 
   const isValidConnection = useCallback(
@@ -129,6 +151,8 @@ export function PipelineCanvas({
         onConnect={onConnect}
         onDrop={onDrop}
         onDragOver={onDragOver}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
         isValidConnection={isValidConnection}
         nodeTypes={pipelineNodeTypes}
         edgeTypes={pipelineEdgeTypes}
@@ -136,6 +160,7 @@ export function PipelineCanvas({
         onNodesDelete={(deleted) => {
           const ids = new Set(deleted.map((n) => n.id))
           setEdges((eds) => eds.filter((e) => !ids.has(e.source) && !ids.has(e.target)))
+          onGraphCommit()
         }}
         onSelectionChange={({ nodes: selNodes, edges: selEdges }) => {
           onSelectionChange(
@@ -146,7 +171,14 @@ export function PipelineCanvas({
         className="pipeline-editor-flow bg-bg-base"
       >
         <Background gap={16} size={1} color="#1e2d3d" />
-        <PipelineFlowControls onAutoLayout={onAutoLayout} layoutDisabled={nodes.length === 0} />
+        <PipelineFlowControls
+          onAutoLayout={onAutoLayout}
+          layoutDisabled={nodes.length === 0}
+          onUndo={onUndo}
+          onRedo={onRedo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+        />
         <MiniMap
           className="pipeline-flow-minimap"
           maskColor="rgba(11, 15, 20, 0.72)"
