@@ -173,6 +173,29 @@ const en = {
   'pipelines.editor.error.pipeline_cycle': 'Pipeline graph must be acyclic (DAG).',
   'pipelines.editor.error.sink_stream_output_url': 'sink.stream requires output_url.',
 
+  'pipelines.node.category.source':      'Source',
+  'pipelines.node.category.decode':      'Decode',
+  'pipelines.node.category.infer':       'Inference',
+  'pipelines.node.category.postprocess': 'Post-process',
+  'pipelines.node.category.track':       'Tracking',
+  'pipelines.node.category.join':        'Join',
+  'pipelines.node.category.archive':     'Archive',
+  'pipelines.node.category.sink':        'Sink',
+
+  'pipelines.node.type.source.rtsp':         'RTSP source',
+  'pipelines.node.type.source.file':         'File source',
+  'pipelines.node.type.decode.ffmpeg':       'FFmpeg decode',
+  'pipelines.node.type.infer.sahiScheduler': 'SAHI scheduler',
+  'pipelines.node.type.infer.engine':        'Inference engine',
+  'pipelines.node.type.post.sahiMerge':      'SAHI merge',
+  'pipelines.node.type.postprocess.yolo':    'YOLO post-process',
+  'pipelines.node.type.track.bytetrack':     'ByteTrack',
+  'pipelines.node.type.join.byFrameId':      'Join by frame ID',
+  'pipelines.node.type.archive.raw':         'Raw archive',
+  'pipelines.node.type.sink.publish':        'Publish sink',
+  'pipelines.node.type.sink.ffplay':         'FFplay preview',
+  'pipelines.node.type.sink.stream':         'Stream output',
+
   'tasks.title':               'Tasks',
   'tasks.subtitle_stats':      '{total} total · {running} running',
   'tasks.subtitle_empty':      'Bind a source to a pipeline and start inference',
@@ -369,6 +392,29 @@ const zh: Record<keyof typeof en, string> = {
   'pipelines.editor.error.pipeline_cycle': '流水线必须是有向无环图（DAG）。',
   'pipelines.editor.error.sink_stream_output_url': 'sink.stream 需要配置 output_url。',
 
+  'pipelines.node.category.source':      '数据源',
+  'pipelines.node.category.decode':      '解码',
+  'pipelines.node.category.infer':       '推理',
+  'pipelines.node.category.postprocess': '后处理',
+  'pipelines.node.category.track':       '跟踪',
+  'pipelines.node.category.join':        '合并',
+  'pipelines.node.category.archive':     '归档',
+  'pipelines.node.category.sink':        '输出',
+
+  'pipelines.node.type.source.rtsp':         'RTSP 源流',
+  'pipelines.node.type.source.file':         '文件源',
+  'pipelines.node.type.decode.ffmpeg':       'FFmpeg 解码',
+  'pipelines.node.type.infer.sahiScheduler': 'SAHI 分块调度',
+  'pipelines.node.type.infer.engine':        '推理引擎',
+  'pipelines.node.type.post.sahiMerge':      'SAHI 合并',
+  'pipelines.node.type.postprocess.yolo':    'YOLO 后处理',
+  'pipelines.node.type.track.bytetrack':     'ByteTrack 跟踪',
+  'pipelines.node.type.join.byFrameId':      '按帧 ID 合并',
+  'pipelines.node.type.archive.raw':         '原始归档',
+  'pipelines.node.type.sink.publish':        '发布输出',
+  'pipelines.node.type.sink.ffplay':         'FFplay 预览',
+  'pipelines.node.type.sink.stream':         '流媒体输出',
+
   'tasks.title':               '任务',
   'tasks.subtitle_stats':      '共 {total} 个 · {running} 个运行中',
   'tasks.subtitle_empty':      '绑定数据源与流水线以启动推理',
@@ -398,7 +444,7 @@ const zh: Record<keyof typeof en, string> = {
 
 // ─── Context & Hook ────────────────────────────────────────────────────────
 
-type Key = keyof typeof en
+export type Key = keyof typeof en
 
 interface I18nCtx {
   lang: Lang

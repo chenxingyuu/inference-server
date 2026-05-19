@@ -1,10 +1,13 @@
 import { memo } from 'react'
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import type { PipelineNodeData } from '../../lib/pipelineGraph'
+import { nodeCategoryLabel, nodeTypeLabel } from '../../lib/nodeTypeI18n'
 import { getCategoryColor, getHandleConfig } from '../../lib/pipelineHandles'
 import { getNodeTypeDef } from '../../lib/nodeTypes'
+import { useT } from '../../lib/i18n'
 
 function PipelineNodeComponent({ data, selected }: NodeProps<Node<PipelineNodeData>>) {
+  const { t } = useT()
   const stageType = data.stageType || '—'
   const stageId = data.stageId || '—'
   const handles = getHandleConfig(stageType)
@@ -29,13 +32,13 @@ function PipelineNodeComponent({ data, selected }: NodeProps<Node<PipelineNodeDa
       )}
       <div className="px-3 py-2">
         <div className="text-[10px] uppercase tracking-wide text-ink-muted truncate">
-          {category || 'node'}
+          {nodeCategoryLabel(t, category)}
         </div>
-        <div className="font-mono text-[12px] text-ink-primary truncate" title={stageId}>
+        <div className="text-[12px] text-ink-primary truncate font-medium" title={stageId}>
           {stageId}
         </div>
-        <div className="font-mono text-[10px] text-ink-secondary truncate" title={stageType}>
-          {stageType}
+        <div className="text-[10px] text-ink-secondary truncate" title={stageType}>
+          {nodeTypeLabel(t, stageType)}
         </div>
       </div>
       {handles.outputs !== 'none' && (
