@@ -8,7 +8,7 @@ import {
   type Node,
 } from '@xyflow/react'
 import toast from 'react-hot-toast'
-import { Field, Input } from '../components/ui/Field'
+import { Input } from '../components/ui/Field'
 import { NodePalette } from '../components/pipeline/NodePalette'
 import { PipelineCanvas } from '../components/pipeline/PipelineCanvas'
 import { PipelineInspector } from '../components/pipeline/PipelineInspector'
@@ -232,16 +232,21 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
         <Link to="/pipelines" className="text-[12px] text-ink-muted hover:text-accent">
           ← {t('pipelines.editor.back')}
         </Link>
-        <div className="flex-1 max-w-xs">
-        <Field label={t('pipelines.field.id')}>
+        <div className="flex items-center gap-2 min-w-0 max-w-md flex-1">
+          <label
+            htmlFor="pipeline-id"
+            className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-ink-muted whitespace-nowrap"
+          >
+            {t('pipelines.field.id')}
+          </label>
           <Input
+            id="pipeline-id"
             placeholder="detection-pipeline"
             value={pipelineId}
             onChange={(e) => setPipelineId(e.target.value)}
             disabled={isEdit}
-            className={isEdit ? 'opacity-60 cursor-not-allowed' : ''}
+            className={`flex-1 min-w-0 py-1.5 ${isEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
           />
-        </Field>
         </div>
         <button type="button" onClick={handleAutoLayout} className="btn-ghost text-[12px]">
           {t('pipelines.editor.auto_layout')}
