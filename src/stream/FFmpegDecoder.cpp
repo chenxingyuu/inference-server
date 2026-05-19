@@ -79,6 +79,9 @@ static int parseFfmpegLogLevel(const std::string& s) {
     LOG_WARN("[ffmpeg] unknown log level '{}', defaulting to 'warning'", s);
     return AV_LOG_WARNING;
 }
+
+// 0 = do not set AVCodecContext::thread_count (libavcodec auto).
+int g_ffmpeg_decode_threads = 2;
 } // namespace
 
 // ─── Free functions ───────────────────────────────────────────────────────────
@@ -105,6 +108,10 @@ bool SamplingParams::shouldEmit(std::optional<double> pts, uint64_t frame_seq) {
 void setFfmpegLogLevel(const std::string& level) {
     configureFfmpegLogLevelOnce();   // ensure callback is registered
     av_log_set_level(parseFfmpegLogLevel(level));
+}
+
+void setFfmpegDecodeThreads(int threads) {
+    g_ffmpeg_decode_threads = threads;
 }
 
 AVPixelFormat FFmpegDecoder::getHWFormat(AVCodecContext* /*ctx*/, const AVPixelFormat* pix_fmts) {
@@ -251,8 +258,8 @@ bool FFmpegDecoder::openStream(const StreamConfig& cfg) {
             codec_ctx_->hw_device_ctx = av_buffer_ref(hw_device_ctx_);
             codec_ctx_->get_format    = &FFmpegDecoder::getHWFormat;
         }
-    } else {
-        codec_ctx_->thread_count = 2;
+    } else if (g_ffmpeg_decode_threads > 0) {
+        codec_ctx_->thread_count = g_ffmpeg_decode_threads;
     }
 
     if (avcodec_open2(codec_ctx_, codec, nullptr) < 0) {
@@ -268,8 +275,15 @@ bool FFmpegDecoder::openStream(const StreamConfig& cfg) {
             SWS_BILINEAR, nullptr, nullptr, nullptr);
     }
 
-    LOG_INFO("[{}] stream opened {}x{} hwdec={}",
-             stream_id_, codec_ctx_->width, codec_ctx_->height, use_hwdec_);
+    if (!use_hwdec_) {
+        LOG_INFO("[{}] stream opened {}x{} hwdec=false thread_count={} "
+                 "(frame threading: recv_ms may be ~0; use pkt_avg_ms in debug logs)",
+                 stream_id_, codec_ctx_->width, codec_ctx_->height,
+                 codec_ctx_->thread_count);
+    } else {
+        LOG_INFO("[{}] stream opened {}x{} hwdec=true",
+                 stream_id_, codec_ctx_->width, codec_ctx_->height);
+    }
     return true;
 }
 
@@ -308,8 +322,29 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
         }
 
         if (pkt->stream_index == video_stream_idx_) {
-            if (avcodec_send_packet(codec_ctx_, pkt) == 0) {
-                while (avcodec_receive_frame(codec_ctx_, frame) == 0) {
+            const auto pkt_t0 = std::chrono::steady_clock::now();
+            const auto send_t0 = std::chrono::steady_clock::now();
+            const int send_ret = avcodec_send_packet(codec_ctx_, pkt);
+            const double send_ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - send_t0).count();
+
+            if (send_ret == 0) {
+                int pkt_frame_idx = 0;
+                for (;;) {
+                    const auto recv_t0 = std::chrono::steady_clock::now();
+                    const int recv_ret = avcodec_receive_frame(codec_ctx_, frame);
+                    const double recv_ms = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - recv_t0).count();
+                    if (recv_ret != 0) {
+                        break;
+                    }
+
+                    ++pkt_frame_idx;
+                    const double pkt_ms = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - pkt_t0).count();
+                    const double pkt_avg_ms =
+                        pkt_ms / static_cast<double>(pkt_frame_idx);
+
                     const uint64_t seq = frame_seq_++;
 
                     std::optional<double> frame_pts;
@@ -373,9 +408,14 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
                         Metrics::get().incFramesDecoded(stream_id_);
                         StreamHealthRegistry::get().onFrameDecoded(stream_id_, f.meta.capture_ts);
                         if (f.meta.frame_seq % 30 == 0) {
-                            LOG_DEBUG("[{}] frame_seq={} ts={:.3f} {}x{} convert_ms={:.1f}",
+                            const double total_ms = pkt_avg_ms + convert_ms;
+                            LOG_DEBUG("[{}] frame_seq={} ts={:.3f} {}x{} "
+                                      "recv_ms={:.3f} pkt_ms={:.1f} pkt_avg_ms={:.1f} "
+                                      "send_ms={:.3f} convert_ms={:.1f} total_ms={:.1f}",
                                       stream_id_, f.meta.frame_seq, f.meta.capture_ts,
-                                      f.meta.orig_width, f.meta.orig_height, convert_ms);
+                                      f.meta.orig_width, f.meta.orig_height,
+                                      recv_ms, pkt_ms, pkt_avg_ms, send_ms,
+                                      convert_ms, total_ms);
                         }
                         cb(std::move(f));
                     }

@@ -11,6 +11,8 @@ server:
   max_streams: 50
   socket_path: "/var/run/infer/infer.sock"
   ffmpeg_log_level: "fatal"
+  # DVPP 不可用时的 FFmpeg 软解回退；全景 7680 可酌情调大（如 8）
+  ffmpeg_decode_threads: 2
   log_level: "debug"
   model_repository: "models"
 

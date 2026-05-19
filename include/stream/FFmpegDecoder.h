@@ -45,6 +45,10 @@ struct SamplingParams {
 // Typically called once after loading AppConfig. Env var FFMPEG_LOG_LEVEL takes precedence.
 void setFfmpegLogLevel(const std::string& level);
 
+// CPU software decode: libavcodec thread_count (see server.ffmpeg_decode_threads in YAML).
+// Call once after loadConfig. 0 = do not set (libavcodec default).
+void setFfmpegDecodeThreads(int threads);
+
 // Reason that readAndDecode() returned.
 enum class ReadExitReason {
     FramesOk,   // stopped by stop_flag_

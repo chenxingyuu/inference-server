@@ -3,6 +3,7 @@ server:
   max_streams: 10
   socket_path: "/var/run/infer.sock"
   ffmpeg_log_level: fatal
+  ffmpeg_decode_threads: 4
   log_level: debug
 
 models:

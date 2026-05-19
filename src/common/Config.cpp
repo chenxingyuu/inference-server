@@ -596,8 +596,15 @@ AppConfig loadConfig(const std::string& yaml_path) {
         cfg.server.max_streams         = sn["max_streams"].as<int>(100);
         cfg.server.socket_path         = sn["socket_path"].as<std::string>("/var/run/infer.sock");
         cfg.server.ffmpeg_log_level    = sn["ffmpeg_log_level"].as<std::string>("warning");
+        cfg.server.ffmpeg_decode_threads =
+            sn["ffmpeg_decode_threads"].as<int>(cfg.server.ffmpeg_decode_threads);
         cfg.server.log_level           = sn["log_level"].as<std::string>("info");
         cfg.server.model_repository    = sn["model_repository"].as<std::string>("");
+        if (cfg.server.ffmpeg_decode_threads < 0 ||
+            cfg.server.ffmpeg_decode_threads > 64) {
+            throw std::runtime_error(
+                "server.ffmpeg_decode_threads must be in [0, 64] (0 = libavcodec auto)");
+        }
     }
     if (root["models"]) {
         if (!root["models"].IsSequence()) {

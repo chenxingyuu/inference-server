@@ -113,6 +113,7 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cfg.server.max_streams,         10);
     EXPECT_EQ(cfg.server.socket_path,         "/var/run/infer.sock");
     EXPECT_EQ(cfg.server.ffmpeg_log_level,    "fatal");
+    EXPECT_EQ(cfg.server.ffmpeg_decode_threads, 4);
     EXPECT_EQ(cfg.server.log_level,           "debug");
 
     // models

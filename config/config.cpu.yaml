@@ -13,6 +13,8 @@ server:
   max_streams: 50
   socket_path: "./infer.sock"
   ffmpeg_log_level: "warning"
+  # CPU 软解 libavcodec 线程数：0=自动，1=单线程（便于 profiling），>1=帧/片并行（默认 2）
+  ffmpeg_decode_threads: 2
   log_level: "debug"
   # 仓库根：其下每个子目录若含 config.yaml 则注册为一个 model_id（如 models/yolov8n_cpu/）。
   model_repository: "models"
