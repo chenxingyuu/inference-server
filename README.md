@@ -13,7 +13,7 @@
 ## 架构概览
 
 ```text
-RTSP(source) -> decode.ffmpeg -> (fan-out)
+RTSP(source) -> decode.ffmpeg | decode.dvpp (Ascend 可选) -> (fan-out)
             -> archive.raw (可选)
             -> preprocess.yolo -> infer.engine -> postprocess.yolo
             -> track.bytetrack (可选)
@@ -21,7 +21,9 @@ RTSP(source) -> decode.ffmpeg -> (fan-out)
             -> sink.publish（publishers: 配置可同时扇出到 Kafka / gRPC / Redis）
             -> sink.stream (可选，画框+RTSP/RTMP 推流)
             -> sink.ffplay (可选，画框+本机 ffplay 预览)
-            -> ManagementServer (/healthz /metrics /tasks)
+
+管理面: inferenced (C++) --Unix socket--> infer-server (Go HTTP: /healthz /metrics /tasks ...)
+        infer-ctl (Go CLI) 直连同一 socket
 ```
 
 运行时关键点：
@@ -216,7 +218,7 @@ publishers:
 
 ## Ascend 模型转换
 
-在仓库根目录执行（脚本会嵌入 `scripts/aipp.cfg`，默认 **1080p NV12 → 640×640** 模型输入，供 DVPP + AIPP 零拷贝路径使用）：
+在仓库根目录执行（脚本会嵌入 `scripts/aipp.cfg`，默认 **640×640** NV12 `src`，无 AIPP resize；1080p 等码流由运行时 **DVPP VPC** 拉伸到模型输入）：
 
 ```bash
 # ONNX -> Ascend .om（batch=1/4/8/16，含 NV12 AIPP）
@@ -225,8 +227,8 @@ publishers:
 
 转换后可在 `models/` 得到 `*_b1.om / *_b4.om / *_b8.om / *_b16.om`，并在 `config/config.yaml` 的 `om_paths` 中配置。
 
-- 摄像头分辨率不是 1920×1080 时，先改 `scripts/aipp.cfg` 中的 `src_image_size_w/h`，再重新转换并替换部署中的 `.om`。
-- DVPP 硬解需 `use_ascend_dvpp: true` 且加载带 AIPP 的 om；详见 [docs/ascend-guide.md](docs/ascend-guide.md) §12–§13。
+- `scripts/aipp.cfg` 的 `src_image_size_w/h` 必须与 **VPC 输出 / Path B pack 尺寸**一致（通常 640×640），修改后须重新 ATC 并替换 `.om`。
+- 任务级 `use_ascend_dvpp: true` 启用 DVPP 硬解；VPC 目标尺寸由 `infer.engine` 对应模型的 `input_shape` 自动注入（见 [docs/ascend-guide.md](docs/ascend-guide.md) §13）。
 
 ## 项目结构
 
