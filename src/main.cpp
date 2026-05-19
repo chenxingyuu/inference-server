@@ -1,6 +1,7 @@
 #include "common/Config.h"
 #include "common/Logger.h"
 #include "stream/FFmpegDecoder.h"
+#include "pipeline/stages/DrawAndStreamStage.h"
 #include "pipeline/TaskManager.h"
 #include "publisher/KafkaPublisher.h"
 #include "publisher/MultiPublisher.h"
