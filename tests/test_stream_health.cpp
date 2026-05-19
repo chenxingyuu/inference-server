@@ -120,17 +120,6 @@ TEST_F(StreamHealthTest, FrameDecodedUpdatesTimestampAndCounter) {
 
     auto h = StreamHealthRegistry::get().getHealth("cam_01");
     EXPECT_DOUBLE_EQ(h.last_frame_ts, 1001.0);
-    EXPECT_EQ(h.frames_since_last_hb, 2u);
-}
-
-TEST_F(StreamHealthTest, ResetHbCountersClearsFrameCount) {
-    StreamHealthRegistry::get().onStreamAdded("cam_01");
-    StreamHealthRegistry::get().onStreamOpened("cam_01");
-    StreamHealthRegistry::get().onFrameDecoded("cam_01", 1000.0);
-    StreamHealthRegistry::get().onFrameDecoded("cam_01", 1001.0);
-
-    StreamHealthRegistry::get().resetHbCounters();
-    EXPECT_EQ(StreamHealthRegistry::get().getHealth("cam_01").frames_since_last_hb, 0u);
 }
 
 // ── Multi-stream ───────────────────────────────────────────────────────────

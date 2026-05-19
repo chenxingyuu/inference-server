@@ -9,6 +9,8 @@ When updating or creating documentation (iteration docs, project summaries), kee
 ## Development Workflow
 
 Follow TDD (RED-GREEN-REFACTOR) workflow for all C++ and Python feature implementations unless told otherwise.
+Do not create git commits automatically after modifying code. Only commit when the user explicitly asks for a commit.
+When committing, include only changes made for the current request. Do not stage or commit unrelated work from the user or other sessions.
 
 ## Implementation Checklist
 

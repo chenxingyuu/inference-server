@@ -677,9 +677,6 @@ AppConfig loadConfig(const std::string& yaml_path) {
         k.linger_ms             = kn["linger_ms"].as<int>(5);
         k.compression           = kn["compression"].as<std::string>("lz4");
         k.queue_capacity        = kn["queue_capacity"].as<int>(10000);
-        k.heartbeat_topic       = kn["heartbeat_topic"].as<std::string>("inference-heartbeat");
-        k.heartbeat_interval_ms = kn["heartbeat_interval_ms"].as<int>(5000);
-        k.control_topic         = kn["control_topic"].as<std::string>("inference-control");
     };
     if (auto pn = root["publishers"]) {
         if (auto kn = pn["kafka"]) parseKafkaNode(kn, cfg.publishers.kafka);

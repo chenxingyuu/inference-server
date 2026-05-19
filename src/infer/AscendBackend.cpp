@@ -242,9 +242,13 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
 #ifdef BUILD_ASCEND_BACKEND
     if (aipp_enabled_ && input.is_ascend && !input.ascend_frames.empty()) {
         // Path A: zero-copy DVPP → AIPP
+        // NV12 buffer stride equals DVPP-aligned width (16-byte aligned),
+        // NOT the codec pixel width. Use aligned dims when available.
         const auto& f0 = input.ascend_frames[0];
+        const int stride_w = f0.aligned_width  > 0 ? f0.aligned_width  : f0.width;
+        const int stride_h = f0.aligned_height > 0 ? f0.aligned_height : f0.height;
         const size_t frame_nv12 =
-            static_cast<size_t>(f0.width) * static_cast<size_t>(f0.height) * 3 / 2;
+            static_cast<size_t>(stride_w) * static_cast<size_t>(stride_h) * 3 / 2;
         in_bytes = static_cast<size_t>(model_bs) * frame_nv12;
 
         if (req_bs == 1 && model_bs == 1) {

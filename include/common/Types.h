@@ -85,8 +85,10 @@ struct GpuBuffer {
 // returning the YUV surface to the DVPP output pool.
 struct AscendBuffer {
     void* yuv_device{nullptr};           // YUV420SP in NPU device (HBM) memory
-    int   width{0};
-    int   height{0};
+    int   width{0};                      // codec pixel width
+    int   height{0};                     // codec pixel height
+    int   aligned_width{0};              // DVPP row stride (width aligned to 16)
+    int   aligned_height{0};             // DVPP buffer height (height aligned to 2)
     int   device_id{0};
     std::shared_ptr<void> frame_ref;     // keeps DVPP buffer alive; deleter: acldvppFree
 };

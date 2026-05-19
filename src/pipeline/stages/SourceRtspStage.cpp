@@ -1,5 +1,6 @@
 #include "pipeline/stages/SourceRtspStage.h"
 
+#include "common/Logger.h"
 #include "metrics/Metrics.h"
 
 #include <algorithm>
@@ -63,7 +64,14 @@ void SourceRtspStage::start() {
         cfg.ascend_device_id = ascend_device_id_;
         dvpp_decoder_ = std::make_unique<DVPPDecoder>();
         dvpp_decoder_->start(cfg, frame_cb);
-        return;
+        if (dvpp_decoder_->running()) {
+            return;
+        }
+        // DVPP failed to start (resolution out of range, unsupported codec, ACL
+        // init error, etc.). Fall through to FFmpegDecoder (CPU software decode).
+        LOG_WARN("SourceRtspStage [{}]: DVPP decoder failed to start — "
+                 "falling back to FFmpeg software decode", source_.id);
+        dvpp_decoder_.reset();
     }
 #endif
 

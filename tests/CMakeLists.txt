@@ -165,56 +165,6 @@ target_link_libraries(test_archive_raw_stage PRIVATE
 add_test(NAME test_archive_raw_stage COMMAND test_archive_raw_stage
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
-# Phase 10: heartbeat JSON serialization (needs rdkafka for linking HeartbeatPublisher.cpp)
-add_executable(test_heartbeat_publisher test_heartbeat_publisher.cpp
-    ${CMAKE_SOURCE_DIR}/src/publisher/HeartbeatPublisher.cpp
-    ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
-    ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
-)
-target_include_directories(test_heartbeat_publisher PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${RDKAFKA_INCLUDE_DIRS}
-    ${OpenCV_INCLUDE_DIRS}
-)
-target_link_directories(test_heartbeat_publisher PRIVATE
-    ${RDKAFKA_LIBRARY_DIRS}
-)
-target_link_libraries(test_heartbeat_publisher PRIVATE
-    GTest::gtest_main
-    nlohmann_json::nlohmann_json
-    spdlog::spdlog
-    ${RDKAFKA_LIBRARIES}
-    ${OpenCV_LIBS}
-    Threads::Threads
-)
-add_test(NAME test_heartbeat_publisher COMMAND test_heartbeat_publisher
-         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
-
-# Phase 14: control topic JSON serialization (needs rdkafka for linking ControlPublisher.cpp)
-add_executable(test_control_publisher test_control_publisher.cpp
-    ${CMAKE_SOURCE_DIR}/src/publisher/ControlPublisher.cpp
-    ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
-)
-target_include_directories(test_control_publisher PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${RDKAFKA_INCLUDE_DIRS}
-    ${OpenCV_INCLUDE_DIRS}
-)
-target_link_directories(test_control_publisher PRIVATE
-    ${RDKAFKA_LIBRARY_DIRS}
-)
-target_link_libraries(test_control_publisher PRIVATE
-    GTest::gtest_main
-    nlohmann_json::nlohmann_json
-    spdlog::spdlog
-    ${RDKAFKA_LIBRARIES}
-    ${OpenCV_LIBS}
-    Threads::Threads
-)
-add_test(NAME test_control_publisher COMMAND test_control_publisher
-         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
 # Phase 11: GPU fault self-healing (BatchPolicy, GpuFault classification, Metrics, InferWorker recovery)
 # Uses InferWorker directly so it needs its transitive deps that are not in infer_testable.

@@ -18,7 +18,7 @@ RTSP(source) -> decode.ffmpeg -> (fan-out)
             -> preprocess.yolo -> infer.engine -> postprocess.yolo
             -> track.bytetrack (可选)
             -> join.byFrameId (可选)
-            -> sink.kafka（publishers: 配置可同时扇出到 gRPC / Redis）
+            -> sink.publish（publishers: 配置可同时扇出到 Kafka / gRPC / Redis）
             -> sink.stream (可选，画框+RTSP/RTMP 推流)
             -> sink.ffplay (可选，画框+本机 ffplay 预览)
             -> ManagementServer (/healthz /metrics /tasks)
@@ -109,49 +109,45 @@ make docker-build-gpu
 make docker-build-npu
 ```
 
-## HTTP 管理接口
+## 管理接口
 
-默认端口来自 `server.management_port`（默认 `8080`）。
-
-### 健康和可观测
+管理接口通过 **Unix Domain Socket** 暴露，路径来自 `server.socket_path`（默认 `/var/run/infer.sock`，可在配置中覆盖）。协议为 newline-delimited JSON，每条连接发一条请求收一条响应。
 
 ```bash
-curl http://localhost:8080/healthz
-curl http://localhost:8080/metrics
-```
+# 健康检查
+echo '{"cmd":"health"}' | socat - UNIX-CONNECT:./infer.sock
 
-Kafka 可观测 topic：
-- `inference-heartbeat`：引擎与 stream 心跳（含 `stream_state`）
-- `inference-control`：stream 控制事件（断流/恢复/终态失败）
+# Prometheus 格式指标
+echo '{"cmd":"metrics"}' | socat - UNIX-CONNECT:./infer.sock
 
-### Task 管理
-
-```bash
 # 列出 task 与状态
-curl http://localhost:8080/tasks
+echo '{"cmd":"list_tasks"}' | socat - UNIX-CONNECT:./infer.sock
 
-# 启动 / 停止某个 task（id 与配置中 tasks[].id 一致，例如 task_cam_001）
-curl -X POST http://localhost:8080/tasks/task_cam_001/start
-curl -X POST http://localhost:8080/tasks/task_cam_001/stop
+# 启动 / 停止某个 task
+echo '{"cmd":"start_task","id":"task_cam_001"}' | socat - UNIX-CONNECT:./infer.sock
+echo '{"cmd":"stop_task","id":"task_cam_001"}' | socat - UNIX-CONNECT:./infer.sock
 ```
+
 
 ## Pipeline 配置（新格式）
 
 配置文件以 `sources` 描述输入源（`id`、`url` 与重连相关字段），以 `pipelines` 描述可编排 DAG 模板（nodes/edges），以 `tasks` 绑定「哪路源跑哪张图」。
 每条 `tasks` 可单独设置 **`sample_fps`**（默认 `5`，须 ≥ 1）与 **`use_hwdec`**（默认 `false`）；二者已从 `sources` 迁出，若在 `sources` 下仍写 `sample_fps` / `use_hwdec`，加载配置时会报错提示迁移到对应 task。
-示例见 `config/config.cpu.yaml` / `config/config.gpu.yaml` / `config/config.yaml`。
+示例见 `config/config.cpu.yaml` / `config/config.gpu.yaml` / `config/config.npu.yaml`。
 
-常见 stage（首批）：
-- `source.rtsp`：RTSP/文件输入（内部使用 `FFmpegDecoder`）
+常见 stage：
+- `source.rtsp`：RTSP 输入（内部使用 `FFmpegDecoder`）
+- `source.file`：本地视频文件输入
 - `decode.ffmpeg`：解码阶段（当前为占位 passthrough，解码由 source 完成）
 - `archive.raw`：原图归档（复用 `FrameArchiver`，支持 `use_hwdec=true` 的 GPU 帧，默认开启）
   - 可通过 `frame_archive.worker_count` 配置归档并发 worker 数（默认 `1`）。
 - `preprocess.yolo` / `postprocess.yolo`：占位 passthrough（后续可落地真实算子）
 - `infer.engine`：推理 stage（引用 `models[].id`）；DAG 路径下由 `InferWorkerGroup` 执行，支持 `models[].instance_count` 与 `models[].device_ids`（每实例一个后端；`device_ids` 拼写须正确）。攒批策略与 `batch_size`、`max_queue_delay_us` 一致（与 `ModelManager` + `BatchScheduler` 的流池攒批路径不同）。
+- `infer.sahiScheduler`：SAHI 滑窗切块，将大分辨率帧切成重叠 tile 后送入下游 `infer.engine`，最后由 `infer.sahiMerge` 合并 NMS 结果。参数：`tile_width`、`tile_height`、`overlap_ratio`、`full_interval`（每 N 帧插入一次全图推理）、`max_tiles_per_frame`。
 - `track.bytetrack`：ByteTrack 追踪
 - `join.byFrameId`：归档信息回填到推理结果（按 frame id join）
-- `sink.kafka`：结果输出；通过 `publishers:` 配置可同时扇出到 Kafka / gRPC / Redis（见下方配置示例）
-- `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`，需 `output_url`）。`output_url` 支持占位符 `{task_id}` / `{source_id}`，在每个 task 构图时插值；未知占位符会报错。
+- `sink.publish`：结果输出；通过 `publishers:` 配置可同时扇出到 Kafka / gRPC / Redis（见下方配置示例）
+- `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`，需 `output_url`；`encoder` 可选 `ffmpeg_x264`（默认）或 `ascend_venc`）。`output_url` 支持占位符 `{task_id}` / `{source_id}`，在每个 task 构图时插值；未知占位符会报错。
 - `sink.ffplay`：叠加检测框后通过管道喂给本机 `ffplay`（BGR rawvideo，需已安装 ffmpeg/ffplay）
 
 `sink.stream` 占位符示例（多 task 复用同一 pipeline 时为每路生成不同推流地址）：
@@ -238,9 +234,9 @@ inference-server/
 │   ├── decoder/      YOLO 与分类器后处理
 │   ├── pipeline/     调度、worker、级联、模型管理
 │   ├── tracker/      可选目标追踪（ByteTrack/DeepSORT 占位）
-│   ├── publisher/    Kafka 与属性发布
+│   ├── publisher/    发布器
 │   ├── metrics/      指标导出
-│   ├── server/       HTTP 管理接口
+│   ├── server/       Unix Socket 管理接口
 │   ├── archive/      帧归档与 MinIO 上传
 │   └── cuda/         CUDA 预处理头文件
 ├── src/              对应实现

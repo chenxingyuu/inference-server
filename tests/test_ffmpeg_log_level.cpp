@@ -58,7 +58,7 @@ TEST(FfmpegLogLevel, YamlParsesExplicitLevel) {
 }
 
 TEST(FfmpegLogLevel, YamlMissingFieldDefaultsToWarning) {
-    std::string yaml = std::string("server:\n  management_port: 8080\n") + kMinimalYaml;
+    std::string yaml = std::string("server:\n  socket_path: /tmp/infer.sock\n") + kMinimalYaml;
     AppConfig cfg = loadFromString(yaml);
     EXPECT_EQ(cfg.server.ffmpeg_log_level, "warning");
 }

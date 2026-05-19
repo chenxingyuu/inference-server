@@ -4,8 +4,6 @@
 #include "pipeline/TaskManager.h"
 #include "publisher/KafkaPublisher.h"
 #include "publisher/MultiPublisher.h"
-#include "publisher/HeartbeatPublisher.h"
-#include "publisher/ControlEventBus.h"
 #ifdef BUILD_REDIS_PUBLISHER
 #include "publisher/RedisPublisher.h"
 #endif
@@ -141,26 +139,6 @@ int main(int argc, char* argv[]) {
     task_manager.loadAll();
     task_manager.startAll();
 
-    // ── Start heartbeat publisher (Phase 10) ─────────────────────────────────
-    std::unique_ptr<infer::HeartbeatPublisher> heartbeat;
-    try {
-        heartbeat = std::make_unique<infer::HeartbeatPublisher>(kafka_cfg);
-        heartbeat->start();
-    } catch (const std::exception& e) {
-        LOG_WARN("HeartbeatPublisher init failed (non-fatal): {}", e.what());
-        heartbeat.reset();
-    }
-
-    // ── Start control publisher (Phase 14) ───────────────────────────────────
-    std::shared_ptr<infer::ControlPublisher> control;
-    try {
-        control = std::make_shared<infer::ControlPublisher>(kafka_cfg.brokers, kafka_cfg.control_topic);
-        infer::ControlEventBus::get().setPublisher(control);
-    } catch (const std::exception& e) {
-        LOG_WARN("ControlPublisher init failed (non-fatal): {}", e.what());
-        control.reset();
-    }
-
     // ── Start management HTTP server ──────────────────────────────────────────
     infer::UnixSocketServer mgmt_server(mgmt_socket_path, task_manager);
     mgmt_server.start();
@@ -176,16 +154,10 @@ int main(int argc, char* argv[]) {
     // ── Graceful shutdown ─────────────────────────────────────────────────────
     LOG_INFO("Shutting down…");
 
-    // Stop inference graphs first. If we stop HTTP/heartbeat before tasks, RTSP
-    // and ffplay sinks keep running briefly: ffplay may already be dead (SIGINT
-    // to the terminal group) while the sink still schedules reconnect — bad UX.
+    // Stop inference graphs first so RTSP/ffplay sinks don't race with shutdown.
     task_manager.stopAll();
 
     mgmt_server.stop();
-
-    if (heartbeat) heartbeat->stop();
-    infer::ControlEventBus::get().clearPublisher();
-    control.reset();
 
     publisher->flush();
     LOG_INFO("inference-server stopped");
