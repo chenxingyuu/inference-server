@@ -8,6 +8,7 @@ build_agent
 cmake-build-*
 out
 dist
+**/node_modules
 
 logs
 *.log

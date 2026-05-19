@@ -1,3 +1,5 @@
+@import '@xyflow/react/dist/style.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -16,6 +18,11 @@
 }
 
 @layer components {
+  .react-flow {
+    width: 100%;
+    height: 100%;
+  }
+
   .data-table { @apply w-full border-collapse; }
 
   .data-table th {
