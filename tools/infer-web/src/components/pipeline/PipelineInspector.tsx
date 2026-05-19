@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import type { Edge, Node } from '@xyflow/react'
 import { Field, Input, Select } from '../ui/Field'
 import { useT } from '../../lib/i18n'
@@ -14,6 +14,8 @@ type WithPair = { k: string; v: string }
 interface PipelineInspectorProps {
   selectedNode: Node<PipelineNodeData> | null
   selectedEdge: Edge<PipelineEdgeData> | null
+  /** Bumps on undo/redo so inspector re-syncs from graph without watching every data.with change. */
+  graphRevision?: number
   onUpdateNode: (
     nodeId: string,
     data: PipelineNodeData,
@@ -21,14 +23,17 @@ interface PipelineInspectorProps {
   ) => void
   onRenameNode: (oldId: string, newId: string) => void
   onUpdateEdge: (edgeId: string, data: PipelineEdgeData) => void
+  inspectorFlushRef?: MutableRefObject<(() => void) | null>
 }
 
 export function PipelineInspector({
   selectedNode,
   selectedEdge,
+  graphRevision = 0,
   onUpdateNode,
   onRenameNode,
   onUpdateEdge,
+  inspectorFlushRef,
 }: PipelineInspectorProps) {
   const { t } = useT()
 
@@ -93,18 +98,25 @@ export function PipelineInspector({
     <aside className="w-64 flex-shrink-0 border-l border-border bg-bg-surface overflow-y-auto p-4">
       <h3 className="label mb-3">{t('pipelines.editor.inspector_node')}</h3>
       <NodeInspectorForm
+        key={`${selectedNode.id}-${graphRevision}`}
         node={selectedNode}
         onUpdateNode={onUpdateNode}
         onRenameNode={onRenameNode}
+        inspectorFlushRef={inspectorFlushRef}
       />
     </aside>
   )
+}
+
+function withToPairs(withRecord: Record<string, string> | undefined): WithPair[] {
+  return Object.entries(withRecord ?? {}).map(([k, v]) => ({ k, v }))
 }
 
 function NodeInspectorForm({
   node,
   onUpdateNode,
   onRenameNode,
+  inspectorFlushRef,
 }: {
   node: Node<PipelineNodeData>
   onUpdateNode: (
@@ -113,22 +125,42 @@ function NodeInspectorForm({
     options?: { commit?: 'immediate' | 'debounced' },
   ) => void
   onRenameNode: (oldId: string, newId: string) => void
+  inspectorFlushRef?: MutableRefObject<(() => void) | null>
 }) {
   const { t } = useT()
   const data = node.data
-  const [pairs, setPairs] = useState<WithPair[]>(
-    () => Object.entries(data.with ?? {}).map(([k, v]) => ({ k, v })),
-  )
+  const [pairs, setPairs] = useState<WithPair[]>(() => withToPairs(data.with))
   const [customType, setCustomType] = useState(() =>
     getNodeTypeDef(data.stageType) ? '' : data.stageType,
   )
   const [localId, setLocalId] = useState(data.stageId)
+  const pairsRef = useRef(pairs)
+  pairsRef.current = pairs
+
+  const syncPairsToGraph = useCallback(
+    (ps: WithPair[], options?: { commit?: 'immediate' | 'debounced' }) => {
+      onUpdateNode(node.id, { ...data, with: pairsToWith(ps) }, options)
+    },
+    [node.id, data, onUpdateNode],
+  )
+  const syncPairsToGraphRef = useRef(syncPairsToGraph)
+  syncPairsToGraphRef.current = syncPairsToGraph
 
   useEffect(() => {
-    setPairs(Object.entries(data.with ?? {}).map(([k, v]) => ({ k, v })))
-    setCustomType(getNodeTypeDef(data.stageType) ? '' : data.stageType)
-    setLocalId(data.stageId)
-  }, [node.id, data.stageId, data.stageType, data.with])
+    if (!inspectorFlushRef) return
+    inspectorFlushRef.current = () => {
+      syncPairsToGraphRef.current(pairsRef.current, { commit: 'immediate' })
+    }
+    return () => {
+      inspectorFlushRef.current = null
+    }
+  }, [inspectorFlushRef])
+
+  useEffect(() => {
+    return () => {
+      syncPairsToGraphRef.current(pairsRef.current, { commit: 'immediate' })
+    }
+  }, [node.id])
 
   const selectValue = getNodeTypeDef(data.stageType) ? data.stageType : (data.stageType ? CUSTOM : '')
 
@@ -141,7 +173,7 @@ function NodeInspectorForm({
 
   const handlePairsChange = (ps: WithPair[]) => {
     setPairs(ps)
-    applyData({ with: pairsToWith(ps) }, { commit: 'immediate' })
+    syncPairsToGraph(ps, { commit: 'debounced' })
   }
 
   const handleTypeSelect = (val: string) => {

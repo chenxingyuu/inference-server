@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ReactFlowProvider, type Edge, type Node } from '@xyflow/react'
 import toast from 'react-hot-toast'
@@ -106,20 +107,36 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
     canRedo,
     onNodeDragStart,
     onNodeDragStop,
+    graphRevision,
   } = usePipelineGraphHistory()
 
   const { debouncedCommit, flushCommit } = useDebouncedCommit(commitGraph, 400)
+  const inspectorFlushRef = useRef<(() => void) | null>(null)
+  const nodesRef = useRef(nodes)
+  const edgesRef = useRef(edges)
+  nodesRef.current = nodes
+  edgesRef.current = edges
 
   useEffect(() => {
     if (selectedNode) {
       const next = nodes.find((n) => n.id === selectedNode.id)
-      if (!next) setSelectedNode(null)
-      else if (next !== selectedNode) setSelectedNode(next)
+      if (!next) {
+        setSelectedNode(null)
+      } else if (
+        next.position.x !== selectedNode.position.x ||
+        next.position.y !== selectedNode.position.y ||
+        JSON.stringify(next.data) !== JSON.stringify(selectedNode.data)
+      ) {
+        setSelectedNode(next)
+      }
     }
     if (selectedEdge) {
       const next = edges.find((e) => e.id === selectedEdge.id)
-      if (!next) setSelectedEdge(null)
-      else if (next !== selectedEdge) setSelectedEdge(next)
+      if (!next) {
+        setSelectedEdge(null)
+      } else if (JSON.stringify(next.data) !== JSON.stringify(selectedEdge.data)) {
+        setSelectedEdge(next)
+      }
     }
   }, [nodes, edges, selectedNode, selectedEdge])
 
@@ -253,14 +270,11 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
         }
         return nextNodes
       })
-      if (selectedNode?.id === nodeId) {
-        setSelectedNode((prev) => (prev ? { ...prev, data } : null))
-      }
       if (options?.commit !== 'immediate') {
         debouncedCommit()
       }
     },
-    [setNodes, edges, selectedNode?.id, debouncedCommit, flushCommit, commitGraph],
+    [setNodes, edges, debouncedCommit, flushCommit, commitGraph],
   )
 
   const handleRenameNode = useCallback(
@@ -296,18 +310,24 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
   )
 
   const handleSave = () => {
-    const result = validatePipelineGraph(pipelineId, nodes, edges)
+    flushSync(() => {
+      inspectorFlushRef.current?.()
+    })
+    flushCommit()
+    const liveNodes = nodesRef.current
+    const liveEdges = edgesRef.current
+    const result = validatePipelineGraph(pipelineId, liveNodes, liveEdges)
     if (!result.ok) {
       toast.error(formatValidationErrors(t, result))
       return
     }
-    const body = toPipelineCreate(pipelineId, nodes, edges)
+    const body = toPipelineCreate(pipelineId, liveNodes, liveEdges)
     if (isEdit && routeId) {
       update.mutate(
         { id: routeId, body },
         {
           onSuccess: () => {
-            saveLayout(pipelineId, nodes)
+            saveLayout(pipelineId, liveNodes)
             navigate('/pipelines')
           },
         },
@@ -315,7 +335,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
     } else {
       add.mutate(body, {
         onSuccess: () => {
-          saveLayout(pipelineId, nodes)
+          saveLayout(pipelineId, liveNodes)
           navigate('/pipelines')
         },
       })
@@ -399,6 +419,8 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
         <PipelineInspector
           selectedNode={selectedNode}
           selectedEdge={selectedEdge}
+          graphRevision={graphRevision}
+          inspectorFlushRef={inspectorFlushRef}
           onUpdateNode={handleUpdateNodeData}
           onRenameNode={handleRenameNode}
           onUpdateEdge={handleUpdateEdgeData}

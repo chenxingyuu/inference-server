@@ -25,6 +25,7 @@ export function usePipelineGraphHistory(maxSize = 50) {
   const [history, setHistory] = useState(() =>
     createHistoryState(cloneGraphSnapshot([], []), maxSize),
   )
+  const [graphRevision, setGraphRevision] = useState(0)
 
   const isApplyingHistoryRef = useRef(false)
   const dragBaselineRef = useRef<GraphSnapshot | null>(null)
@@ -57,6 +58,7 @@ export function usePipelineGraphHistory(maxSize = 50) {
     (nextNodes: Node<PipelineNodeData>[], nextEdges: Edge<PipelineEdgeData>[]) => {
       const snap = cloneGraphSnapshot(nextNodes, nextEdges)
       setHistory(createHistoryState(snap, maxSize))
+      setGraphRevision((r) => r + 1)
     },
     [maxSize],
   )
@@ -94,6 +96,7 @@ export function usePipelineGraphHistory(maxSize = 50) {
       const result = undoHistory(h)
       if (!result) return h
       applyHistorySnapshot(result.snapshot)
+      setGraphRevision((r) => r + 1)
       return result.state
     })
   }, [applyHistorySnapshot])
@@ -103,6 +106,7 @@ export function usePipelineGraphHistory(maxSize = 50) {
       const result = redoHistory(h)
       if (!result) return h
       applyHistorySnapshot(result.snapshot)
+      setGraphRevision((r) => r + 1)
       return result.state
     })
   }, [applyHistorySnapshot])
@@ -159,5 +163,6 @@ export function usePipelineGraphHistory(maxSize = 50) {
     onNodeDragStart,
     onNodeDragStop,
     isApplyingHistoryRef,
+    graphRevision,
   }
 }
