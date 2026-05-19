@@ -497,35 +497,15 @@ YOLO 推理                          │
                                YOLO 推理
 ```
 
-### AIPP 配置文件示例
+### AIPP 配置文件
 
-```
-aipp_op {
-    aipp_mode: static
+仓库内权威配置为 **`scripts/aipp.cfg`**（默认 **640×640** NV12 输入）。关键字段：
 
-    input_format: YUV420SP_U8       # NV12 输入
+- `src_image_size_w/h`：必须与 **VPC 输出 / Path B pack 尺寸**一致（通常 640×640）
+- `resize: false`（CANN 6 静态 AIPP 勿开 resize；1080p→640 由 **DVPP VPC** 完成，见 §13）
+- `input_format: YUV420SP_U8`、`csc_switch: true`、`rbuv_swap_switch: true`
 
-    src_image_size_w: 1920          # 原始图像宽
-    src_image_size_h: 1080          # 原始图像高
-
-    crop: false
-    resize: true                    # 启用 resize
-    resize_output_w: 640
-    resize_output_h: 640
-
-    mean_chn_0: 0                   # RGB 均值
-    mean_chn_1: 0
-    mean_chn_2: 0
-    min_chn_0: 0.0                  # 归一化: (pixel - min) / var
-    min_chn_1: 0.0
-    min_chn_2: 0.0
-    var_reci_chn_0: 0.00392157      # 1/255
-    var_reci_chn_1: 0.00392157
-    var_reci_chn_2: 0.00392157
-}
-```
-
-ATC 转换时加入 `--insert_op_conf=aipp.cfg` 即可。
+ATC 转换时加入 `--insert_op_conf=scripts/aipp.cfg`（或从仓库根目录执行 `convert_ascend.sh`，其使用相对路径 `aipp.cfg`）。
 
 ---
 
@@ -533,14 +513,17 @@ ATC 转换时加入 `--insert_op_conf=aipp.cfg` 即可。
 
 ### 概述
 
-当同时启用 DVPP 硬件解码（`use_ascend_dvpp: true`）和 NV12 AIPP 模型时，推理服务器可以实现**端到端零 CPU 参与**的推理路径：
+当同时启用 DVPP 硬件解码（`use_ascend_dvpp: true`）和 NV12 AIPP 模型时，推理服务器可以实现**端到端零 CPU 参与**的推理路径（1080p 码流经 **DVPP VPC** 拉伸到模型输入尺寸，例如 640×640）：
 
 ```
 RTSP 码流
   │
   ▼  (FFmpeg 仅 demux，不解码)
-DVPP 硬件视频解码
-  │ YUV420SP (NV12) 在 HBM 设备内存
+DVPP 硬件视频解码 (VDEC)
+  │ YUV420SP (NV12) 1080p 在 HBM
+  ▼
+DVPP VPC 拉伸缩放 (1080p → 640×640，与 Path B cv::resize 语义一致)
+  │ YUV420SP (NV12) 640×640 在 HBM
   │  Frame.is_ascend = true
   ▼
 BatchScheduler / InferEngineWorkerStage
@@ -548,13 +531,13 @@ BatchScheduler / InferEngineWorkerStage
   ▼
 AscendBackend::infer() — Path A
   │
-  ├── batch=1：DVPP device ptr 直传 ACL dataset（无任何拷贝）
+  ├── batch=1：VPC 输出 device ptr 直传 ACL dataset（无 CPU 拷贝）
   │
   └── batch>1：D2D memcpy 拼接到临时 HBM buffer（仍在 NPU 侧）
          │
          ▼
-      AIPP（.om 内嵌）
-        NV12 → RGB → resize → 归一化 → NCHW
+      AIPP（.om 内嵌，src 640×640）
+        NV12 → RGB → 归一化 → NCHW
          │（NPU 硬件执行，无 CPU 参与）
          ▼
       YOLO NPU 推理
@@ -563,11 +546,13 @@ AscendBackend::infer() — Path A
       Kafka 结果发布
 ```
 
+VPC 目标尺寸由 pipeline 中 `infer.engine` 对应模型的 `input_shape.width/height` 自动注入 ingest（`TaskManager` → `StreamConfig.ascend_vpc_out_*`）。码流分辨率已与模型输入一致时跳过 VPC。
+
 ### 与原有路径对比
 
 | 路径 | CPU 操作 | 拷贝方向 | 适用场景 |
 |------|----------|----------|---------|
-| **Path A 零拷贝** | 无 | 无（batch=1）/ D2D（batch>1） | DVPP + NV12 AIPP 模型 |
+| **Path A 零拷贝** | 无 | 无（batch=1）/ D2D（batch>1） | DVPP VDEC + VPC + NV12 AIPP（src=640） |
 | Path B CPU BGR | `cv::resize` + `packBgrUint8` | H2D | AIPP 模型 + FFmpeg 软解 |
 | Path C CPU float | `cv::resize` + CHW 归一化 | H2D | 无 AIPP 模型 |
 
@@ -575,54 +560,35 @@ AscendBackend::infer() — Path A
 
 ### 模型编译（NV12 AIPP 配置）
 
-AIPP 配置文件 `aipp_nv12.cfg` 示例（1080p 输入，缩放至 640×640）：
+使用仓库根目录下的 **`scripts/aipp.cfg`**（默认 **640×640** NV12 输入，无 AIPP resize；1080p 全画面缩放由 **DVPP VPC** 完成）。修改 `src_image_size_*` 后**必须重新 ATC 并替换部署中的 `.om`**。
 
-```
-aipp_op {
-    aipp_mode: static
+在已 `source .../set_env.sh` 的转换机上，从仓库根目录执行：
 
-    input_format: YUV420SP_U8       # 接受 DVPP 输出的 NV12 格式
-
-    src_image_size_w: 1920          # 必须与 DVPP 输出分辨率完全一致
-    src_image_size_h: 1080
-
-    crop: false
-    resize: true
-    resize_output_w: 640
-    resize_output_h: 640
-
-    csc_switch: true                # YUV → RGB 色域转换
-    rbuv_swap_switch: false
-
-    mean_chn_0: 0
-    mean_chn_1: 0
-    mean_chn_2: 0
-    min_chn_0: 0.0
-    min_chn_1: 0.0
-    min_chn_2: 0.0
-    var_reci_chn_0: 0.00392157      # 1/255 归一化
-    var_reci_chn_1: 0.00392157
-    var_reci_chn_2: 0.00392157
-}
+```bash
+./scripts/convert_ascend.sh path/to/yolov8n.onnx yolov8n Ascend310P3
 ```
 
-ATC 转换命令（批量编译 batch=1/4/8/16）：
+脚本会为 batch=1/4/8/16 生成 `*_b{1,4,8,16}.om`，并自动传入 `--insert_op_conf=aipp.cfg`。
+
+等价的手动 ATC 示例：
 
 ```bash
 for BS in 1 4 8 16; do
     atc \
       --model=yolo11n.onnx \
       --framework=5 \
-      --output="yolo11n_nv12_bs${BS}" \
+      --output="yolo11n_b${BS}" \
       --input_shape="images:${BS},3,640,640" \
-      --input_format=NCHW \
       --soc_version=Ascend310P3 \
-      --insert_op_conf=aipp_nv12.cfg \   # 嵌入 NV12 AIPP
-      --precision_mode=allow_fp32_to_fp16
+      --insert_op_conf=scripts/aipp.cfg \
+      --precision_mode=allow_mix_precision \
+      --log=error
 done
 ```
 
-> **注意**：`src_image_size_w/h` 必须与摄像头实际输出分辨率完全匹配，AscendBackend 运行时不校验，不匹配会导致 NPU 内存越界。
+> **注意（Path A）**：`src_image_size_w/h` 必须与 **VPC 输出**（通常 640×640）一致，而非摄像头 codec 分辨率。`AscendBackend` 在尺寸不一致时会 WARN；CANN 可能报 `CheckUserAndModelSize`，**`dets` 恒为 0**。
+>
+> **注意（Path B）**：FFmpeg 软解在 CPU 上 pack **640×640** NV12；`aipp.cfg` 的 `src` 也应为 640×640。
 
 ### 配置（config.yaml）
 
@@ -650,6 +616,20 @@ models:
 - batch>1 的 D2D 拼接使用动态 `aclrtMalloc`，未来版本将引入 pool 预分配
 - DVPP 与 AIPP 必须同时启用才能走 Path A；单独 DVPP（不含 AIPP）不支持零拷贝
 
+### CANN 6 DVPP VDEC 回调（Atlas 300I Pro）
+
+CANN 6 使用 `aclvdec*` API（非 CANN 7 的 `acldvppVdecProcess`）。除 AIPP 配置外，解码回调要能在 `decodeLoop` 线程上触发，需满足：
+
+| 要求 | 说明 |
+|------|------|
+| `aclvdecSetChannelDescThreadId` | 在 `aclvdecCreateChannel` **之前**，将 `decodeLoop` 线程（`pthread_self()`）绑到通道；与 `AscendVencFfmpegMuxWriter` 中 VENC 的写法对称 |
+| `aclrtProcessReport` | 包循环内周期性调用（如 5ms 超时），泵该线程的 report queue；**不要**依赖 CANN 6 下未创建的 `dvpp_stream_` + `aclrtSubscribeReport` |
+| RTSP/RTP | **跳过** `h264_mp4toannexb`：包已是 Annex B，BSF 会把 start code 误解析为长度前缀 |
+| `aclvdecFrameConfig` | **每路连接一份**，在 `aclvdecDestroyChannel` 之后再 destroy；每帧 destroy 会导致悬空指针、回调永不触发 |
+| H.264 profile | 按 `codecpar->profile` 选择 `H264_BASELINE/MAIN/HIGH_LEVEL`；与码流不匹配时 CANN 6 可能静默丢帧 |
+
+日志中若只有 `pkt#N` 而无 `onDecoded fired`，优先检查 ThreadId 绑定与 `aclrtProcessReport` 是否在跑。
+
 ---
 
 ## 14. 常见错误速查
@@ -663,6 +643,9 @@ models:
 | `EE9999` | NPU 内部通用错误 | 查 `/var/log/npu/slog/` 详细日志 |
 | `model input size mismatch` | 实际 batch != .om 编译时的 batch | `selectModel()` 选择正确的 .om |
 | `input format mismatch` | 运行时数据格式与 ATC 编译时不一致 | 重新用正确 `--input_format` 编译 |
+| `CheckUserAndModelSize` / `User input size is bigger than om size` | Path A 传入的 NV12 字节数大于 om AIPP 期望的 `src` 尺寸（如 1080p 帧 + `src=640` 的 om） | 按 DVPP 输出改 `scripts/aipp.cfg` 的 `src_image_size_*` 与 `resize_output_*`，重新 `convert_ascend.sh` 并替换 `.om` |
+| `onDecoded` 从不触发 / 仅 `pkt#N` 日志 | CANN 6 未绑 `aclvdecSetChannelDescThreadId` 或未 `aclrtProcessReport` | 见 §13「CANN 6 DVPP VDEC 回调」 |
+| `halCqReportIrqWait` / `drvRetCode=16`（泵 report 时） | 多为 `aclrtProcessReport` 超时，队列暂无回调 | 属良性；可适当加大超时；若始终无 `onDecoded` 则查 ThreadId |
 | `DVPP_ERROR_*` | 视频硬解码器错误 | 检查 DVPP 初始化流程 |
 | `out of memory` | NPU 显存不足 | 减小 batch size 或减少并发模型数 |
 | `No parser is registered for Op [... ai.onnx::20::*]` | ONNX opset 过新，ATC 未注册该域 | 重导时指定 `opset=12` 或 `11`（或升级 CANN） |
@@ -758,25 +741,15 @@ config/models/
     └── ...
 ```
 
-### 模型转换脚本（参考 `scripts/convert_ascend.sh`）
+### 模型转换脚本（`scripts/convert_ascend.sh`）
+
+从**仓库根目录**执行（`--insert_op_conf=aipp.cfg` 为相对路径）：
 
 ```bash
-#!/bin/bash
-ONNX=$1
-NAME=$2
-SOC=${3:-Ascend310P3}
-
-for BS in 1 4 8 16; do
-  atc \
-    --model="$ONNX" \
-    --framework=5 \
-    --output="${NAME}_bs${BS}" \
-    --input_shape="images:${BS},3,640,640" \
-    --input_format=NCHW \
-    --soc_version="$SOC" \
-    --precision_mode=allow_fp32_to_fp16
-done
+./scripts/convert_ascend.sh path/to/model.onnx model_name [Ascend310P3]
 ```
+
+脚本会为 batch 1/4/8/16 调用 ATC，并嵌入 `scripts/aipp.cfg`（NV12 AIPP + 1080p→640 resize）。详见 §12–§13。
 
 ### `sink.stream` 硬件编码（可选，CANN 6 + 310P）
 

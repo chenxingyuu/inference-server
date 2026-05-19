@@ -21,7 +21,8 @@ public:
     SourceRtspStage(std::string id, const PipelineSourceConfig& src,
                     int sample_fps, SamplingMode sampling_mode, bool use_hwdec,
                     std::shared_ptr<GpuDeviceAllocator> gpu_alloc = nullptr,
-                    bool use_ascend_dvpp = false, int ascend_device_id = 0);
+                    bool use_ascend_dvpp = false, int ascend_device_id = 0,
+                    int vpc_out_width = 0, int vpc_out_height = 0);
 
     std::string id() const override;
     bool isSource() const override;
@@ -43,6 +44,8 @@ private:
     std::unique_ptr<DVPPDecoder> dvpp_decoder_;
     bool use_ascend_dvpp_{false};
     int  ascend_device_id_{0};
+    int  vpc_out_width_{0};
+    int  vpc_out_height_{0};
 #endif
     std::atomic<bool> running_{false};
     std::mutex mu_;

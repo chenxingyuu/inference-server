@@ -249,6 +249,13 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
         const int stride_h = f0.aligned_height > 0 ? f0.aligned_height : f0.height;
         const size_t frame_nv12 =
             static_cast<size_t>(stride_w) * static_cast<size_t>(stride_h) * 3 / 2;
+        const size_t expected_nv12 =
+            static_cast<size_t>(input_w_) * static_cast<size_t>(input_h_) * 3 / 2;
+        if (frame_nv12 != expected_nv12) {
+            LOG_WARN("AscendBackend: Path A NV12 bytes/frame={} but model expects {} "
+                     "(stride {}x{} vs input {}x{}); check DVPP VPC and aipp.cfg src_*",
+                     frame_nv12, expected_nv12, stride_w, stride_h, input_w_, input_h_);
+        }
         in_bytes = static_cast<size_t>(model_bs) * frame_nv12;
 
         if (req_bs == 1 && model_bs == 1) {

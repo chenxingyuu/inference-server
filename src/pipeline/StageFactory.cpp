@@ -83,7 +83,9 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
             ctx.ingest_use_hwdec,
             ctx.gpu_alloc,
             ctx.ingest_use_ascend_dvpp,
-            ctx.ingest_ascend_device_id);
+            ctx.ingest_ascend_device_id,
+            ctx.ingest_vpc_out_width,
+            ctx.ingest_vpc_out_height);
     }
     if (cfg.type == "source.file") {
         bool loop = getBoolWithDefault(cfg.with, "loop", false);

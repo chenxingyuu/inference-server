@@ -354,6 +354,9 @@ if(BUILD_ASCEND_BACKEND)
     add_executable(test_dvpp_decoder
         test_dvpp_decoder.cpp
         ${CMAKE_SOURCE_DIR}/src/stream/DVPPDecoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/stream/DvppVpcScaler.cpp
+        ${CMAKE_SOURCE_DIR}/src/stream/DvppOutputPool.cpp
+        ${CMAKE_SOURCE_DIR}/src/infer/AscendProcessRuntime.cpp
         ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
         ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
     )
@@ -379,6 +382,29 @@ if(BUILD_ASCEND_BACKEND)
         nlohmann_json::nlohmann_json
     )
     add_test(NAME test_dvpp_decoder COMMAND test_dvpp_decoder
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+    add_executable(test_dvpp_vpc
+        test_dvpp_vpc.cpp
+        ${CMAKE_SOURCE_DIR}/src/stream/DvppVpcScaler.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
+    )
+    target_include_directories(test_dvpp_vpc PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+    )
+    target_compile_definitions(test_dvpp_vpc PRIVATE BUILD_ASCEND_BACKEND)
+    target_link_libraries(test_dvpp_vpc PRIVATE
+        GTest::gtest_main
+        GTest::gmock
+        spdlog::spdlog
+        Threads::Threads
+        AscendCL::ascendcl
+        $<$<TARGET_EXISTS:AscendCL::dvpp>:AscendCL::dvpp>
+        yaml-cpp
+        nlohmann_json::nlohmann_json
+    )
+    add_test(NAME test_dvpp_vpc COMMAND test_dvpp_vpc
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 endif() # BUILD_ASCEND_BACKEND
 

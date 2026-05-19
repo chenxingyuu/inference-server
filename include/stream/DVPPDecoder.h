@@ -3,12 +3,16 @@
 #ifdef BUILD_ASCEND_BACKEND
 
 #include "stream/IStreamDecoder.h"
+#include "stream/DvppVpcScaler.h"
+#include "stream/DvppOutputPool.h"
 #include "common/Types.h"
 #include <acl/acl.h>
 #include <acl/ops/acl_dvpp.h>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -118,12 +122,24 @@ public:
         // slot_yuv_buf: device pointer inside the slot (written by DVPP, read by NPU).
         std::shared_ptr<void> pool_release;
         void*                 slot_yuv_buf{nullptr};
+        acldvppPicDesc*       in_pic_desc{nullptr};
+
+        // VPC path (optional): stretch decode output to model input size on NPU.
+        bool                  vpc_enabled{false};
+        uint32_t              vpc_out_w{0};
+        uint32_t              vpc_out_h{0};
+        DvppVpcScaler*                  vpc_scaler{nullptr};
+        std::shared_ptr<DvppOutputPool> vpc_pool;
+        aclrtContext                    acl_context{nullptr};
     };
+
+    void setVpcScalerForTest(DvppVpcScaler* scaler) { vpc_scaler_override_ = scaler; }
+    bool vpcEnabledForTest() const { return vpc_enabled_; }
 
 private:
     void decodeLoop(StreamConfig cfg);
     bool initChannel(int device_id, uint32_t aligned_w, uint32_t aligned_h,
-                     bool is_h265 = false);
+                     int h264_profile, bool is_h265 = false);
     void destroyChannel();
 
     std::string              stream_id_;
@@ -165,6 +181,12 @@ private:
     static std::atomic<uint32_t> s_channel_counter_;
 
     uint64_t                 frame_seq_{0};   // monotonic per-stream frame counter
+
+    uint32_t                 vpc_out_w_{0};
+    uint32_t                 vpc_out_h_{0};
+    bool                     vpc_enabled_{false};
+    DvppVpcScaler            vpc_scaler_;
+    DvppVpcScaler*           vpc_scaler_override_{nullptr};
 
     static constexpr int kOutputPoolSize = 32;
 };

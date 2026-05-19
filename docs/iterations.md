@@ -569,7 +569,7 @@ tasks:
 **修复**：
 - **回调死循环**（CRITICAL）：`start()` 将用户 callback 直接通过 `std::move` 传入 `decodeLoop`，不再创建中间 lambda；`decodeLoop` 在 `ctx_.cb` 中存储真实 callback，彻底消除 `onDecoded` → lambda → `ctx_.cb`（= lambda）的无限递归
 - **`initChannel` 部分初始化资源泄漏**（HIGH）：`decodeLoop` 在 `initChannel()` 返回 false 后立即调用 `destroyChannel()`，释放已分配的 `channel_desc_` / `dvpp_stream_`（`destroyChannel` 对 null 指针安全）
-- **CANN6 vs CANN7 同步**：CANN7 用 `aclrtSynchronizeStream(dvpp_stream_)`（精确到 vdec stream）；CANN6 `aclvdecSendFrame` 无 per-call stream，用 `aclrtSynchronizeDevice()`，在包被 unref 前保证 DMA 完成
+- **CANN6 vs CANN7 同步**：CANN7 用 `aclrtSynchronizeStream(dvpp_stream_)`；CANN6 当时用 `aclrtSynchronizeDevice()`（后续 Phase 33 改为 `aclvdecSetChannelDescThreadId` + `aclrtProcessReport` 泵回调，见下）
 - **发送失败回收**：`aclvdecSendFrame` / `acldvppVdecProcess` 失败时正确 free `yuv_buf` 并 destroy `pic_desc` / `stream_desc`，防止 DVPP 不持有描述符时内存泄漏
 
 **状态**：✅ 完成
@@ -831,6 +831,29 @@ source.rtsp → infer.sahiScheduler → infer.engine → post.sahiMerge → trac
 - tile 共享原帧 `cv::Mat` 内存（`image(rect)` 是 ROI 引用，不做深拷贝），首个 tile 持有 `parent_frame` 引用保证原帧生命周期
 - IoS 补充 IoU：大目标框包含小目标框时 IoU 可能仅 0.3，但 IoS > 0.9，双策略避免漏合并
 - ROI 模式下 `min_roi_width/height` 保证切片不小于模型输入尺寸，避免无效推理
+
+---
+
+## Phase 33 — DVPP CANN6 回调派发 + AIPP 与 1080p 对齐
+
+**完成**：2026-05-15
+
+**目标**：在 192.168.3.135（Atlas 300I Pro，CANN 6）上打通 DVPP 硬解 → AIPP → 推理全链路；修复 `onDecoded` 不触发与 AIPP 输入尺寸不匹配导致 `dets=0`。
+
+**修复**：
+
+- **VDEC 回调派发**（CRITICAL）：`aclvdecSetChannelDescThreadId(desc, pthread_self())` 须在 `aclvdecCreateChannel` 之前调用；`decodeLoop` 包循环内 `aclrtProcessReport(5)` 泵 report queue。未绑线程时 `aclvdecSendFrame` 成功但 `onDecoded` 永不触发。
+- **RTSP Annex B**（HIGH）：RTSP/RTP 输入跳过 `h264_mp4toannexb` BSF，避免把 start code 误当 AVCC 长度前缀破坏 NAL。
+- **`aclvdecFrameConfig` 生命周期**（HIGH）：每路连接共享一份 `session_frame_cfg`，在 `aclvdecDestroyChannel` 之后再 destroy，避免悬空指针。
+- **H.264 profile**：按 `codecpar->profile` 选择 `H264_BASELINE/MAIN/HIGH_LEVEL`。
+- **AIPP 配置**（HIGH）：`scripts/aipp.cfg` 改为 `src 1920×1080` + `resize 640×640`；修复 `User input size is bigger than om size` 与推理噪声。改 cfg 后须重新 ATC 并替换 `.om`。
+- **输出池**：in-flight 槽位 32，降低高帧率下 pool 耗尽。
+
+**真机验证（135）**：`onDecoded fired seq=N output=ok`，`hw decode done 1920x1080 decode_ms` 个位数～数十 ms；推理链路 `infer done` 正常。部署新 om 后应消除 GE `CheckUserAndModelSize` 告警。
+
+**文档**：`docs/ascend-guide.md` §12–§14、§16 与 `README.md` Ascend 转换节已同步。
+
+**状态**：✅ 代码与文档完成；**待**按新 `aipp.cfg` 在转换机重导 om 并替换 135 上的模型文件
 
 ---
 

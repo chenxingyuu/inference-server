@@ -89,6 +89,8 @@ struct StreamConfig {
     int         cuda_device_id{0}; // set programmatically by GpuDeviceAllocator; not from YAML
     bool        use_ascend_dvpp{false};  // Ascend: true → DVPP NPU hardware decode
     int         ascend_device_id{0};     // NPU device index for DVPP decoding
+    int         ascend_vpc_out_width{0};  // 0 = no VPC; else stretch decode to this size
+    int         ascend_vpc_out_height{0};
     TrackerType tracker{TrackerType::None};
     ByteTrackConfig byte_track{};
     SourceType  source_type{SourceType::RTSP};  // RTSP stream or local file
