@@ -834,11 +834,11 @@ source.rtsp → infer.sahiScheduler → infer.engine → post.sahiMerge → trac
 
 ---
 
-## Phase 33 — DVPP CANN6 回调派发 + AIPP 与 1080p 对齐
+## Phase 33 — DVPP CANN6 VDEC 回调派发
 
 **完成**：2026-05-15
 
-**目标**：在 192.168.3.135（Atlas 300I Pro，CANN 6）上打通 DVPP 硬解 → AIPP → 推理全链路；修复 `onDecoded` 不触发与 AIPP 输入尺寸不匹配导致 `dets=0`。
+**目标**：在 192.168.3.135（Atlas 300I Pro，CANN 6）上修复 DVPP 硬解 `onDecoded` 不触发；为后续 Path A 零拷贝铺路。
 
 **修复**：
 
@@ -846,14 +846,39 @@ source.rtsp → infer.sahiScheduler → infer.engine → post.sahiMerge → trac
 - **RTSP Annex B**（HIGH）：RTSP/RTP 输入跳过 `h264_mp4toannexb` BSF，避免把 start code 误当 AVCC 长度前缀破坏 NAL。
 - **`aclvdecFrameConfig` 生命周期**（HIGH）：每路连接共享一份 `session_frame_cfg`，在 `aclvdecDestroyChannel` 之后再 destroy，避免悬空指针。
 - **H.264 profile**：按 `codecpar->profile` 选择 `H264_BASELINE/MAIN/HIGH_LEVEL`。
-- **AIPP 配置**（HIGH）：`scripts/aipp.cfg` 改为 `src 1920×1080` + `resize 640×640`；修复 `User input size is bigger than om size` 与推理噪声。改 cfg 后须重新 ATC 并替换 `.om`。
-- **输出池**：in-flight 槽位 32，降低高帧率下 pool 耗尽。
 
-**真机验证（135）**：`onDecoded fired seq=N output=ok`，`hw decode done 1920x1080 decode_ms` 个位数～数十 ms；推理链路 `infer done` 正常。部署新 om 后应消除 GE `CheckUserAndModelSize` 告警。
+**真机验证（135）**：`onDecoded fired seq=N output=ok`，`hw decode done 1920x1080 decode_ms` 个位数～数十 ms。
 
-**文档**：`docs/ascend-guide.md` §12–§14、§16 与 `README.md` Ascend 转换节已同步。
+**状态**：✅ 完成（尺寸对齐与 VPC 见 Phase 34）
 
-**状态**：✅ 代码与文档完成；**待**按新 `aipp.cfg` 在转换机重导 om 并替换 135 上的模型文件
+---
+
+## Phase 34 — DVPP VPC Path A + 输出池与 sink 队列可观测性
+
+**完成**：2026-05-19
+
+**目标**：1080p 码流在 NPU 侧经 **DVPP VPC** 拉伸到模型输入（如 640×640），与 `scripts/aipp.cfg`（`src=640×640`，无 AIPP resize）配合，消除 `CheckUserAndModelSize` / `dets=0`；并提升 DVPP 高帧率稳定性与推流阶段队列诊断能力。
+
+**新增 / 修复**（PR #31 `8e45836`）：
+
+- **`DvppVpcScaler`**（`include/stream/DvppVpcScaler.h` + `src/stream/DvppVpcScaler.cpp`）：DVPP VPC 硬件 YUV420SP→YUV420SP resize；`VpcApiStub` 可注入；`test_dvpp_vpc.cpp` 覆盖 init/resize 失败路径。
+- **`DvppOutputPool`**：VPC 输出 HBM 槽位池，与 VDEC 输出池分离。
+- **ingest 自动注入**：`TaskManager` 从 pipeline 中 `infer.engine` 对应模型的 `input_shape` 写入 `StreamConfig.ascend_vpc_out_width/height` → `SourceRtspStage` → `DVPPDecoder`；codec 分辨率已与模型输入一致时跳过 VPC。
+- **`scripts/aipp.cfg`**：保持 **640×640** NV12 `src`（不在 AIPP 内做 1080p→640 resize；缩放由 VPC 完成）。修改 `src_image_size_*` 后须重新 ATC。
+- **`AscendBackend`**：Path A 输入尺寸与 VPC 输出不一致时 WARN。
+
+**修复**（PR #30 `d66a66c`）：
+
+- **VDEC 输出池**：in-flight 槽位扩至 **32**，降低高帧率下 pool 耗尽与丢帧。
+- CANN 6 兼容与 ingest 配置项整理（见 PR diff；`README` 配置示例已同步）。
+
+**可观测性**（PR #29 `fee5755`）：
+
+- **`DrawAndStreamStage::enqueue`**：满队列时按 `StreamDropPolicy` 记录 `drop_oldest_then_enqueue` / `drop_newest`，DEBUG 日志含 `queue_size` / `queue_capacity` / `dropped_total`，便于排查推流积压。
+
+**文档**：`docs/ascend-guide.md` §12–§14、`README.md` Ascend 节、`docs/ARCHITECTURE.md` Ascend ingest 与管理面描述已同步。
+
+**状态**：✅ 代码与文档完成；部署 Path A 时需确认 `.om` 的 AIPP `src` 与 VPC 输出一致（默认 640×640）
 
 ---
 

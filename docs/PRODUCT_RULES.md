@@ -4,9 +4,9 @@ Durable product-level constraints for `inference-server`.
 
 ## Core Invariants
 
-- The service supports dynamic **task** management through HTTP endpoints (each task runs a pipeline graph against one source).
+- The service supports dynamic **task** management: the C++ engine exposes NDJSON commands on a **Unix domain socket** (`server.socket_path`, default `/var/run/infer.sock`); the Go **`infer-server`** sidecar forwards HTTP (`/healthz`, `/metrics`, `/tasks`, model repository APIs, etc.) to that socket. **`infer-ctl`** is the CLI for the same protocol.
 - Inference behavior is model-scoped and driven by `pipelines[].nodes` referencing `models[].id`; `tasks[]` selects which graph runs for which source.
-- Telemetry endpoints (`/healthz`, `/metrics`, `/tasks`) remain available.
+- Telemetry endpoints exposed by **`infer-server`** (`/healthz`, `/metrics`, `/tasks`, …) remain available to operators and Prometheus.
 - Stream lifecycle semantics are externally observable:
   - Heartbeat continues to emit per-stream `stream_state`
   - Control events are emitted to the dedicated Kafka control topic (default `inference-control`)
@@ -25,3 +25,4 @@ When code paths change, update at least one relevant document:
 - `docs/ARCHITECTURE.md` for architecture boundary changes
 - `README.md` for usage/operations changes
 - `docs/iterations.md` for notable implementation milestones
+- `docs/ascend-guide.md` for Ascend/DVPP/AIPP/VPC behavior or conversion workflow changes

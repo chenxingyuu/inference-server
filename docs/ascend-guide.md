@@ -643,7 +643,7 @@ CANN 6 使用 `aclvdec*` API（非 CANN 7 的 `acldvppVdecProcess`）。除 AIPP
 | `EE9999` | NPU 内部通用错误 | 查 `/var/log/npu/slog/` 详细日志 |
 | `model input size mismatch` | 实际 batch != .om 编译时的 batch | `selectModel()` 选择正确的 .om |
 | `input format mismatch` | 运行时数据格式与 ATC 编译时不一致 | 重新用正确 `--input_format` 编译 |
-| `CheckUserAndModelSize` / `User input size is bigger than om size` | Path A 传入的 NV12 字节数大于 om AIPP 期望的 `src` 尺寸（如 1080p 帧 + `src=640` 的 om） | 按 DVPP 输出改 `scripts/aipp.cfg` 的 `src_image_size_*` 与 `resize_output_*`，重新 `convert_ascend.sh` 并替换 `.om` |
+| `CheckUserAndModelSize` / `User input size is bigger than om size` | Path A 传入的 NV12 字节数与 om AIPP 期望的 `src` 不一致（如未走 VPC、仍送 1080p 而 om `src=640`） | 确认 `use_ascend_dvpp` 且 VPC 已启用（`ascend_vpc_out_*` 与模型 `input_shape` 一致）；必要时改 `scripts/aipp.cfg` 的 `src_image_size_*` 后重新 `convert_ascend.sh` 并替换 `.om` |
 | `onDecoded` 从不触发 / 仅 `pkt#N` 日志 | CANN 6 未绑 `aclvdecSetChannelDescThreadId` 或未 `aclrtProcessReport` | 见 §13「CANN 6 DVPP VDEC 回调」 |
 | `halCqReportIrqWait` / `drvRetCode=16`（泵 report 时） | 多为 `aclrtProcessReport` 超时，队列暂无回调 | 属良性；可适当加大超时；若始终无 `onDecoded` 则查 ThreadId |
 | `DVPP_ERROR_*` | 视频硬解码器错误 | 检查 DVPP 初始化流程 |
