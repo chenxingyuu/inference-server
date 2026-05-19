@@ -27,6 +27,12 @@ struct SinkFfplayConfig {
     int reconnect_max_ms{15000};
     float draw_conf_thresh{0.0f};
     int line_thickness{2};
+    bool draw_timestamp{false};
+    bool draw_timestamp_with_stream_id{false};
+    int timestamp_x{10};
+    int timestamp_y{28};
+    float timestamp_font_scale{0.6f};
+    int timestamp_thickness{1};
     StreamDropPolicy drop_policy{StreamDropPolicy::DropOldest};
 };
 
@@ -64,7 +70,7 @@ private:
     std::condition_variable cv_;
     std::deque<QueueItem> queue_;
     FILE* ffplay_pipe_{nullptr};
-    pid_t ffplay_pid_{-1};
+    std::atomic<pid_t> ffplay_pid_{-1};
 
     std::atomic<uint64_t> reconnect_attempts_{0};
     // Worker-thread-only — no mutex needed

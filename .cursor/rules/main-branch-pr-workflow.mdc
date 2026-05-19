@@ -1,0 +1,20 @@
+---
+description: Enforce PR-based changes for the main branch
+alwaysApply: true
+---
+
+# Main Branch Protection Workflow
+
+- Do not make code changes directly on `main` or `master`.
+- Before editing code, check the current branch. If it is `main` or `master`, create or switch to a feature branch first.
+- Do not commit or push directly to `main` or `master`.
+- All changes intended for `main` must go through a pull request.
+- Merge to `main` only after required CI checks pass.
+- If a task explicitly requires an emergency hotfix on `main`, ask for user confirmation before making changes.
+
+```bash
+# Good workflow
+git switch -c feature/<short-description>
+# make changes, commit, push, open PR
+# merge only after CI passes
+```

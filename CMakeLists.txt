@@ -94,21 +94,12 @@ if(BUILD_ONNX_BACKEND)
     endif()
 endif()
 
-# ── cpp-httplib (header-only HTTP server) ──────────────────────────────────────
-include(FetchContent)
-FetchContent_Declare(
-    httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG        v0.14.3
-    GIT_SHALLOW    TRUE
-)
-set(HTTPLIB_COMPILE OFF CACHE BOOL "Use header-only mode")
-FetchContent_MakeAvailable(httplib)
 
 # ── Source files ──────────────────────────────────────────────────────────────
 set(COMMON_SOURCES
     src/common/Config.cpp
     src/common/Logger.cpp
+    src/common/RuntimeState.cpp
 )
 
 set(STREAM_SOURCES
@@ -117,10 +108,12 @@ set(STREAM_SOURCES
     src/stream/StreamPool.cpp
     src/stream/StreamHealthRegistry.cpp
     src/stream/GpuDeviceAllocator.cpp
+    src/stream/StopAwareSleep.cpp
 )
 
 set(INFER_SOURCES
     src/infer/BackendFactory.cpp
+    src/infer/BgrToNv12.cpp
 )
 if(BUILD_TRT_BACKEND)
     list(APPEND INFER_SOURCES src/infer/TRTBackend.cpp)
@@ -128,9 +121,12 @@ if(BUILD_TRT_BACKEND)
     list(APPEND INFER_SOURCES src/cuda/CudaPreprocess.cu)
 endif()
 if(BUILD_ASCEND_BACKEND)
+    list(APPEND INFER_SOURCES src/infer/AscendProcessRuntime.cpp)
     list(APPEND INFER_SOURCES src/infer/AscendBackend.cpp)
     list(APPEND INFER_SOURCES src/infer/AscendBufferPool.cpp)
-    list(APPEND STREAM_SOURCES src/stream/DVPPDecoder.cpp)
+    list(APPEND INFER_SOURCES src/stream/DVPPDecoder.cpp)
+    list(APPEND INFER_SOURCES src/stream/DvppVpcScaler.cpp)
+    list(APPEND INFER_SOURCES src/stream/DvppOutputPool.cpp)
 endif()
 if(BUILD_ONNX_BACKEND)
     list(APPEND INFER_SOURCES src/infer/OnnxBackend.cpp)
@@ -157,6 +153,9 @@ set(PIPELINE_SOURCES
     src/pipeline/stages/InferEngineStage.cpp
     src/pipeline/stages/InferEngineWorkerStage.cpp
     src/pipeline/stages/JoinByFrameStage.cpp
+    src/pipeline/stages/SahiMergeStage.cpp
+    src/pipeline/stages/SahiRoiRegistry.cpp
+    src/pipeline/stages/SahiSchedulerStage.cpp
     src/pipeline/stages/SinkKafkaStage.cpp
     src/pipeline/stages/SourceFileStage.cpp
     src/pipeline/stages/SourceRtspStage.cpp
@@ -169,6 +168,9 @@ set(PIPELINE_SOURCES
     src/pipeline/ResultMerger.cpp
     src/pipeline/ModelManager.cpp
 )
+if(BUILD_ASCEND_BACKEND)
+    list(APPEND PIPELINE_SOURCES src/pipeline/stages/AscendVencFfmpegMuxWriter.cpp)
+endif()
 
 set(TRACKER_SOURCES
     src/tracker/ByteTrackTracker.cpp
@@ -178,9 +180,6 @@ set(TRACKER_SOURCES
 set(PUBLISHER_SOURCES
     src/publisher/KafkaPublisher.cpp
     src/publisher/AttributePublisher.cpp
-    src/publisher/HeartbeatPublisher.cpp
-    src/publisher/ControlPublisher.cpp
-    src/publisher/ControlEventBus.cpp
     src/publisher/MultiPublisher.cpp
     $<$<BOOL:${BUILD_GRPC_PUBLISHER}>:${CMAKE_SOURCE_DIR}/src/publisher/GrpcPublisher.cpp>
     $<$<BOOL:${BUILD_REDIS_PUBLISHER}>:${CMAKE_SOURCE_DIR}/src/publisher/RedisPublisher.cpp>
@@ -316,7 +315,7 @@ set(METRICS_SOURCES
 )
 
 set(SERVER_SOURCES
-    src/server/ManagementServer.cpp
+    src/server/UnixSocketServer.cpp
 )
 
 # ── Library ───────────────────────────────────────────────────────────────────
@@ -356,8 +355,7 @@ target_link_libraries(infer_core PUBLIC
     ${OpenCV_LIBS}
     ${RDKAFKA_LIBRARIES}
     CURL::libcurl
-    httplib::httplib
-    $<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer>
+$<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer>
     $<$<BOOL:${BUILD_TRT_BACKEND}>:CUDA::cudart>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:AscendCL::ascendcl>
     $<$<AND:$<BOOL:${BUILD_ASCEND_BACKEND}>,$<TARGET_EXISTS:AscendCL::dvpp>>:AscendCL::dvpp>

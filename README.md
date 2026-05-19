@@ -13,21 +13,44 @@
 ## 架构概览
 
 ```text
-RTSP(source) -> decode.ffmpeg -> (fan-out)
+RTSP(source) -> decode.ffmpeg | decode.dvpp (Ascend 可选) -> (fan-out)
             -> archive.raw (可选)
             -> preprocess.yolo -> infer.engine -> postprocess.yolo
             -> track.bytetrack (可选)
             -> join.byFrameId (可选)
-            -> sink.kafka（publishers: 配置可同时扇出到 gRPC / Redis）
+            -> sink.publish（publishers: 配置可同时扇出到 Kafka / gRPC / Redis）
             -> sink.stream (可选，画框+RTSP/RTMP 推流)
             -> sink.ffplay (可选，画框+本机 ffplay 预览)
-            -> ManagementServer (/healthz /metrics /tasks)
+
+管理面: inferenced (C++) --Unix socket--> infer-server (Go HTTP: /healthz /metrics /tasks ...)
+        infer-ctl (Go CLI) 直连同一 socket
 ```
 
 运行时关键点：
 
 - Pipeline 可编排（DAG）：用 `sources` + `pipelines`（图模板）+ `tasks`（`source_id` + `pipeline_id`）声明拓扑与运行实例，支持分支并行与汇合。
-- 模型配置仍集中在 `models`，由 `infer.engine` stage 引用（`with.model_id`）。
+- 模型清单由根配置里的 `models:` 与可选的 **model repository**（`server.model_repository`）在启动时合并；`infer.engine` 通过 `with.model_id` 引用合并后的 `models[].id`。
+
+### Model repository（可选，类 Triton 目录布局）
+
+当 `server.model_repository` 非空（或环境变量 `INFER_MODEL_REPOSITORY` 非空，**环境变量覆盖 YAML**）时，服务在 `loadConfig` 阶段扫描该目录，并把发现的模型 **追加** 到 `AppConfig::models`。与根配置 `models:` 出现 **相同 `id` 会报错**。
+
+目录约定：
+
+```text
+<repository>/
+  <model_id>/
+    config.yaml          # 与根配置里单条 models[] 同字段（不含顶层 models 键）
+    <version>/           # 仅正整数字符串目录名，例如 1、2
+      *.onnx | *.engine | *.om | ...
+```
+
+- **`<model_id>`** 必须匹配 `^[A-Za-z0-9_-]+$`，且与 `config.yaml` 里的 `id`（若填写）一致。
+- **`active_version`**（可选，整数）：选用该版本子目录；未设置则取 **最大** 版本号。
+- **`weight_file`**（可选，字符串）：所选版本目录内的主权重文件名；未设置则按后端自动探测：TensorRT 取唯一 `.engine`，ONNX 取唯一 `.onnx`，Ascend 在 `om_paths` 未配置时取唯一 `.om`（多文件歧义则报错）。
+- `engine_path` / `onnx_path` / `om_paths` 若为相对路径，则相对于 **所选版本目录** 解析。
+
+**限制**：合并发生在进程启动、`TaskManager::loadAll()` 构建 DAG **之前**；DAG 内的 `InferEngineWorkerStage` 在创建时 **拷贝** `ModelConfig`，因此仅改磁盘上的仓库 **不会** 自动更新已运行任务中的权重；需重启进程或重建任务图（与 Triton 在线切版本不同，除非后续做动态注册表）。
 
 ## 依赖
 
@@ -88,50 +111,59 @@ make docker-build-gpu
 make docker-build-npu
 ```
 
-## HTTP 管理接口
+## 管理接口
 
-默认端口来自 `server.management_port`（默认 `8080`）。
-
-### 健康和可观测
+管理接口通过 **Unix Domain Socket** 暴露，路径来自 `server.socket_path`（默认 `/var/run/infer.sock`，可在配置中覆盖）。协议为 newline-delimited JSON，每条连接发一条请求收一条响应。
 
 ```bash
-curl http://localhost:8080/healthz
-curl http://localhost:8080/metrics
-```
+# 健康检查
+echo '{"cmd":"health"}' | socat - UNIX-CONNECT:./infer.sock
 
-Kafka 可观测 topic：
-- `inference-heartbeat`：引擎与 stream 心跳（含 `stream_state`）
-- `inference-control`：stream 控制事件（断流/恢复/终态失败）
+# Prometheus 格式指标
+echo '{"cmd":"metrics"}' | socat - UNIX-CONNECT:./infer.sock
 
-### Task 管理
-
-```bash
 # 列出 task 与状态
-curl http://localhost:8080/tasks
+echo '{"cmd":"list_tasks"}' | socat - UNIX-CONNECT:./infer.sock
 
-# 启动 / 停止某个 task（id 与配置中 tasks[].id 一致，例如 task_cam_001）
-curl -X POST http://localhost:8080/tasks/task_cam_001/start
-curl -X POST http://localhost:8080/tasks/task_cam_001/stop
+# 启动 / 停止某个 task
+echo '{"cmd":"start_task","id":"task_cam_001"}' | socat - UNIX-CONNECT:./infer.sock
+echo '{"cmd":"stop_task","id":"task_cam_001"}' | socat - UNIX-CONNECT:./infer.sock
 ```
+
 
 ## Pipeline 配置（新格式）
 
 配置文件以 `sources` 描述输入源（`id`、`url` 与重连相关字段），以 `pipelines` 描述可编排 DAG 模板（nodes/edges），以 `tasks` 绑定「哪路源跑哪张图」。
 每条 `tasks` 可单独设置 **`sample_fps`**（默认 `5`，须 ≥ 1）与 **`use_hwdec`**（默认 `false`）；二者已从 `sources` 迁出，若在 `sources` 下仍写 `sample_fps` / `use_hwdec`，加载配置时会报错提示迁移到对应 task。
-示例见 `config/config.cpu.yaml` / `config/config.gpu.yaml` / `config/config.yaml`。
+示例见 `config/config.cpu.yaml` / `config/config.gpu.yaml` / `config/config.npu.yaml`。
 
-常见 stage（首批）：
-- `source.rtsp`：RTSP/文件输入（内部使用 `FFmpegDecoder`）
+常见 stage：
+- `source.rtsp`：RTSP 输入（内部使用 `FFmpegDecoder`）
+- `source.file`：本地视频文件输入
 - `decode.ffmpeg`：解码阶段（当前为占位 passthrough，解码由 source 完成）
 - `archive.raw`：原图归档（复用 `FrameArchiver`，支持 `use_hwdec=true` 的 GPU 帧，默认开启）
   - 可通过 `frame_archive.worker_count` 配置归档并发 worker 数（默认 `1`）。
 - `preprocess.yolo` / `postprocess.yolo`：占位 passthrough（后续可落地真实算子）
 - `infer.engine`：推理 stage（引用 `models[].id`）；DAG 路径下由 `InferWorkerGroup` 执行，支持 `models[].instance_count` 与 `models[].device_ids`（每实例一个后端；`device_ids` 拼写须正确）。攒批策略与 `batch_size`、`max_queue_delay_us` 一致（与 `ModelManager` + `BatchScheduler` 的流池攒批路径不同）。
+- `infer.sahiScheduler`：SAHI 滑窗切块，将大分辨率帧切成重叠 tile 后送入下游 `infer.engine`，最后由 `infer.sahiMerge` 合并 NMS 结果。参数：`tile_width`、`tile_height`、`overlap_ratio`、`full_interval`（每 N 帧插入一次全图推理）、`max_tiles_per_frame`。
 - `track.bytetrack`：ByteTrack 追踪
 - `join.byFrameId`：归档信息回填到推理结果（按 frame id join）
-- `sink.kafka`：结果输出；通过 `publishers:` 配置可同时扇出到 Kafka / gRPC / Redis（见下方配置示例）
-- `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`，需 `output_url`）
+- `sink.publish`：结果输出；通过 `publishers:` 配置可同时扇出到 Kafka / gRPC / Redis（见下方配置示例）
+- `sink.stream`：叠加检测框/标签后推流（支持 `protocol=rtsp|rtmp`，需 `output_url`；`encoder` 可选 `ffmpeg_x264`（默认）或 `ascend_venc`）。`output_url` 支持占位符 `{task_id}` / `{source_id}`，在每个 task 构图时插值；未知占位符会报错。
 - `sink.ffplay`：叠加检测框后通过管道喂给本机 `ffplay`（BGR rawvideo，需已安装 ffmpeg/ffplay）
+
+`sink.stream` 占位符示例（多 task 复用同一 pipeline 时为每路生成不同推流地址）：
+
+```yaml
+pipelines:
+  - id: pipe_stream
+    nodes:
+      - id: sink_stream
+        type: sink.stream
+        with:
+          output_url: "rtsp://push/live/{source_id}/{task_id}"
+          protocol: rtsp
+```
 
 ### 多路发布配置（publishers:）
 
@@ -164,6 +196,8 @@ publishers:
 | --- | --- | --- | --- |
 | `infer_latency_ms` | histogram | `model_id` | 单批推理耗时 |
 | `e2e_latency_ms` | histogram | `stream_id` | 端到端延迟 |
+| `sink_publish_latency_ms` | histogram | `stream_id` | 帧到达 `sink.publish` 的延迟 |
+| `sink_stream_latency_ms` | histogram | `stream_id` | 帧在 `sink.stream` 写流成功时的延迟 |
 | `frames_decoded_total` | counter | `stream_id` | 解码帧数 |
 | `frames_dropped_total` | counter | `stream_id` | 解码丢帧数 |
 | `kafka_published_total` | counter | 无 | Kafka 成功发布数 |
@@ -184,12 +218,17 @@ publishers:
 
 ## Ascend 模型转换
 
+在仓库根目录执行（脚本会嵌入 `scripts/aipp.cfg`，默认 **640×640** NV12 `src`，无 AIPP resize；1080p 等码流由运行时 **DVPP VPC** 拉伸到模型输入）：
+
 ```bash
-# ONNX -> Ascend .om（自动导出 batch=1/4/8/16）
-bash scripts/convert_ascend.sh yolo11s.onnx yolo11s
+# ONNX -> Ascend .om（batch=1/4/8/16，含 NV12 AIPP）
+./scripts/convert_ascend.sh path/to/yolo11s.onnx yolo11s
 ```
 
 转换后可在 `models/` 得到 `*_b1.om / *_b4.om / *_b8.om / *_b16.om`，并在 `config/config.yaml` 的 `om_paths` 中配置。
+
+- `scripts/aipp.cfg` 的 `src_image_size_w/h` 必须与 **VPC 输出 / Path B pack 尺寸**一致（通常 640×640），修改后须重新 ATC 并替换 `.om`。
+- 任务级 `use_ascend_dvpp: true` 启用 DVPP 硬解；VPC 目标尺寸由 `infer.engine` 对应模型的 `input_shape` 自动注入（见 [docs/ascend-guide.md](docs/ascend-guide.md) §13）。
 
 ## 项目结构
 
@@ -202,9 +241,9 @@ inference-server/
 │   ├── decoder/      YOLO 与分类器后处理
 │   ├── pipeline/     调度、worker、级联、模型管理
 │   ├── tracker/      可选目标追踪（ByteTrack/DeepSORT 占位）
-│   ├── publisher/    Kafka 与属性发布
+│   ├── publisher/    发布器
 │   ├── metrics/      指标导出
-│   ├── server/       HTTP 管理接口
+│   ├── server/       Unix Socket 管理接口
 │   ├── archive/      帧归档与 MinIO 上传
 │   └── cuda/         CUDA 预处理头文件
 ├── src/              对应实现

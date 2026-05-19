@@ -1,0 +1,470 @@
+import { useState } from 'react'
+import { usePipelines, useAddPipeline, useUpdatePipeline, useRemovePipeline } from '../hooks/queries'
+import { Modal } from '../components/ui/Modal'
+import { Field, Input, Select } from '../components/ui/Field'
+import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
+import { useT } from '../lib/i18n'
+import { NODE_TYPE_DEFS, NODE_CATEGORIES, getNodeTypeDef } from '../lib/nodeTypes'
+import type { PipelineCreate, PipelineInfo, StageConfig, EdgeConfig, DropPolicy } from '../types'
+
+const CUSTOM = '__custom__'
+
+const blankNode = (): StageConfig => ({ id: '', type: '' })
+const blankEdge = (): EdgeConfig => ({ from: '', to: '', capacity: 32, drop_policy: 'drop_oldest' })
+
+type WithPair = { k: string; v: string }
+
+function NodeRow({
+  node, idx, onChange, onRemove,
+}: {
+  node: StageConfig
+  idx: number
+  onChange: (n: StageConfig) => void
+  onRemove: () => void
+}) {
+  const { t } = useT()
+  const [pairs, setPairs] = useState<WithPair[]>(
+    () => Object.entries(node.with ?? {}).map(([k, v]) => ({ k, v }))
+  )
+  const [customType, setCustomType] = useState(() =>
+    getNodeTypeDef(node.type) ? '' : node.type
+  )
+
+  const selectValue = getNodeTypeDef(node.type) ? node.type : (node.type ? CUSTOM : '')
+
+  const pairsToWith = (ps: WithPair[]) => {
+    const record: Record<string, string> = {}
+    ps.forEach(({ k, v }) => { if (k) record[k] = v })
+    return Object.keys(record).length ? record : undefined
+  }
+
+  const handlePairsChange = (ps: WithPair[]) => {
+    setPairs(ps)
+    onChange({ ...node, with: pairsToWith(ps) })
+  }
+
+  const handleTypeSelect = (val: string) => {
+    if (val === CUSTOM) {
+      setCustomType('')
+      onChange({ ...node, type: '' })
+      return
+    }
+    const def = getNodeTypeDef(val)!
+    const newPairs = def.withTemplate.map((p) => ({ ...p }))
+    const autoId = node.id || val.replaceAll('.', '_')
+    setPairs(newPairs)
+    onChange({ ...node, id: autoId, type: val, with: pairsToWith(newPairs) })
+  }
+
+  const updatePair = (i: number, patch: Partial<WithPair>) =>
+    handlePairsChange(pairs.map((p, j) => (j === i ? { ...p, ...patch } : p)))
+
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-2 items-start">
+        <div className="flex-none w-5 h-7 flex items-center justify-center text-[10px] font-mono text-ink-muted">
+          {idx + 1}
+        </div>
+        <Input
+          placeholder="node-id"
+          value={node.id}
+          onChange={(e) => onChange({ ...node, id: e.target.value })}
+          className="w-28 flex-none"
+        />
+        <Select
+          value={selectValue}
+          onChange={(e) => handleTypeSelect(e.target.value)}
+          className="flex-1"
+        >
+          <option value="" disabled>— {t('pipelines.col.type')} —</option>
+          {NODE_CATEGORIES.map((cat) => {
+            const items = NODE_TYPE_DEFS.filter((d) => d.category === cat)
+            return (
+              <optgroup key={cat} label={cat}>
+                {items.map((d) => (
+                  <option key={d.type} value={d.type}>{d.type}</option>
+                ))}
+              </optgroup>
+            )
+          })}
+          <option value={CUSTOM}>{t('pipelines.col.type_custom')}</option>
+        </Select>
+        <button onClick={onRemove} className="btn-icon text-danger/50 hover:text-danger mt-0.5">×</button>
+      </div>
+
+      {selectValue === CUSTOM && (
+        <div className="pl-7">
+          <Input
+            placeholder="custom.type"
+            value={customType}
+            onChange={(e) => {
+              setCustomType(e.target.value)
+              onChange({ ...node, type: e.target.value })
+            }}
+            className="w-full text-[11px]"
+          />
+        </div>
+      )}
+
+      {pairs.map((p, i) => (
+        <div key={i} className="flex gap-2 items-start pl-7">
+          <Input
+            placeholder={t('pipelines.col.key')}
+            value={p.k}
+            onChange={(e) => updatePair(i, { k: e.target.value })}
+            className="flex-1 text-[11px]"
+          />
+          <Input
+            placeholder={t('pipelines.col.value')}
+            value={p.v}
+            onChange={(e) => updatePair(i, { v: e.target.value })}
+            className="flex-1 text-[11px]"
+          />
+          <button
+            onClick={() => handlePairsChange(pairs.filter((_, j) => j !== i))}
+            className="btn-icon text-danger/50 hover:text-danger mt-0.5"
+          >×</button>
+        </div>
+      ))}
+
+      <div className="pl-7">
+        <button
+          onClick={() => handlePairsChange([...pairs, { k: '', v: '' }])}
+          className="text-[10px] text-ink-muted hover:text-accent"
+        >
+          {t('pipelines.add_param')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function EdgeRow({
+  edge, nodeIds, onChange, onRemove,
+}: {
+  edge: EdgeConfig
+  nodeIds: string[]
+  onChange: (e: EdgeConfig) => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="flex gap-2 items-start">
+      <Select
+        value={edge.from}
+        onChange={(e) => onChange({ ...edge, from: e.target.value })}
+        className="flex-1"
+      >
+        <option value="" disabled>from</option>
+        {nodeIds.map((id) => <option key={id} value={id}>{id}</option>)}
+      </Select>
+      <span className="text-ink-muted mt-2 flex-none">→</span>
+      <Select
+        value={edge.to}
+        onChange={(e) => onChange({ ...edge, to: e.target.value })}
+        className="flex-1"
+      >
+        <option value="" disabled>to</option>
+        {nodeIds.map((id) => <option key={id} value={id}>{id}</option>)}
+      </Select>
+      <Input
+        type="number"
+        placeholder="cap"
+        value={edge.capacity ?? 32}
+        onChange={(e) => onChange({ ...edge, capacity: +e.target.value })}
+        className="w-20 flex-none"
+      />
+      <Select
+        value={edge.drop_policy ?? 'drop_oldest'}
+        onChange={(e) => onChange({ ...edge, drop_policy: e.target.value as DropPolicy })}
+        className="flex-none w-32"
+      >
+        <option value="block">block</option>
+        <option value="drop_oldest">drop_oldest</option>
+        <option value="drop_newest">drop_newest</option>
+      </Select>
+      <button onClick={onRemove} className="btn-icon text-danger/50 hover:text-danger mt-0.5">×</button>
+    </div>
+  )
+}
+
+export function PipelinesPage() {
+  const { data: pipelines = [], isLoading } = usePipelines()
+  const add = useAddPipeline()
+  const update = useUpdatePipeline()
+  const remove = useRemovePipeline()
+  const { t } = useT()
+
+  const [open, setOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [pipeId, setPipeId] = useState('')
+  const [nodes, setNodes] = useState<StageConfig[]>([blankNode()])
+  const [edges, setEdges] = useState<EdgeConfig[]>([])
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  const isEditing = editingId !== null
+
+  const openAdd = () => {
+    setEditingId(null)
+    setPipeId('')
+    setNodes([blankNode()])
+    setEdges([])
+    setOpen(true)
+  }
+
+  const openCopy = (p: PipelineInfo) => {
+    setEditingId(null)
+    setPipeId(`${p.id}-copy`)
+    setNodes(p.nodes.length ? p.nodes : [blankNode()])
+    setEdges(p.edges ?? [])
+    setOpen(true)
+  }
+
+  const openEdit = (p: PipelineInfo) => {
+    setEditingId(p.id)
+    setPipeId(p.id)
+    setNodes(p.nodes.length ? p.nodes : [blankNode()])
+    setEdges(p.edges ?? [])
+    setOpen(true)
+  }
+
+  const closeModal = () => {
+    setOpen(false)
+    setEditingId(null)
+    setPipeId('')
+    setNodes([blankNode()])
+    setEdges([])
+  }
+
+  const updateNode = (i: number, n: StageConfig) =>
+    setNodes((ns) => ns.map((x, j) => (j === i ? n : x)))
+  const updateEdge = (i: number, e: EdgeConfig) =>
+    setEdges((es) => es.map((x, j) => (j === i ? e : x)))
+
+  const submit = () => {
+    if (!pipeId || nodes.some((n) => !n.id || !n.type)) return
+    const body: PipelineCreate = {
+      id: pipeId,
+      nodes,
+      edges: edges.filter((e) => e.from && e.to),
+    }
+    if (isEditing) {
+      update.mutate({ id: editingId!, body }, { onSuccess: closeModal })
+    } else {
+      add.mutate(body, { onSuccess: closeModal })
+    }
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title={t('pipelines.title')}
+        subtitle={t('pipelines.subtitle')}
+        action={
+          <button onClick={openAdd} className="btn-primary">
+            {t('pipelines.add')}
+          </button>
+        }
+      />
+
+      <div className="section">
+        <div className="card overflow-hidden">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t('common.id')}</th>
+                <th>{t('pipelines.col.nodes')}</th>
+                <th>{t('pipelines.col.edges')}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && <LoadingRows cols={4} />}
+              {!isLoading && pipelines.length === 0 && (
+                <EmptyState message={t('pipelines.empty')} />
+              )}
+              {pipelines.map((p) => (
+                <>
+                  <tr
+                    key={p.id}
+                    className="cursor-pointer"
+                    onClick={() => setExpanded(expanded === p.id ? null : p.id)}
+                  >
+                    <td className="font-mono text-[12px] text-ink-primary font-medium">
+                      <span className="mr-2 text-ink-muted">{expanded === p.id ? '▼' : '▶'}</span>
+                      {p.id}
+                    </td>
+                    <td className="font-mono text-[12px] text-ink-secondary">{p.nodes.length}</td>
+                    <td className="font-mono text-[12px] text-ink-secondary">{p.edges.length}</td>
+                    <td className="text-right pr-2 flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => openCopy(p)}
+                        className="btn-icon text-ink-muted hover:text-accent"
+                        title={t('pipelines.copy')}
+                      >
+                        ⎘
+                      </button>
+                      <button
+                        onClick={() => openEdit(p)}
+                        className="btn-icon text-ink-muted hover:text-accent"
+                        title={t('pipelines.edit')}
+                      >
+                        ✎
+                      </button>
+                      <DeleteButton
+                        loading={remove.isPending}
+                        onClick={() => remove.mutate(p.id)}
+                      />
+                    </td>
+                  </tr>
+                  {expanded === p.id && (
+                    <tr key={`${p.id}-detail`}>
+                      <td colSpan={4} className="bg-bg-overlay px-6 py-3">
+                        <div className="grid grid-cols-2 gap-6">
+                          <div>
+                            <div className="label mb-2">{t('pipelines.section.nodes')}</div>
+                            <div className="space-y-1">
+                              {p.nodes.map((n) => (
+                                <div key={n.id} className="text-[12px]">
+                                  <div className="flex gap-2 items-center">
+                                    <span className="font-mono text-accent w-28 truncate">{n.id}</span>
+                                    <span className="text-ink-muted">→</span>
+                                    <span className="font-mono text-ink-secondary">{n.type}</span>
+                                  </div>
+                                  {n.with && Object.keys(n.with).length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-0.5 pl-[calc(7rem+1.25rem)]">
+                                      {Object.entries(n.with).map(([k, v]) => (
+                                        <span
+                                          key={k}
+                                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-bg-overlay border border-border text-[10px] font-mono text-ink-muted"
+                                        >
+                                          <span className="text-accent">{k}</span>
+                                          <span>=</span>
+                                          <span>{v}</span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          {p.edges.length > 0 && (
+                            <div>
+                              <div className="label mb-2">{t('pipelines.section.edges')}</div>
+                              <div className="space-y-1">
+                                {p.edges.map((e, i) => (
+                                  <div key={i} className="flex gap-2 items-center text-[12px]">
+                                    <span className="font-mono text-ink-primary">{e.from}</span>
+                                    <span className="text-ink-muted">→</span>
+                                    <span className="font-mono text-ink-primary">{e.to}</span>
+                                    <span className="text-ink-muted ml-2 text-[10px]">
+                                      cap:{e.capacity} · {e.drop_policy}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Modal open={open} onClose={closeModal} title={isEditing ? t('pipelines.modal_edit_title') : t('pipelines.modal_title')} width="max-w-2xl">
+        <div className="space-y-5">
+          <Field label={t('pipelines.field.id')}>
+            <Input
+              placeholder="detection-pipeline"
+              value={pipeId}
+              onChange={(e) => setPipeId(e.target.value)}
+              disabled={isEditing}
+              className={isEditing ? 'opacity-60 cursor-not-allowed' : ''}
+            />
+          </Field>
+
+          {/* Nodes */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="label">{t('pipelines.section.nodes')}</span>
+              <button
+                onClick={() => setNodes((ns) => [...ns, blankNode()])}
+                className="text-[11px] text-accent hover:underline"
+              >
+                {t('pipelines.add_node')}
+              </button>
+            </div>
+            <div className="space-y-2">
+              <div className="flex gap-2 text-[10px] text-ink-muted mb-1 pl-7">
+                <span className="flex-1">{t('pipelines.col.node_id')}</span>
+                <span className="flex-1">{t('pipelines.col.type')}</span>
+                <span className="w-4" />
+              </div>
+              {nodes.map((n, i) => (
+                <NodeRow
+                  key={i}
+                  idx={i}
+                  node={n}
+                  onChange={(v) => updateNode(i, v)}
+                  onRemove={() => setNodes((ns) => ns.filter((_, j) => j !== i))}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Edges */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="label">{t('pipelines.section.edges')}</span>
+              <button
+                onClick={() => setEdges((es) => [...es, blankEdge()])}
+                className="text-[11px] text-accent hover:underline"
+              >
+                {t('pipelines.add_edge')}
+              </button>
+            </div>
+            {edges.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex gap-2 text-[10px] text-ink-muted mb-1">
+                  <span className="flex-1">{t('pipelines.col.from')}</span>
+                  <span className="w-4" />
+                  <span className="flex-1">{t('pipelines.col.to')}</span>
+                  <span className="w-20">{t('pipelines.col.capacity')}</span>
+                  <span className="w-32">{t('pipelines.col.drop_policy')}</span>
+                  <span className="w-4" />
+                </div>
+                {edges.map((e, i) => (
+                  <EdgeRow
+                    key={i}
+                    edge={e}
+                    nodeIds={nodes.map((n) => n.id).filter(Boolean)}
+                    onChange={(v) => updateEdge(i, v)}
+                    onRemove={() => setEdges((es) => es.filter((_, j) => j !== i))}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={closeModal} className="btn-ghost">{t('common.cancel')}</button>
+            <button
+              onClick={submit}
+              disabled={!pipeId || nodes.some((n) => !n.id || !n.type) || add.isPending || update.isPending}
+              className="btn-primary"
+            >
+              {isEditing
+                ? (update.isPending ? t('pipelines.saving') : t('pipelines.save'))
+                : (add.isPending ? t('pipelines.adding') : t('pipelines.add'))}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  )
+}

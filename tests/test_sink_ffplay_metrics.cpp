@@ -73,3 +73,17 @@ TEST(SinkFfplayMetrics, MultipleStageIdsAreIndependent) {
     EXPECT_NE(out.find("sink_ffplay_frames_written_total{stage_id=\"isolate_B\"} 1"),
               std::string::npos);
 }
+
+TEST(SinkMetrics, PublishAndStreamLatencyHistogramsAreExposed) {
+    auto& m = Metrics::get();
+    m.recordSinkPublishLatency("sink_latency_s1", 120.0);
+    m.recordSinkStreamLatency("sink_latency_s1", 180.0);
+
+    const std::string out = m.serialize();
+    EXPECT_NE(out.find("sink_publish_latency_ms"), std::string::npos);
+    EXPECT_NE(out.find("sink_publish_latency_ms_count{stream_id=\"sink_latency_s1\"} 1"),
+              std::string::npos);
+    EXPECT_NE(out.find("sink_stream_latency_ms"), std::string::npos);
+    EXPECT_NE(out.find("sink_stream_latency_ms_count{stream_id=\"sink_latency_s1\"} 1"),
+              std::string::npos);
+}

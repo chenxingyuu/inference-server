@@ -28,7 +28,6 @@ void StreamHealthRegistry::onStreamAdded(const std::string& id, int degraded_thr
     e.degraded_threshold = degraded_threshold;
     e.max_reconnect_attempts = max_reconnect_attempts;
     e.last_frame_ts_atomic.store(0.0, std::memory_order_relaxed);
-    e.frames_since_last_hb_atomic.store(0, std::memory_order_relaxed);
 }
 
 void StreamHealthRegistry::onStreamOpened(const std::string& id) {
@@ -103,7 +102,6 @@ void StreamHealthRegistry::onFrameDecoded(const std::string& id, double capture_
     auto it = map_.find(id);
     if (it == map_.end()) return;
     it->second.last_frame_ts_atomic.store(capture_ts, std::memory_order_relaxed);
-    it->second.frames_since_last_hb_atomic.fetch_add(1, std::memory_order_relaxed);
 }
 
 void StreamHealthRegistry::onStreamRemoved(const std::string& id) {
@@ -126,7 +124,6 @@ StreamHealth StreamHealthRegistry::getHealth(const std::string& id) const {
     }
     StreamHealth out = it->second.health;
     out.last_frame_ts = it->second.last_frame_ts_atomic.load(std::memory_order_relaxed);
-    out.frames_since_last_hb = it->second.frames_since_last_hb_atomic.load(std::memory_order_relaxed);
     return out;
 }
 
@@ -137,18 +134,9 @@ std::vector<std::pair<std::string, StreamHealth>> StreamHealthRegistry::getAllHe
     for (const auto& [id, entry] : map_) {
         StreamHealth h = entry.health;
         h.last_frame_ts = entry.last_frame_ts_atomic.load(std::memory_order_relaxed);
-        h.frames_since_last_hb = entry.frames_since_last_hb_atomic.load(std::memory_order_relaxed);
         result.emplace_back(id, h);
     }
     return result;
-}
-
-void StreamHealthRegistry::resetHbCounters() {
-    std::unique_lock lock(mu_);
-    for (auto& [id, entry] : map_) {
-        entry.health.frames_since_last_hb = 0;
-        entry.frames_since_last_hb_atomic.store(0, std::memory_order_relaxed);
-    }
 }
 
 void StreamHealthRegistry::clear() {

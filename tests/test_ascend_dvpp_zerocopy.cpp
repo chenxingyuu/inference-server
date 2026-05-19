@@ -25,17 +25,22 @@ using namespace infer;
 static constexpr uintptr_t kFakeDevPtr = 0xDEAD'C0DE'0000'0001ULL;
 
 // Build a Batch with `n` is_ascend frames at the given resolution.
-static Batch makeAscendBatch(int n, int w = 1920, int h = 1080) {
+static Batch makeAscendBatch(int n, int w = 640, int h = 640) {
     Batch b;
     b.is_ascend = true;
+    // Compute DVPP-aligned dims so AscendBackend uses the correct NV12 stride.
+    const int aligned_w = (w + 15) & ~15;
+    const int aligned_h = (h +  1) & ~1;
     for (int i = 0; i < n; ++i) {
         AscendBuffer buf;
         // Offset each frame's fake device pointer so we can verify individual
         // D2D copies in the multi-frame path.
-        buf.yuv_device = reinterpret_cast<void*>(kFakeDevPtr + static_cast<uintptr_t>(i));
-        buf.width      = w;
-        buf.height     = h;
-        buf.device_id  = 0;
+        buf.yuv_device    = reinterpret_cast<void*>(kFakeDevPtr + static_cast<uintptr_t>(i));
+        buf.width          = w;
+        buf.height         = h;
+        buf.aligned_width  = aligned_w;
+        buf.aligned_height = aligned_h;
+        buf.device_id      = 0;
         b.ascend_frames.push_back(std::move(buf));
         StreamMeta m;
         m.stream_id = "cam" + std::to_string(i);
@@ -46,7 +51,7 @@ static Batch makeAscendBatch(int n, int w = 1920, int h = 1080) {
 
 // Build a backend with AIPP enabled, test pool, and no-op ACL stubs.
 // dev_alloc and dev_free stubs default to no-ops that record calls.
-static AscendBackend makeAippBackend(size_t in_bytes = 1920 * 1080 * 3 / 2) {
+static AscendBackend makeAippBackend(size_t in_bytes = 640 * 640 * 3 / 2) {
     AscendBackend backend;
     backend.initPoolForTest(4, in_bytes, /*output_bytes=*/1024);
     backend.setAippEnabledForTest(true);
@@ -169,7 +174,7 @@ TEST(DvppZeroCopy, BatchN_D2DCopiedOncePerFrame) {
     AscendBackend backend = makeAippBackend();
 
     // Provide a real backing buffer for the tmp allocation
-    std::vector<char> backing(4 * 1920 * 1080 * 3 / 2);
+    std::vector<char> backing(4 * 640 * 640 * 3 / 2);
     backend.setDevAllocFnForTest([&backing](void** p, size_t) -> aclError {
         *p = backing.data();
         return ACL_SUCCESS;
@@ -198,7 +203,7 @@ TEST(DvppZeroCopy, BatchN_TmpBufferFreedAfterInfer) {
     AscendBackend backend = makeAippBackend();
 
     std::atomic<int> free_calls{0};
-    std::vector<char> backing(4 * 1920 * 1080 * 3 / 2);
+    std::vector<char> backing(4 * 640 * 640 * 3 / 2);
     backend.setDevAllocFnForTest([&backing](void** p, size_t) -> aclError {
         *p = backing.data();
         return ACL_SUCCESS;
@@ -222,7 +227,7 @@ TEST(DvppZeroCopy, BatchN_TmpBufferFreedEvenOnExecError) {
     AscendBackend backend = makeAippBackend();
 
     std::atomic<int> free_calls{0};
-    std::vector<char> backing(4 * 1920 * 1080 * 3 / 2);
+    std::vector<char> backing(4 * 640 * 640 * 3 / 2);
     backend.setDevAllocFnForTest([&backing](void** p, size_t) -> aclError {
         *p = backing.data();
         return ACL_SUCCESS;

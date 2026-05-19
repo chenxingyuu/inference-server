@@ -12,6 +12,7 @@ services:
       - ../models:/models:ro
       - ../config:/config:ro
       - /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro
+      - infer-socket:/var/run/infer
     command: ["/app/infer_server", "/config/config.npu.yaml"]
     environment:
       - ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
@@ -26,6 +27,28 @@ services:
       options:
         max-size: "100m"
         max-file: "5"
+  # ── Web UI ────────────────────────────────────────────────────────────────
+  infer-web:
+    image: registry.cn-hangzhou.aliyuncs.com/daxx/infer-web:latest
+    ports:
+      - "8081:80"
+    depends_on:
+      - infer-server
+    restart: unless-stopped
+  # ── Management HTTP sidecar (Go) ───────────────────────────────────────────
+  infer-server:
+    image: registry.cn-hangzhou.aliyuncs.com/daxx/infer-server:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - INFER_SOCKET=/var/run/infer/infer.sock
+      - INFER_STATE_FILE=/var/lib/infer-server/state.json
+    volumes:
+      - infer-socket:/var/run/infer:ro
+      - infer-state:/var/lib/infer-server
+    depends_on:
+      - infer-ascend
+    restart: unless-stopped
 
   # ── ZooKeeper ─────────────────────────────────────────────────────────────
   zookeeper:
@@ -68,3 +91,5 @@ volumes:
   zookeeper-data:
   zookeeper-logs:
   kafka-data:
+  infer-socket:
+  infer-state:

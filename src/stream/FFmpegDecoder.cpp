@@ -1,8 +1,8 @@
 #include "stream/FFmpegDecoder.h"
+#include "stream/StopAwareSleep.h"
 #include "stream/StreamHealthRegistry.h"
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
-#include "publisher/ControlEventBus.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -319,6 +319,8 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
                     }
 
                     if (params.shouldEmit(frame_pts, seq)) {
+                        auto convert_start = std::chrono::steady_clock::now();
+
                         Frame f;
                         f.meta.stream_id   = stream_id_;
                         f.meta.capture_ts  = nowEpoch();
@@ -365,12 +367,15 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
                             f.is_gpu = false;
                         }
 
+                        const double convert_ms = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - convert_start).count();
+
                         Metrics::get().incFramesDecoded(stream_id_);
                         StreamHealthRegistry::get().onFrameDecoded(stream_id_, f.meta.capture_ts);
                         if (f.meta.frame_seq % 30 == 0) {
-                            LOG_DEBUG("[{}] frame_seq={} ts={:.3f} {}x{}",
+                            LOG_DEBUG("[{}] frame_seq={} ts={:.3f} {}x{} convert_ms={:.1f}",
                                       stream_id_, f.meta.frame_seq, f.meta.capture_ts,
-                                      f.meta.orig_width, f.meta.orig_height);
+                                      f.meta.orig_width, f.meta.orig_height, convert_ms);
                         }
                         cb(std::move(f));
                     }
@@ -420,14 +425,6 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
             reg.onReconnectFailed(cfg.id);
             const auto h = reg.getHealth(cfg.id);
             if (h.state == StreamState::FAILED) {
-                ControlEventBus::get().emit(
-                    ControlEventType::StreamFailedTerminal,
-                    cfg.id,
-                    h.state,
-                    nowEpoch(),
-                    static_cast<int>(h.consecutive_failures),
-                    cfg.max_reconnect_attempts,
-                    "max reconnect attempts reached");
                 LOG_ERROR("[{}] reached terminal reconnect failure (attempt {}), stopping decoder thread",
                           cfg.id, h.consecutive_failures);
                 break;
@@ -437,7 +434,9 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
                                            cfg.max_reconnect_delay_ms, failures);
             LOG_WARN("[{}] open failed (attempt {}), retry in {}ms",
                      cfg.id, failures, delay);
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+            if (waitForOrStop(stop_flag_, std::chrono::milliseconds(delay))) {
+                break;
+            }
             continue;
         }
 
@@ -446,18 +445,8 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
             StreamState cur = reg.getHealth(cfg.id).state;
             if (cur == StreamState::CONNECTING)
                 reg.onStreamOpened(cfg.id);
-            else {
+            else
                 reg.onReconnectSucceeded(cfg.id);
-                const auto hh = reg.getHealth(cfg.id);
-                ControlEventBus::get().emit(
-                    ControlEventType::StreamRecovered,
-                    cfg.id,
-                    hh.state,
-                    nowEpoch(),
-                    static_cast<int>(hh.consecutive_failures),
-                    cfg.max_reconnect_attempts,
-                    "");
-            }
         }
 
         // Build SamplingParams from actual stream fps (only valid after openStream()).
@@ -490,20 +479,13 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
         // RTSP: treat any exit (including timeout/error) as a drop → reconnect.
         if (!stop_flag_.load()) {
             reg.onStreamDropped(cfg.id);
-            const auto h = reg.getHealth(cfg.id);
-            ControlEventBus::get().emit(
-                ControlEventType::StreamDropped,
-                cfg.id,
-                h.state,
-                nowEpoch(),
-                static_cast<int>(h.consecutive_failures),
-                cfg.max_reconnect_attempts,
-                "stream dropped");
             uint32_t failures = reg.getHealth(cfg.id).consecutive_failures;
             int64_t delay = backoffDelayMs(cfg.reconnect_delay_ms,
                                            cfg.max_reconnect_delay_ms, failures);
             LOG_WARN("[{}] stream dropped, reconnecting in {}ms", cfg.id, delay);
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+            if (waitForOrStop(stop_flag_, std::chrono::milliseconds(delay))) {
+                break;
+            }
         }
     }
 

@@ -117,12 +117,6 @@ private:
     aclrtStream  stream_{nullptr};
     std::mutex   infer_mu_;
 
-    // Process-wide ACL init reference count.
-    // aclInit is called when the count goes 0→1; aclFinalize when 1→0.
-    // Using a static atomic avoids double-finalize when multiple AscendBackend
-    // instances share a process (multi-card setup).
-    static std::atomic<int> s_acl_refcount_;
-
     // Pre-allocated NPU buffer pool (replaces per-inference aclrtMalloc)
     AscendBufferPool buffer_pool_;
     size_t input_bytes_{0};

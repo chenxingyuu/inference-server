@@ -7,17 +7,42 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-    ports:
-      - "8080:8080"   # HTTP management server (/healthz, /metrics, /streams)
     volumes:
       - ../models:/models:ro
       - ../config:/config:ro
+      - infer-socket:/var/run/infer
     restart: unless-stopped
     logging:
       driver: json-file
       options:
         max-size: "100m"
         max-file: "5"
+
+  # ── Management HTTP sidecar (Go) ───────────────────────────────────────────
+  infer-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.infer-server
+    ports:
+      - "8080:8080"
+    environment:
+      - INFER_SOCKET=/var/run/infer/infer.sock
+      - INFER_STATE_FILE=/var/lib/infer-server/state.json
+    volumes:
+      - infer-socket:/var/run/infer:ro
+      - infer-state:/var/lib/infer-server
+    depends_on:
+      - infer-trt
+    restart: unless-stopped
+
+  # ── Web UI ────────────────────────────────────────────────────────────────
+  infer-web:
+    image: registry.cn-hangzhou.aliyuncs.com/daxx/infer-web:latest
+    ports:
+      - "8081:80"
+    depends_on:
+      - infer-server
+    restart: unless-stopped
 
   # ── ZooKeeper ─────────────────────────────────────────────────────────────
   zookeeper:
@@ -67,7 +92,7 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=15d"
     depends_on:
-      - infer-trt
+      - infer-server
     restart: unless-stopped
 
   # ── Grafana ────────────────────────────────────────────────────────────────
@@ -91,3 +116,5 @@ volumes:
   kafka-data:
   prometheus-data:
   grafana-data:
+  infer-socket:
+  infer-state:

@@ -3,6 +3,8 @@
 #include "pipeline/StageFactory.h"
 #include "pipeline/stages/InferEngineWorkerStage.h"
 
+#include <stdexcept>
+
 namespace infer {
 namespace {
 
@@ -22,7 +24,9 @@ StageFactory::Context makeContext() {
     source.degraded_threshold = 5;
     source.max_reconnect_attempts = 5;
     static DummyPublisher publisher;
-    return StageFactory::Context{cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount, false, true, 2, nullptr};
+    return StageFactory::Context{
+        cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount,
+        false, true, 2, 640, 640, nullptr};
 }
 
 StageFactory::Context makeInferEngineContext() {
@@ -54,7 +58,9 @@ StageFactory::Context makeInferEngineContext() {
         m.input_shape.width = 640;
         cfg.models.push_back(m);
     }
-    return StageFactory::Context{cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount, false, false, 0, nullptr};
+    return StageFactory::Context{
+        cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount,
+        false, false, 0, 0, 0, nullptr};
 }
 
 } // namespace
@@ -90,6 +96,62 @@ TEST(StageFactory, RequiresSinkStreamOutputUrl) {
     cfg.with["protocol"] = "rtsp";
 
     EXPECT_THROW((void)StageFactory::create(cfg, makeContext()), std::runtime_error);
+}
+
+TEST(StageFactory, RejectsNegativeSinkStreamGop) {
+    StageConfig cfg;
+    cfg.id = "stream_sink_1";
+    cfg.type = "sink.stream";
+    cfg.with["output_url"] = "rtsp://localhost:8554/live/test";
+    cfg.with["protocol"] = "rtsp";
+    cfg.with["gop"] = "-1";
+
+    EXPECT_THROW((void)StageFactory::create(cfg, makeContext()), std::runtime_error);
+}
+
+TEST(StageFactory, AcceptsZeroSinkStreamGopForAutoMode) {
+    StageConfig cfg;
+    cfg.id = "stream_sink_auto_gop";
+    cfg.type = "sink.stream";
+    cfg.with["output_url"] = "rtsp://localhost:8554/live/test";
+    cfg.with["protocol"] = "rtsp";
+    cfg.with["gop"] = "0";
+
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, makeContext());
+        ASSERT_NE(stage, nullptr);
+        EXPECT_EQ(stage->id(), "stream_sink_auto_gop");
+    });
+}
+
+TEST(StageFactory, RejectsInvalidSinkStreamEncoder) {
+    StageConfig cfg;
+    cfg.id = "stream_bad_enc";
+    cfg.type = "sink.stream";
+    cfg.with["output_url"] = "rtsp://localhost:8554/live/test";
+    cfg.with["protocol"] = "rtsp";
+    cfg.with["encoder"] = "libx264";
+
+    EXPECT_THROW((void)StageFactory::create(cfg, makeContext()), std::runtime_error);
+}
+
+TEST(StageFactory, SinkStreamAscendVencRequiresAscendBuild) {
+    StageConfig cfg;
+    cfg.id = "stream_venc";
+    cfg.type = "sink.stream";
+    cfg.with["output_url"] = "rtsp://localhost:8554/live/test";
+    cfg.with["protocol"] = "rtsp";
+    cfg.with["encoder"] = "ascend_venc";
+    cfg.with["ascend_device_id"] = "1";
+
+#ifdef BUILD_ASCEND_BACKEND
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, makeContext());
+        ASSERT_NE(stage, nullptr);
+    });
+#else
+    EXPECT_THROW((void)StageFactory::create(cfg, makeContext()), std::runtime_error);
+#endif
 }
 
 TEST(StageFactory, CreatesSinkFfplayStage) {
@@ -146,6 +208,32 @@ TEST(StageFactory, CreatesSourceRtspStageWithTaskScopedDvppContext) {
         ASSERT_NE(stage, nullptr);
         EXPECT_TRUE(stage->isSource());
     });
+}
+
+TEST(StageFactory, CreatesSahiSchedulerStage) {
+    StageConfig cfg;
+    cfg.id = "sahi_sched_1";
+    cfg.type = "infer.sahiScheduler";
+    cfg.with["tile_width"] = "960";
+    cfg.with["tile_height"] = "1144";
+    cfg.with["full_interval"] = "5";
+
+    auto ctx = makeContext();
+    EXPECT_NO_THROW({
+        auto stage = StageFactory::create(cfg, ctx);
+        ASSERT_NE(stage, nullptr);
+        EXPECT_EQ(stage->id(), "sahi_sched_1");
+    });
+}
+
+TEST(StageFactory, RejectsInvalidSahiMergeIou) {
+    StageConfig cfg;
+    cfg.id = "sahi_merge_1";
+    cfg.type = "post.sahiMerge";
+    cfg.with["merge_iou"] = "1.2";
+
+    auto ctx = makeContext();
+    EXPECT_THROW((void)StageFactory::create(cfg, ctx), std::runtime_error);
 }
 
 #if defined(BUILD_ONNX_BACKEND)

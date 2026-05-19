@@ -30,6 +30,7 @@ add_library(infer_testable STATIC
     ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/ReconnectPolicy.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/GpuDeviceAllocator.cpp
+    ${CMAKE_SOURCE_DIR}/src/stream/StopAwareSleep.cpp
     ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
 )
 
@@ -72,6 +73,7 @@ add_infer_test(test_debug_logging)
 add_infer_test(test_read_timeout)
 add_infer_test(test_file_source_config)
 add_infer_test(test_ffmpeg_log_level)
+add_infer_test(test_stop_aware_sleep)
 
 # Phase 10: stream health state machine (no hardware deps)
 add_infer_test(test_stream_health)
@@ -122,6 +124,28 @@ target_link_libraries(test_draw_and_stream_stage PRIVATE
 add_test(NAME test_draw_and_stream_stage COMMAND test_draw_and_stream_stage
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+add_executable(test_sahi_scheduler test_sahi_scheduler.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/SahiSchedulerStage.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/SahiMergeStage.cpp
+    ${CMAKE_SOURCE_DIR}/src/pipeline/stages/SahiRoiRegistry.cpp
+)
+target_link_libraries(test_sahi_scheduler PRIVATE
+    infer_testable
+    GTest::gtest_main
+)
+add_test(NAME test_sahi_scheduler COMMAND test_sahi_scheduler
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+add_executable(test_bgr_to_nv12 test_bgr_to_nv12.cpp
+    ${CMAKE_SOURCE_DIR}/src/infer/BgrToNv12.cpp
+)
+target_link_libraries(test_bgr_to_nv12 PRIVATE
+    infer_testable
+    GTest::gtest_main
+)
+add_test(NAME test_bgr_to_nv12 COMMAND test_bgr_to_nv12
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
 add_executable(test_archive_raw_stage test_archive_raw_stage.cpp
     ${CMAKE_SOURCE_DIR}/src/pipeline/stages/ArchiveRawStage.cpp
     ${CMAKE_SOURCE_DIR}/src/archive/FrameArchiver.cpp
@@ -141,56 +165,6 @@ target_link_libraries(test_archive_raw_stage PRIVATE
 add_test(NAME test_archive_raw_stage COMMAND test_archive_raw_stage
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
-# Phase 10: heartbeat JSON serialization (needs rdkafka for linking HeartbeatPublisher.cpp)
-add_executable(test_heartbeat_publisher test_heartbeat_publisher.cpp
-    ${CMAKE_SOURCE_DIR}/src/publisher/HeartbeatPublisher.cpp
-    ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
-    ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
-)
-target_include_directories(test_heartbeat_publisher PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${RDKAFKA_INCLUDE_DIRS}
-    ${OpenCV_INCLUDE_DIRS}
-)
-target_link_directories(test_heartbeat_publisher PRIVATE
-    ${RDKAFKA_LIBRARY_DIRS}
-)
-target_link_libraries(test_heartbeat_publisher PRIVATE
-    GTest::gtest_main
-    nlohmann_json::nlohmann_json
-    spdlog::spdlog
-    ${RDKAFKA_LIBRARIES}
-    ${OpenCV_LIBS}
-    Threads::Threads
-)
-add_test(NAME test_heartbeat_publisher COMMAND test_heartbeat_publisher
-         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
-
-# Phase 14: control topic JSON serialization (needs rdkafka for linking ControlPublisher.cpp)
-add_executable(test_control_publisher test_control_publisher.cpp
-    ${CMAKE_SOURCE_DIR}/src/publisher/ControlPublisher.cpp
-    ${CMAKE_SOURCE_DIR}/src/stream/StreamHealthRegistry.cpp
-    ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
-)
-target_include_directories(test_control_publisher PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${RDKAFKA_INCLUDE_DIRS}
-    ${OpenCV_INCLUDE_DIRS}
-)
-target_link_directories(test_control_publisher PRIVATE
-    ${RDKAFKA_LIBRARY_DIRS}
-)
-target_link_libraries(test_control_publisher PRIVATE
-    GTest::gtest_main
-    nlohmann_json::nlohmann_json
-    spdlog::spdlog
-    ${RDKAFKA_LIBRARIES}
-    ${OpenCV_LIBS}
-    Threads::Threads
-)
-add_test(NAME test_control_publisher COMMAND test_control_publisher
-         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
 # Phase 11: GPU fault self-healing (BatchPolicy, GpuFault classification, Metrics, InferWorker recovery)
 # Uses InferWorker directly so it needs its transitive deps that are not in infer_testable.
@@ -208,6 +182,26 @@ target_link_libraries(test_gpu_fault_recovery PRIVATE
     CURL::libcurl
 )
 add_test(NAME test_gpu_fault_recovery COMMAND test_gpu_fault_recovery
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+# Unix socket management server (no GPU/Kafka/FFmpeg deps)
+add_executable(test_unix_socket_server test_unix_socket_server.cpp
+    ${CMAKE_SOURCE_DIR}/src/server/UnixSocketServer.cpp
+    ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
+)
+target_link_libraries(test_unix_socket_server PRIVATE
+    infer_testable
+    GTest::gtest_main
+)
+add_test(NAME test_unix_socket_server COMMAND test_unix_socket_server
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+add_executable(test_task_manager_placeholder test_task_manager_placeholder.cpp)
+target_link_libraries(test_task_manager_placeholder PRIVATE
+    infer_core
+    GTest::gtest_main
+)
+add_test(NAME test_task_manager_placeholder COMMAND test_task_manager_placeholder
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
 # TrtUtils pure-logic unit tests — no GPU required, no TRT dependency
@@ -360,6 +354,9 @@ if(BUILD_ASCEND_BACKEND)
     add_executable(test_dvpp_decoder
         test_dvpp_decoder.cpp
         ${CMAKE_SOURCE_DIR}/src/stream/DVPPDecoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/stream/DvppVpcScaler.cpp
+        ${CMAKE_SOURCE_DIR}/src/stream/DvppOutputPool.cpp
+        ${CMAKE_SOURCE_DIR}/src/infer/AscendProcessRuntime.cpp
         ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
         ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
     )
@@ -385,6 +382,29 @@ if(BUILD_ASCEND_BACKEND)
         nlohmann_json::nlohmann_json
     )
     add_test(NAME test_dvpp_decoder COMMAND test_dvpp_decoder
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
+    add_executable(test_dvpp_vpc
+        test_dvpp_vpc.cpp
+        ${CMAKE_SOURCE_DIR}/src/stream/DvppVpcScaler.cpp
+        ${CMAKE_SOURCE_DIR}/src/common/Logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
+    )
+    target_include_directories(test_dvpp_vpc PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+    )
+    target_compile_definitions(test_dvpp_vpc PRIVATE BUILD_ASCEND_BACKEND)
+    target_link_libraries(test_dvpp_vpc PRIVATE
+        GTest::gtest_main
+        GTest::gmock
+        spdlog::spdlog
+        Threads::Threads
+        AscendCL::ascendcl
+        $<$<TARGET_EXISTS:AscendCL::dvpp>:AscendCL::dvpp>
+        yaml-cpp
+        nlohmann_json::nlohmann_json
+    )
+    add_test(NAME test_dvpp_vpc COMMAND test_dvpp_vpc
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 endif() # BUILD_ASCEND_BACKEND
 

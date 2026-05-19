@@ -569,7 +569,7 @@ tasks:
 **修复**：
 - **回调死循环**（CRITICAL）：`start()` 将用户 callback 直接通过 `std::move` 传入 `decodeLoop`，不再创建中间 lambda；`decodeLoop` 在 `ctx_.cb` 中存储真实 callback，彻底消除 `onDecoded` → lambda → `ctx_.cb`（= lambda）的无限递归
 - **`initChannel` 部分初始化资源泄漏**（HIGH）：`decodeLoop` 在 `initChannel()` 返回 false 后立即调用 `destroyChannel()`，释放已分配的 `channel_desc_` / `dvpp_stream_`（`destroyChannel` 对 null 指针安全）
-- **CANN6 vs CANN7 同步**：CANN7 用 `aclrtSynchronizeStream(dvpp_stream_)`（精确到 vdec stream）；CANN6 `aclvdecSendFrame` 无 per-call stream，用 `aclrtSynchronizeDevice()`，在包被 unref 前保证 DMA 完成
+- **CANN6 vs CANN7 同步**：CANN7 用 `aclrtSynchronizeStream(dvpp_stream_)`；CANN6 当时用 `aclrtSynchronizeDevice()`（后续 Phase 33 改为 `aclvdecSetChannelDescThreadId` + `aclrtProcessReport` 泵回调，见下）
 - **发送失败回收**：`aclvdecSendFrame` / `acldvppVdecProcess` 失败时正确 free `yuv_buf` 并 destroy `pic_desc` / `stream_desc`，防止 DVPP 不持有描述符时内存泄漏
 
 **状态**：✅ 完成
@@ -629,6 +629,268 @@ tasks:
 - ⚠️ Ascend 专项测试在当前环境无法编译运行：缺少 `AscendCL`（`AscendCL_LIBRARY` / `AscendCL_INCLUDE_DIR`）
 
 **状态**：✅ 代码完成，待 135 真机镜像回归
+
+---
+
+## Phase 26 — 管理接口重构（UnixSocket + Go Sidecar）
+
+**完成**：2026-05-07
+
+**目标**：移除 C++ 内嵌 HTTP server（cpp-httplib），改用 POSIX Unix domain socket 暴露管理接口；Go sidecar 负责 HTTP 层，CLI 工具面向运维人员。
+
+**动机**：cpp-httplib 通过 FetchContent 引入，增加构建时间与依赖；HTTP 解析/路由逻辑在 C++ 中维护成本高；Go 更适合做轻量 HTTP 服务与 CLI 工具。
+
+**架构变化**：
+```
+旧: inferenced (C++) → cpp-httplib → HTTP :8080
+新: inferenced (C++) → Unix socket (/var/run/infer.sock) ← infer-server (Go) → HTTP :8080
+                                                          ← infer-ctl (Go CLI)
+```
+
+**协议**：换行分隔 JSON（NDJSON），每个连接一问一答：
+```json
+→ {"cmd":"list_tasks"}
+← {"status":"ok","data":[{"id":"cam0","state":"running"}]}
+```
+
+**新增**：
+- `include/pipeline/ITaskManager.h`：抽取纯接口（`listTasks` / `start` / `stop`），`TaskManager` 继承它，解耦测试依赖
+- `include/server/UnixSocketServer.h` + `src/server/UnixSocketServer.cpp`：POSIX socket 实现，零第三方依赖，`detach` 线程处理并发连接
+- `tools/infer-ctl/main.go`：CLI，子命令 `health / tasks / start / stop / metrics`，`INFER_SOCKET` 环境变量覆盖路径
+- `tools/infer-server/main.go`：HTTP sidecar，将 REST 请求转发到 socket，Prometheus 可直接 scrape `/metrics`
+
+**移除**：
+- `src/server/ManagementServer.cpp` / `include/server/ManagementServer.h`
+- CMakeLists.txt 中 `FetchContent_Declare(httplib ...)` 及 `httplib::httplib` 链接项
+
+**配置变更**：`server.management_port` → `server.socket_path`（默认 `/var/run/infer.sock`）
+
+**测试**：`tests/test_unix_socket_server.cpp` 10 个测试全绿，覆盖全部命令、错误路径、无效 JSON。
+
+---
+
+## Phase 27 — Runtime 状态机 + StopAwareSleep + Phase 26 收尾
+
+**完成**：2026-05-07
+
+**目标**：让 task 的 stop 路径可幂等、可观测，并把退避/重连等 sleep loop 改造为 stop 信号毫秒级可中断；同时清理 Phase 26 剩余的 `ManagementServer` 残留与 docker-compose 配置。
+
+**新增**：
+- `RuntimeState` 状态机（`UNINITIALIZED → RUNNING → STOPPING → STOPPED`）：`TaskManager` 持有，`stop()` 幂等，重复调用进入 `STOPPING` 后不再重复触发资源回收
+- `StopAwareSleep` helper：`SourceRtspStage` / 重连退避 / `EdgeQueue` 长等场景统一改为可中断 sleep，stop 信号到达后 ≤ 5ms 退出循环
+- 三套 docker-compose 同步：`infer-server`（Go HTTP sidecar）作为常驻服务挂载 `/var/run/infer.sock` 卷，与 `inferenced` 容器共享 socket
+- 删除 `src/server/ManagementServer.cpp` / `include/server/ManagementServer.h` 的最后残留与 CMake 引用，确认 cpp-httplib 已彻底从依赖图中移除
+
+**关键决策**：
+- `RuntimeState` 与 Phase 19 的 `WorkerState` 解耦：前者管 task 级生命周期，后者管 worker 级故障恢复，两者在不同抽象层级
+- StopAwareSleep 内部用 `condition_variable_any` + `stop_token`（C++20），不再依赖 `std::this_thread::sleep_for` 的不可中断行为
+
+---
+
+## Phase 28 — infer-server REST 完善（Swagger + 持久化 Store + DAG 元数据）
+
+**完成**：2026-05-07
+
+**目标**：让 Go sidecar 不仅是 HTTP→socket 的薄壳，而是承担 OpenAPI 文档生成、运行期状态持久化、以及 DAG 元数据结构化输出的完整管理面。
+
+**新增**：
+- **Swagger 集成**（`tools/infer-server/docs/`）：`swag init` 生成的 `docs.go` / `swagger.json` / `swagger.yaml`，挂载到 `/swagger/index.html`；`make swagger` target 重生成；移除 host 硬编码以适配多环境
+- **`PipelineNodeInfo` / `PipelineEdgeInfo`**（`include/pipeline/ITaskManager.h`）：取代旧的字符串数组，REST 返回的 pipeline 现包含完整 DAG（`node.type` / `node.params` / `edge.from/to/capacity/drop_policy`），前端无需二次推断
+- **`Store`**（`tools/infer-server/store.go`，259 行 + 508 行 `store_test.go`）：JSON 文件后端的运行期状态机，覆盖 `models` / `sources` / `pipelines` / `tasks`；server 启动时回放到 C++ 引擎，崩溃/重启不丢配置
+- 三套 docker-compose 新增 `state.json` 卷映射，作为持久化挂载点
+
+**关键决策**：
+- Store 与 YAML 配置文件解耦：YAML 仅作为首次启动的 seed，运行期改动通过 REST 写入 Store，避免"配置文件 vs 运行态"双源真相
+- Swagger 注解直接写在 handler 上方，CI 通过 `swag init --parseDependency` 校验注解一致性
+
+---
+
+## Phase 29 — infer-web 管理 UI（React + Vite + Tailwind）
+
+**完成**：2026-05-07 → 05-08
+
+**目标**：为运维人员提供可视化管理界面，避免每次只能用 `infer-ctl` CLI；端到端覆盖 Sources / Pipelines / Models / Tasks 四种资源的增删改查。
+
+**新增**：
+- **初版**（`db42121`）：React 18 + Vite + Tailwind + React Query；五大页面 `Dashboard / Sources / Pipelines / Models / Tasks`；侧边栏布局 + 复用 `Field` / `Modal` / `StatusBadge` 组件；约 3.8k 行新增
+- **API 与多语言**（`2ffd951`）：Vite dev proxy `/api` → infer-server，统一 `lib/api.ts` 客户端；`i18n.tsx` 中英文 dictionary，所有界面文案走 `t(key)` 解析
+- **删除二次确认**（`d42f1df`）：所有 destructive 操作走统一的 confirm modal，避免误删
+- **自定义节点类型**（`a0c9fca`）：`lib/nodeTypes.ts` 定义 stage 类型字典（`source.rtsp` / `infer.engine` / `archive.raw` / `track.bytetrack` / `sink.kafka` / ...），Pipelines 页编辑器据此渲染节点参数表单
+- **Pipeline 编辑模式**（`ba51590`）：`useUpdatePipeline` hook + Pipelines 页支持就地修改 nodes/edges
+- **Task 编辑模式**（`cb3f669`）：Tasks 页支持改 source/pipeline 绑定、`sample_fps` / `sampling_mode` / 采样阈值
+- **运行时镜像**（`Dockerfile.infer-web` / `Dockerfile.infer-web.runtime`）：pnpm 多阶段构建产出静态资源 + nginx 反代镜像
+
+**关键决策**：
+- 选 React Query 而非 Redux：管理界面以"远端状态读取 + 偶发写入"为主，无复杂客户端状态机，QueryClient 自带的缓存/失效已满足
+- 静态资源走独立 nginx 镜像，不与 inferenced/infer-server 共栈，部署解耦
+
+---
+
+## Phase 30 — 运行期管理增强 + Ascend ACL 生命周期修复
+
+**完成**：2026-05-08
+
+**目标**：补齐 Phase 28/29 的"读" 已完成、"改" 还缺位的部分；同时修复 Phase 26 ~ 29 期间发现的 Ascend 热停启严重 bug。
+
+**新增**：
+- **`addTask(autostart)`**（`3b23e30`）：`autostart=false` 时仅写入配置不启动，UI 手动触发；解决"添加 task 立即占用 GPU/NPU"的工程不便
+- **`update_task` 命令**（`9487c2f` + `cb3f669`）：`UnixSocketServer` 新增端点支持改 source/pipeline 绑定与采样参数；`list_tasks` 返回完整字段（`source_id` / `pipeline_id` / `sampling.*` / 状态）；新增 `TaskRuntimeInfo` 结构体把 config + runtime state 一次返回，前端不再做二次拼装
+- **模型仓库**（`9c70962`，1566 行变更）：
+  - C++ 侧：`ITaskManager::listRepositoryModels()` / `loadFromRepository(id)` + `RepositoryModelInfo` 结构体（含 `loaded` 标记）
+  - Go 侧：扫描 `model_repository` 目录列出可用 `.engine` / `.onnx` / `.om`，新增 8 个 endpoint：`/models/repository`、`/models/repository/:id/load`、`/models/upload`、`/models/upload/analyze`、`/models/upload/deploy/:token` 等
+  - 上传支持 tar/tar.gz/zip 归档，先 analyze（解析 metadata 返回 token），后 deploy（按 token 落盘到仓库）；可一键加载到运行期
+  - UI：`ModelsPage` 新增"仓库浏览"+"上传"+"一键加载"+ Ascend DVPP / device_id 字段配置（532 行变更）
+- **HIGH 修复 — Ascend ACL 生命周期**（`6d4fbd2`）：
+  - **背景**：CANN GE 在同进程内 `aclFinalize → aclInit` 循环后调用 `aclmdlLoadFromFile` 会报 `ACL_ERROR_GE_EXEC_NOT_INIT(145001)`，导致"热停 task → 重新创建同模型 task"的场景必 crash
+  - **修复**：ACL runtime 改为进程级常驻，`s_acl_refcount_` 仅做日志计数；首次 init 时通过 `std::call_once` 注册 `std::atexit` 回调；`unloadModel()` 不再调用 `aclFinalize`，仅在进程退出时执行单次 finalize
+  - **配置**：UI 新增任务级 `use_ascend_dvpp` toggle 与 `ascend_device_id` 字段，对应 `TaskConfig` 透传到 `SourceRtspStage`
+
+**关键决策**：
+- 模型上传两阶段（analyze → deploy）避免大文件长事务：analyze 阶段流式扫描归档不落盘，token 有效期内 deploy 才真正写入仓库
+- ACL refcount 保留但不再驱动 finalize：CANN runtime 一旦初始化就持有到进程结束，符合官方文档"建议每个进程仅 init 一次"的语义；以前的 finalize-on-last-unload 是过度优化
+- TaskRuntimeInfo 设计参考 Phase 28 的 PipelineNodeInfo：服务端聚合一次，前端不做拼装
+
+**真机验证（192.168.3.135）**：
+- 5/8 上午通过 UI 反复创建/删除 NPU 单卡 task 5 次，无 145001 错误，sibling task 不受影响
+- 模型仓库上传 `yolov8n.om`（tar.gz）→ analyze → deploy → load 全流程跑通
+
+---
+
+## Phase 31 — Ascend VENC 硬编码推流 + 时间戳叠图 + 管道更新增强
+
+**完成**：2026-05-11
+
+**目标**：在 Ascend NPU 上实现 DVPP VENC 硬件编码推流（替代 FFmpeg 软编码），补齐视频帧时间戳叠图功能，同时增强运行期管道更新与错误处理能力。
+
+**新增**：
+
+- **`AscendVencFfmpegMuxWriter`**（`include/pipeline/stages/AscendVencFfmpegMuxWriter.h` + `src/pipeline/stages/AscendVencFfmpegMuxWriter.cpp`，~500 行）：实现 `IStreamWriter`，DVPP VENC 硬件编码 BGR→NV12→H.264 Annex-B，通过 `popen` 将裸 H.264 流送入 ffmpeg（`-f h264 -c:v copy`）推 RTSP/RTMP；回调模式异步接收编码帧写管道；VENC 资源完整 RAII 管理（channel/stream/context/buffer）
+- **`AscendProcessRuntime`**（`include/infer/AscendProcessRuntime.h` + `src/infer/AscendProcessRuntime.cpp`）：ACL runtime 进程级 acquire/release，VENC 与推理后端共享同一 ACL 生命周期
+- **`BgrToNv12`**（`include/infer/BgrToNv12.h` + `src/infer/BgrToNv12.cpp`）：CPU 侧 BGR→NV12 颜色空间转换，供 VENC 输入使用
+- **`DrawAndStreamStage`** 重构：新增 `encoder` 配置项（`ffmpeg` / `ascend_venc`），Ascend 编码器路径自动选择 `AscendVencFfmpegMuxWriter`；`IStreamWriter` 抽象接口使两种编码器可插拔
+- **时间戳叠图**（`bf2e80b`）：`DetectionOverlay` 新增 `drawTimestamp()` 函数，在帧上叠加当前时间（精确到毫秒）+ 可选 stream_id；`DrawAndStreamStage` / `SinkFfplayStage` 均支持 `show_timestamp` / `include_stream_id` / `timestamp_pos_x/y` / `timestamp_font_scale/thickness` 配置项；`StageFactory` 从 `with` 参数透传
+- **VENC 回调健壮性**（`f9df4a7`）：增强错误日志（WARN + ERROR 双级别），对 CANN 507018（`ACL_ERROR_RT_AICPU_EXCEPTION`）给出 DVPP+VENC 资源竞争的诊断提示；回调内 pipe 写入加锁保护
+- **管道更新增强**（`9129f8d`）：`TaskManager` 支持 `update_pipeline` 命令，运行期更新 pipeline 的 nodes/edges；`UnixSocketServer` 新增对应端点与错误处理；补充 10+ 测试覆盖命令正确性与异常路径
+- **Edge drop policy 序列化**（`d72403e`）：`RuntimeState` 序列化/反序列化 edge 的 `capacity` + `drop_policy`；Go Store 回放 pipeline 时正确恢复 edge 配置；新增 Go 侧测试
+
+**配置示例**（`sink.stream` 节点 `with` 参数）：
+```yaml
+encoder: ascend_venc       # ffmpeg | ascend_venc
+show_timestamp: "true"
+include_stream_id: "true"
+timestamp_pos_x: "10"
+timestamp_pos_y: "30"
+```
+
+**测试**：`test_bgr_to_nv12.cpp`（3 个）、`test_stage_factory.cpp`（VENC writer 创建路径）、`test_unix_socket_server.cpp`（10+ 更新/错误用例）、Go `store_replay_pipeline_test.go` 全绿。
+
+---
+
+## Phase 32 — SAHI 切片推理管道（全景/高分辨率场景）
+
+**完成**：2026-05-12
+
+**目标**：为 7680×1870 等全景/超高分辨率视频引入 Slicing Aided Hyper Inference（SAHI）管道，将大图切片为可推理尺寸的 tile，推理后回拼为完整帧检测结果，大幅提升小目标召回率。
+
+**架构**：
+```
+source.rtsp → infer.sahiScheduler → infer.engine → post.sahiMerge → track.bytetrack → sink.stream
+```
+
+**新增**：
+
+- **`SahiSchedulerStage`**（`infer.sahiScheduler`）：
+  - 两种切片模式：**full pass**（按 `full_interval` 周期执行全图网格切片）和 **ROI pass**（利用上一轮检测结果，仅对有目标的区域做局部切片）
+  - 网格切片算法：`makeAxisStarts(full, tile, overlap)` 按水平/垂直方向独立计算起始位置，支持非对称重叠率（`x_overlap_ratio` / `y_overlap_ratio`）
+  - ROI 切片：从 `SahiRoiRegistry` 读取上一轮检测结果，按 `roi_expand_ratio` 扩展 bbox 为切片窗口，保证最小尺寸 `min_roi_width × min_roi_height`；去重排序后输出
+  - 切片限流：`max_tiles_per_frame` 防止超大帧产生过多 tile 压垮推理队列
+  - ROI 缺失/过期时自动 fallback：`roi_max_age_frames` 超龄或 ROI 为空时退回 full pass，`fallback_full_min_gap_frames` 节流防止连续 fallback 风暴
+  - 每帧输出 N 个 `EventEnvelope`，携带 `SahiTileInfo`（parent_frame_seq / tile 坐标 / full_w/h / expected_tiles / parent_frame 引用）
+  - 流级状态管理：每个 stream_id 独立计数与 tile_seq；60s 无帧自动清理过期流状态
+
+- **`SahiMergeStage`**（`post.sahiMerge`）：
+  - 按 `(stream_id, parent_frame_seq)` 聚合所有 tile 的推理结果
+  - tile 坐标到原图坐标的映射：`det.bbox += tile_offset`
+  - 双策略 NMS：IoU（交并比 > `merge_iou`）+ IoS（intersection over smaller area > `merge_ios`），解决大小框重叠时 IoU 偏低但实际冗余的问题
+  - 所有 tile 到齐后执行 NMS，输出完整帧检测结果，同时将结果写入 `SahiRoiRegistry` 供下一轮 ROI 切片使用
+  - `stale_timeout_ms` 超时清理：tile 未全部到齐时强制输出已有结果，防止丢帧导致内存泄漏
+
+- **`SahiRoiRegistry`**（`include/pipeline/stages/SahiRoiRegistry.h`）：全局线程安全注册表，存储每路流最近一次合并后的检测结果（`frame_seq` + `detections`），供 `SahiSchedulerStage` ROI 模式查询
+
+- **`SahiTileInfo`**（`include/pipeline/Event.h`）：tile 元数据结构体，贯穿 scheduler→infer→merge 完整链路
+
+- **`EdgeQueue` 增强**：新增 `currentSize()` 接口，`GraphExecutor` 支持 `infer.sahiScheduler` 与 `post.sahiMerge` stage 类型注册
+
+- **infer-web 前端**：`nodeTypes.ts` 新增 `infer.sahiScheduler` 与 `post.sahiMerge` 节点类型定义（含全部可配置参数），Pipeline 编辑器支持可视化配置 SAHI 参数
+
+**测试**：`test_sahi_scheduler.cpp` 12 个测试（makeAxisStarts 边界、重叠率、单 tile/多 tile、max_tiles 限流、ROI 切片路径）全绿；`test_stage_factory.cpp` 新增 SAHI stage 创建验证。
+
+**配置模板**：`config/config.npu.sahi.mvp.yaml`（双路全景流 SAHI MVP 配置）
+
+**关键决策**：
+- tile 共享原帧 `cv::Mat` 内存（`image(rect)` 是 ROI 引用，不做深拷贝），首个 tile 持有 `parent_frame` 引用保证原帧生命周期
+- IoS 补充 IoU：大目标框包含小目标框时 IoU 可能仅 0.3，但 IoS > 0.9，双策略避免漏合并
+- ROI 模式下 `min_roi_width/height` 保证切片不小于模型输入尺寸，避免无效推理
+
+---
+
+## Phase 33 — DVPP CANN6 VDEC 回调派发
+
+**完成**：2026-05-15
+
+**目标**：在 192.168.3.135（Atlas 300I Pro，CANN 6）上修复 DVPP 硬解 `onDecoded` 不触发；为后续 Path A 零拷贝铺路。
+
+**修复**：
+
+- **VDEC 回调派发**（CRITICAL）：`aclvdecSetChannelDescThreadId(desc, pthread_self())` 须在 `aclvdecCreateChannel` 之前调用；`decodeLoop` 包循环内 `aclrtProcessReport(5)` 泵 report queue。未绑线程时 `aclvdecSendFrame` 成功但 `onDecoded` 永不触发。
+- **RTSP Annex B**（HIGH）：RTSP/RTP 输入跳过 `h264_mp4toannexb` BSF，避免把 start code 误当 AVCC 长度前缀破坏 NAL。
+- **`aclvdecFrameConfig` 生命周期**（HIGH）：每路连接共享一份 `session_frame_cfg`，在 `aclvdecDestroyChannel` 之后再 destroy，避免悬空指针。
+- **H.264 profile**：按 `codecpar->profile` 选择 `H264_BASELINE/MAIN/HIGH_LEVEL`。
+
+**真机验证（135）**：`onDecoded fired seq=N output=ok`，`hw decode done 1920x1080 decode_ms` 个位数～数十 ms。
+
+**状态**：✅ 完成（尺寸对齐与 VPC 见 Phase 34）
+
+---
+
+## Phase 34 — DVPP VPC Path A + 输出池与 sink 队列可观测性
+
+**完成**：2026-05-19
+
+**目标**：1080p 码流在 NPU 侧经 **DVPP VPC** 拉伸到模型输入（如 640×640），与 `scripts/aipp.cfg`（`src=640×640`，无 AIPP resize）配合，消除 `CheckUserAndModelSize` / `dets=0`；并提升 DVPP 高帧率稳定性与推流阶段队列诊断能力。
+
+**新增 / 修复**（PR #31 `8e45836`）：
+
+- **`DvppVpcScaler`**（`include/stream/DvppVpcScaler.h` + `src/stream/DvppVpcScaler.cpp`）：DVPP VPC 硬件 YUV420SP→YUV420SP resize；`VpcApiStub` 可注入；`test_dvpp_vpc.cpp` 覆盖 init/resize 失败路径。
+- **`DvppOutputPool`**：VPC 输出 HBM 槽位池，与 VDEC 输出池分离。
+- **ingest 自动注入**：`TaskManager` 从 pipeline 中 `infer.engine` 对应模型的 `input_shape` 写入 `StreamConfig.ascend_vpc_out_width/height` → `SourceRtspStage` → `DVPPDecoder`；codec 分辨率已与模型输入一致时跳过 VPC。
+- **`scripts/aipp.cfg`**：保持 **640×640** NV12 `src`（不在 AIPP 内做 1080p→640 resize；缩放由 VPC 完成）。修改 `src_image_size_*` 后须重新 ATC。
+- **`AscendBackend`**：Path A 输入尺寸与 VPC 输出不一致时 WARN。
+
+**修复**（PR #30 `d66a66c`）：
+
+- **VDEC 输出池**：in-flight 槽位扩至 **32**，降低高帧率下 pool 耗尽与丢帧。
+- CANN 6 兼容与 ingest 配置项整理（见 PR diff；`README` 配置示例已同步）。
+
+**可观测性**（PR #29 `fee5755`）：
+
+- **`DrawAndStreamStage::enqueue`**：满队列时按 `StreamDropPolicy` 记录 `drop_oldest_then_enqueue` / `drop_newest`，DEBUG 日志含 `queue_size` / `queue_capacity` / `dropped_total`，便于排查推流积压。
+
+**文档**：`docs/ascend-guide.md` §12–§14、`README.md` Ascend 节、`docs/ARCHITECTURE.md` Ascend ingest 与管理面描述已同步。
+
+**状态**：✅ 代码与文档完成；部署 Path A 时需确认 `.om` 的 AIPP `src` 与 VPC 输出一致（默认 640×640）
+
+---
+
+## 解码器时间戳诊断
+
+**完成**：2026-05-12
+
+**目标**：为解码器补充帧级时间戳追踪，便于定位端到端延迟瓶颈。
+
+**新增**：
+- **`DVPPDecoder`**：新增 `submit_ts_ns` 字段记录帧提交时间戳，解码回调中可计算单帧解码耗时
+- **`FFmpegDecoder`**：新增 `submit_mono_ns`，在 `avcodec_send_packet` 前记录，`avcodec_receive_frame` 后计算 `decode_duration_ms` 并输出 debug 日志，覆盖软解与硬解（NVDEC/CUVID）路径
 
 ---
 

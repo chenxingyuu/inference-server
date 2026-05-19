@@ -3,6 +3,11 @@
 namespace infer {
 
 bool EdgeQueue::push(const EventEnvelope& event) {
+    EventEnvelope copy = event;
+    return push(std::move(copy));
+}
+
+bool EdgeQueue::push(EventEnvelope&& event) {
     std::unique_lock<std::mutex> lock(mu_);
     if (stopped_) return false;
 
@@ -17,7 +22,7 @@ bool EdgeQueue::push(const EventEnvelope& event) {
             if (!has_space || stopped_) return false;
         }
     }
-    queue_.push_back(event);
+    queue_.push_back(std::move(event));
     cv_.notify_all();
     return true;
 }
@@ -26,7 +31,7 @@ bool EdgeQueue::pop(EventEnvelope& event, int wait_ms) {
     std::unique_lock<std::mutex> lock(mu_);
     cv_.wait_for(lock, std::chrono::milliseconds(wait_ms), [this] { return stopped_ || !queue_.empty(); });
     if (queue_.empty()) return false;
-    event = queue_.front();
+    event = std::move(queue_.front());
     queue_.pop_front();
     cv_.notify_all();
     return true;
@@ -35,6 +40,12 @@ bool EdgeQueue::pop(EventEnvelope& event, int wait_ms) {
 void EdgeQueue::stop() {
     std::lock_guard<std::mutex> lock(mu_);
     stopped_ = true;
+    cv_.notify_all();
+}
+
+void EdgeQueue::reopen() {
+    std::lock_guard<std::mutex> lock(mu_);
+    stopped_ = false;
     cv_.notify_all();
 }
 

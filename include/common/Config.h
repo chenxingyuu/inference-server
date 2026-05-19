@@ -12,9 +12,12 @@ namespace infer {
 struct ServerConfig {
     int stream_pool_threads{32};
     int max_streams{100};
-    int management_port{8080};          // HTTP management server port
+    std::string socket_path{"/var/run/infer.sock"};
     std::string ffmpeg_log_level{"warning"};  // FFmpeg log threshold (quiet/fatal/error/warning/info/debug/trace)
     std::string log_level{"info"};            // spdlog level (trace/debug/info/warn/error/critical/off)
+    // Triton-style model repository root (<root>/<model_id>/config.yaml + version subdirs). Empty disables scan.
+    // If set, non-empty env INFER_MODEL_REPOSITORY overrides this value after YAML parse.
+    std::string model_repository;
 };
 
 // Model type: detector outputs bounding boxes; classifier outputs class probabilities.
@@ -86,6 +89,8 @@ struct StreamConfig {
     int         cuda_device_id{0}; // set programmatically by GpuDeviceAllocator; not from YAML
     bool        use_ascend_dvpp{false};  // Ascend: true → DVPP NPU hardware decode
     int         ascend_device_id{0};     // NPU device index for DVPP decoding
+    int         ascend_vpc_out_width{0};  // 0 = no VPC; else stretch decode to this size
+    int         ascend_vpc_out_height{0};
     TrackerType tracker{TrackerType::None};
     ByteTrackConfig byte_track{};
     SourceType  source_type{SourceType::RTSP};  // RTSP stream or local file
@@ -143,9 +148,6 @@ struct KafkaConfig {
     int         linger_ms{5};
     std::string compression{"lz4"};
     int         queue_capacity{10000};
-    std::string heartbeat_topic{"inference-heartbeat"};
-    int         heartbeat_interval_ms{5000};
-    std::string control_topic{"inference-control"};
 };
 
 struct GrpcConfig {
@@ -215,6 +217,10 @@ struct AppConfig {
     const TaskConfig* findTask(const std::string& id) const;
 };
 
+// Scan `<root>/<model_id>/config.yaml` and numeric `<root>/<model_id>/<version>/` dirs; merge at load time only.
+// Optional per-model YAML keys: active_version (int), weight_file (string, file inside selected version dir).
+std::vector<ModelConfig> scanModelRepository(const std::string& root);
+
 // Parse config.yaml → AppConfig. Throws std::runtime_error on invalid config.
 AppConfig loadConfig(const std::string& yaml_path);
 
@@ -223,6 +229,9 @@ YOLOVersion parseYOLOVersion(const std::string& s);
 
 // Convert string → DeviceType
 DeviceType parseDeviceType(const std::string& s);
+
+// Convert DeviceType → canonical string (matches parseDeviceType round-trip)
+std::string deviceTypeToStr(DeviceType d);
 
 // Convert string → TrackerType
 TrackerType parseTrackerType(const std::string& s);

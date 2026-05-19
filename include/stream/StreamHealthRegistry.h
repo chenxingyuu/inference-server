@@ -38,11 +38,10 @@ struct StreamHealth {
     double      state_changed_at{0.0};      // epoch seconds when current state was entered
     uint32_t    reconnect_count{0};         // total reconnect successes (monotonic)
     uint32_t    consecutive_failures{0};    // consecutive open failures (cleared on success)
-    uint64_t    frames_since_last_hb{0};    // frames decoded since last heartbeat reset
 };
 
 // Thread-safe singleton registry tracking per-stream health state.
-// FFmpegDecoder calls the on*() methods; HeartbeatPublisher and Metrics read via get*().
+// FFmpegDecoder calls the on*() methods; Metrics reads via get*().
 class StreamHealthRegistry {
 public:
     static StreamHealthRegistry& get();
@@ -78,10 +77,6 @@ public:
     // Returns all stream health snapshots (copies)
     std::vector<std::pair<std::string, StreamHealth>> getAllHealth() const;
 
-    // Called by HeartbeatPublisher after emitting a heartbeat round;
-    // resets frames_since_last_hb to 0 for all streams.
-    void resetHbCounters();
-
     // For testing: clear all entries
     void clear();
 
@@ -93,7 +88,6 @@ private:
         int          degraded_threshold{5};
         int          max_reconnect_attempts{0};
         std::atomic<double> last_frame_ts_atomic{0.0};
-        std::atomic<uint64_t> frames_since_last_hb_atomic{0};
     };
 
     static double now();

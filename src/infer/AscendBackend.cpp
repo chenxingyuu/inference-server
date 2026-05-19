@@ -1,17 +1,19 @@
 #ifdef BUILD_ASCEND_BACKEND
 
 #include "infer/AscendBackend.h"
+
+#include "infer/AscendProcessRuntime.h"
+#include "infer/BgrToNv12.h"
+
 #include "common/Logger.h"
 
 #include <acl/acl.h>
 #include <stdexcept>
 #include <algorithm>
+#include <mutex>
 #include <opencv2/imgproc.hpp>
 
 namespace infer {
-
-// Process-wide ACL refcount definition.
-std::atomic<int> AscendBackend::s_acl_refcount_{0};
 
 namespace {
 
@@ -22,11 +24,6 @@ namespace {
                                  + " at " + __FILE__ + ":" + std::to_string(__LINE__)); \
     } \
 } while(0)
-
-// 100002: ACL_ERROR_REPEAT_INITIALIZE (already inited in same process)
-// 507008: ACL_ERROR_RT_CONTEXT_NULL_PTR (CANN 6 emits this instead of 100002 on repeat aclInit)
-constexpr aclError kAclRepeatInitCode     = static_cast<aclError>(100002);
-constexpr aclError kAclRepeatInitCodeCann6 = static_cast<aclError>(507008);
 
 int yoloAnchorCount(int h, int w) {
     return (h / 8) * (w / 8)
@@ -58,19 +55,7 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     input_w_        = cfg.input_shape.width;
     num_classes_    = cfg.num_classes;
 
-    // Increment process-wide refcount; call aclInit only on the first backend.
-    if (s_acl_refcount_.fetch_add(1, std::memory_order_acq_rel) == 0) {
-        const aclError init_rc = aclInit(nullptr);
-        if (init_rc != ACL_SUCCESS && init_rc != kAclRepeatInitCode && init_rc != kAclRepeatInitCodeCann6) {
-            s_acl_refcount_.fetch_sub(1, std::memory_order_release);
-            throw std::runtime_error(std::string("[ACL] aclInit error ") + std::to_string(init_rc)
-                                     + " at " + __FILE__ + ":" + std::to_string(__LINE__));
-        }
-        LOG_INFO("AscendBackend: aclInit succeeded (refcount=1)");
-    } else {
-        LOG_INFO("AscendBackend: reusing ACL runtime (refcount={})",
-                 s_acl_refcount_.load(std::memory_order_relaxed));
-    }
+    AscendProcessRuntime::acquire();
     ACL_CHECK(aclrtSetDevice(device_id_));
     // CANN 6 does not auto-create a default context; explicit creation is
     // required for correct multi-threaded operation on all CANN versions.
@@ -95,9 +80,10 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
 
     const int max_bs = model_map_.rbegin()->first;
     if (aipp_enabled_) {
-        // AIPP path: raw BGR uint8 input
-        input_bytes_ = static_cast<size_t>(max_bs) * input_h_ * input_w_ * 3;
-        LOG_INFO("AscendBackend: AIPP enabled, input dtype=uint8");
+        // AIPP path: NV12 (YUV420SP) uint8 input.
+        // The AIPP config in our exported .om expects NV12 (see docs/ascend-guide.md).
+        input_bytes_ = static_cast<size_t>(max_bs) * input_h_ * input_w_ * 3 / 2;
+        LOG_INFO("AscendBackend: AIPP enabled, input format=NV12(uint8)");
     } else {
         // CPU preprocess path: CHW float input
         input_bytes_  = static_cast<size_t>(max_bs) * 3 * input_h_ * input_w_ * sizeof(float);
@@ -129,23 +115,21 @@ void AscendBackend::unloadModel() {
     // that destroys all ACL resources on the device, including those held by
     // sibling AscendBackend instances on the same device_id.
     //
-    // Decrement refcount; call aclFinalize only when the last backend stops.
-    if (s_acl_refcount_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        aclFinalize();
-        LOG_INFO("AscendBackend: aclFinalize called (last backend stopped)");
-    }
+    AscendProcessRuntime::release();
     loaded_ = false;
 }
 
 // ── Private helpers ────────────────────────────────────────────────────────
 
 uint32_t AscendBackend::selectModel(int batch_size) const {
-    uint32_t best_id = model_map_.begin()->second;
-    for (const auto& [bs, id] : model_map_) {
-        if (bs <= batch_size) best_id = id;
-        else break;
+    // Choose the smallest compiled batch that can accommodate the request.
+    // The infer() path pads input to this batch and slices outputs back.
+    if (model_map_.empty()) {
+        throw std::runtime_error("AscendBackend: no models loaded");
     }
-    return best_id;
+    auto it = model_map_.lower_bound(batch_size);
+    if (it != model_map_.end()) return it->second;
+    return model_map_.rbegin()->second;
 }
 
 void AscendBackend::preprocessCPU(const Batch& input, float* dst,
@@ -202,10 +186,19 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
     std::lock_guard<std::mutex> lk(infer_mu_);
     ACL_CHECK(aclrtSetCurrentContext(ctx_));
 
-    const int bs = input.size();
-    const size_t out_bytes =
-        static_cast<size_t>(bs) * (4 + num_classes_) * yoloAnchorCount(input_h_, input_w_) * sizeof(float);
-    const uint32_t model_id = selectModel(bs);
+    const int req_bs = input.size();
+    // Round up to the smallest compiled batch and pad inputs accordingly.
+    auto it = model_map_.lower_bound(req_bs);
+    if (it == model_map_.end()) {
+        throw std::runtime_error("AscendBackend: request batch_size exceeds compiled max batch");
+    }
+    const int      model_bs = it->first;
+    const uint32_t model_id = it->second;
+
+    const size_t out_bytes_model =
+        static_cast<size_t>(model_bs) * (4 + num_classes_) * yoloAnchorCount(input_h_, input_w_) * sizeof(float);
+    const size_t out_bytes_req =
+        static_cast<size_t>(req_bs) * (4 + num_classes_) * yoloAnchorCount(input_h_, input_w_) * sizeof(float);
 
     // Acquire pre-allocated slot for the output buffer (exception-safe release).
     AscendPooledBuffer* slot = buffer_pool_.acquire();
@@ -249,16 +242,27 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
 #ifdef BUILD_ASCEND_BACKEND
     if (aipp_enabled_ && input.is_ascend && !input.ascend_frames.empty()) {
         // Path A: zero-copy DVPP → AIPP
+        // NV12 buffer stride equals DVPP-aligned width (16-byte aligned),
+        // NOT the codec pixel width. Use aligned dims when available.
         const auto& f0 = input.ascend_frames[0];
+        const int stride_w = f0.aligned_width  > 0 ? f0.aligned_width  : f0.width;
+        const int stride_h = f0.aligned_height > 0 ? f0.aligned_height : f0.height;
         const size_t frame_nv12 =
-            static_cast<size_t>(f0.width) * static_cast<size_t>(f0.height) * 3 / 2;
-        in_bytes = static_cast<size_t>(bs) * frame_nv12;
+            static_cast<size_t>(stride_w) * static_cast<size_t>(stride_h) * 3 / 2;
+        const size_t expected_nv12 =
+            static_cast<size_t>(input_w_) * static_cast<size_t>(input_h_) * 3 / 2;
+        if (frame_nv12 != expected_nv12) {
+            LOG_WARN("AscendBackend: Path A NV12 bytes/frame={} but model expects {} "
+                     "(stride {}x{} vs input {}x{}); check DVPP VPC and aipp.cfg src_*",
+                     frame_nv12, expected_nv12, stride_w, stride_h, input_w_, input_h_);
+        }
+        in_bytes = static_cast<size_t>(model_bs) * frame_nv12;
 
-        if (bs == 1) {
+        if (req_bs == 1 && model_bs == 1) {
             // True zero-copy: forward DVPP device ptr directly to ACL dataset.
             input_ptr = f0.yuv_device;
         } else {
-            // Multi-frame: D2D-concatenate into a fresh contiguous device buffer.
+            // Need a contiguous buffer sized for model_bs with padding.
             // TmpDevGuard is already live so any throw below is exception-safe.
             auto alloc_fn = dev_alloc_fn_ ? dev_alloc_fn_
                 : [](void** ptr, size_t sz) -> aclError {
@@ -266,32 +270,38 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
                 };
             ACL_CHECK(alloc_fn(&tmp_device, in_bytes));
 
-            for (int b = 0; b < bs; ++b) {
+            for (int b = 0; b < req_bs; ++b) {
                 const auto& fb  = input.ascend_frames[b];
                 void*       dst = static_cast<char*>(tmp_device)
                                   + static_cast<ptrdiff_t>(b) * frame_nv12;
                 ACL_CHECK(do_memcpy(dst, frame_nv12, fb.yuv_device, frame_nv12,
                                     ACL_MEMCPY_DEVICE_TO_DEVICE));
             }
+            if (model_bs > req_bs) {
+                void* pad_dst = static_cast<char*>(tmp_device)
+                                + static_cast<ptrdiff_t>(req_bs) * frame_nv12;
+                const size_t pad_bytes = static_cast<size_t>(model_bs - req_bs) * frame_nv12;
+                ACL_CHECK(aclrtMemset(pad_dst, pad_bytes, 0, pad_bytes));
+            }
             input_ptr = tmp_device;
         }
     } else
 #endif
     if (aipp_enabled_) {
-        // Path B: CPU BGR uint8, AIPP handles CHW conversion + normalisation.
+        // Path B: CPU BGR → NV12 (YUV420SP) uint8.
         // slot->input_device is NPU HBM memory, so we must stage on host first.
-        in_bytes = static_cast<size_t>(bs) * input_h_ * input_w_ * 3;
-        std::vector<uint8_t> host_input(in_bytes);
-        packBgrUint8(input, host_input.data(), bs, input_h_, input_w_);
+        in_bytes = static_cast<size_t>(model_bs) * input_h_ * input_w_ * 3 / 2;
+        std::vector<uint8_t> host_input(in_bytes, 0);
+        packBgrBatchToNv12(input, host_input.data(), req_bs, input_h_, input_w_);
         ACL_CHECK(do_memcpy(slot->input_device, input_bytes_, host_input.data(), in_bytes,
                             ACL_MEMCPY_HOST_TO_DEVICE));
         input_ptr = slot->input_device;
     } else {
         // Path C: CPU float CHW, no AIPP.
         // Preprocess on host, then copy into device input buffer.
-        in_bytes = static_cast<size_t>(bs) * 3 * input_h_ * input_w_ * sizeof(float);
-        std::vector<float> host_input(in_bytes / sizeof(float));
-        preprocessCPU(input, host_input.data(), bs, input_h_, input_w_);
+        in_bytes = static_cast<size_t>(model_bs) * 3 * input_h_ * input_w_ * sizeof(float);
+        std::vector<float> host_input(in_bytes / sizeof(float), 0.0f);
+        preprocessCPU(input, host_input.data(), req_bs, input_h_, input_w_);
         ACL_CHECK(do_memcpy(slot->input_device, input_bytes_, host_input.data(), in_bytes,
                             ACL_MEMCPY_HOST_TO_DEVICE));
         input_ptr = slot->input_device;
@@ -299,7 +309,7 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
 
     // ── Build ACL datasets and run async inference ────────────────────────
     aclDataBuffer* in_buf  = aclCreateDataBuffer(input_ptr, in_bytes);
-    aclDataBuffer* out_buf = aclCreateDataBuffer(slot->output_device, out_bytes);
+    aclDataBuffer* out_buf = aclCreateDataBuffer(slot->output_device, out_bytes_model);
     if (!in_buf || !out_buf) {
         if (in_buf) aclDestroyDataBuffer(in_buf);
         if (out_buf) aclDestroyDataBuffer(out_buf);
@@ -345,15 +355,18 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
              aclrtMemcpyKind kind, aclrtStream stream) -> aclError {
             return aclrtMemcpyAsync(dst, dst_size, src, src_size, kind, stream);
         };
-    output.resize(out_bytes / sizeof(float));
-    ACL_CHECK(memcpy_async_fn(output.data(), out_bytes,
-                              slot->output_device, out_bytes,
+    std::vector<float> host_out(out_bytes_model / sizeof(float));
+    ACL_CHECK(memcpy_async_fn(host_out.data(), out_bytes_model,
+                              slot->output_device, out_bytes_model,
                               ACL_MEMCPY_DEVICE_TO_HOST, stream_));
     if (infer_timeout_ms_ > 0) {
         ACL_CHECK(timed_sync_fn(stream_, infer_timeout_ms_));
     } else {
         ACL_CHECK(sync_fn(stream_));
     }
+
+    output.assign(host_out.begin(),
+                  host_out.begin() + static_cast<ptrdiff_t>(out_bytes_req / sizeof(float)));
 }
 
 // ── Test entry point ────────────────────────────────────────────────────────

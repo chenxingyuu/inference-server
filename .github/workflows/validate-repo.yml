@@ -23,3 +23,26 @@ jobs:
         run: |
           chmod +x scripts/validate-repo.sh
           scripts/validate-repo.sh
+
+  go-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/go.mod
+
+      - name: Build infer-ctl
+        working-directory: tools
+        run: go build -o /dev/null ./infer-ctl/
+
+      - name: Build infer-server
+        working-directory: tools
+        run: go build -o /dev/null ./infer-server/
+
+      - name: Vet
+        working-directory: tools
+        run: go vet ./...

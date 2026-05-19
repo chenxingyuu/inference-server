@@ -6,6 +6,8 @@
 #include "pipeline/stages/SinkFfplayStage.h"
 #include "pipeline/stages/JoinByFrameStage.h"
 #include "pipeline/stages/PassthroughStage.h"
+#include "pipeline/stages/SahiMergeStage.h"
+#include "pipeline/stages/SahiSchedulerStage.h"
 #include "pipeline/stages/SinkKafkaStage.h"
 #include "pipeline/stages/SourceFileStage.h"
 #include "pipeline/stages/SourceRtspStage.h"
@@ -60,6 +62,15 @@ std::string getStringWithDefault(
     return it->second;
 }
 
+bool getBoolWithDefault(const std::map<std::string, std::string>& kv, const std::string& key, bool default_value) {
+    auto it = kv.find(key);
+    if (it == kv.end()) return default_value;
+    const std::string& raw = it->second;
+    if (raw == "true" || raw == "1" || raw == "yes" || raw == "on") return true;
+    if (raw == "false" || raw == "0" || raw == "no" || raw == "off") return false;
+    throw std::runtime_error("invalid bool value for '" + key + "': " + raw);
+}
+
 } // namespace
 
 std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Context& ctx) {
@@ -72,10 +83,12 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
             ctx.ingest_use_hwdec,
             ctx.gpu_alloc,
             ctx.ingest_use_ascend_dvpp,
-            ctx.ingest_ascend_device_id);
+            ctx.ingest_ascend_device_id,
+            ctx.ingest_vpc_out_width,
+            ctx.ingest_vpc_out_height);
     }
     if (cfg.type == "source.file") {
-        bool loop = getStringWithDefault(cfg.with, "loop", "false") == "true";
+        bool loop = getBoolWithDefault(cfg.with, "loop", false);
         return std::make_unique<SourceFileStage>(cfg.id, ctx.source, ctx.ingest_sample_fps, ctx.ingest_sampling_mode, ctx.ingest_use_hwdec, loop);
     }
     if (cfg.type == "decode.ffmpeg" || cfg.type == "preprocess.yolo" || cfg.type == "postprocess.yolo") {
@@ -110,6 +123,47 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
     if (cfg.type == "join.byFrameId") {
         return std::make_unique<JoinByFrameStage>(cfg.id);
     }
+    if (cfg.type == "infer.sahiScheduler") {
+        SahiSchedulerConfig sahi_cfg;
+        sahi_cfg.tile_width = getIntWithDefault(cfg.with, "tile_width", sahi_cfg.tile_width);
+        sahi_cfg.tile_height = getIntWithDefault(cfg.with, "tile_height", sahi_cfg.tile_height);
+        const float overlap = getFloatWithDefault(cfg.with, "overlap_ratio", sahi_cfg.x_overlap_ratio);
+        sahi_cfg.x_overlap_ratio = getFloatWithDefault(cfg.with, "x_overlap_ratio", overlap);
+        sahi_cfg.y_overlap_ratio = getFloatWithDefault(cfg.with, "y_overlap_ratio", sahi_cfg.y_overlap_ratio);
+        sahi_cfg.full_interval = getIntWithDefault(cfg.with, "full_interval", sahi_cfg.full_interval);
+        sahi_cfg.roi_expand_ratio = getFloatWithDefault(cfg.with, "roi_expand_ratio", sahi_cfg.roi_expand_ratio);
+        sahi_cfg.max_tiles_per_frame = getIntWithDefault(cfg.with, "max_tiles_per_frame", sahi_cfg.max_tiles_per_frame);
+        sahi_cfg.min_roi_width = getIntWithDefault(cfg.with, "min_roi_width", sahi_cfg.min_roi_width);
+        sahi_cfg.min_roi_height = getIntWithDefault(cfg.with, "min_roi_height", sahi_cfg.min_roi_height);
+        sahi_cfg.roi_max_age_frames = getIntWithDefault(cfg.with, "roi_max_age_frames", sahi_cfg.roi_max_age_frames);
+        sahi_cfg.fallback_full_min_gap_frames = getIntWithDefault(cfg.with, "fallback_full_min_gap_frames", sahi_cfg.fallback_full_min_gap_frames);
+        if (sahi_cfg.tile_width < 1 || sahi_cfg.tile_height < 1) {
+            throw std::runtime_error("infer.sahiScheduler tile_width/tile_height must be >= 1");
+        }
+        if (sahi_cfg.full_interval < 1) {
+            throw std::runtime_error("infer.sahiScheduler full_interval must be >= 1");
+        }
+        if (sahi_cfg.max_tiles_per_frame < 1) {
+            throw std::runtime_error("infer.sahiScheduler max_tiles_per_frame must be >= 1");
+        }
+        return std::make_unique<SahiSchedulerStage>(cfg.id, sahi_cfg);
+    }
+    if (cfg.type == "post.sahiMerge") {
+        SahiMergeConfig merge_cfg;
+        merge_cfg.merge_iou = getFloatWithDefault(cfg.with, "merge_iou", merge_cfg.merge_iou);
+        merge_cfg.merge_ios = getFloatWithDefault(cfg.with, "merge_ios", merge_cfg.merge_ios);
+        merge_cfg.stale_timeout_ms = getIntWithDefault(cfg.with, "stale_timeout_ms", merge_cfg.stale_timeout_ms);
+        if (merge_cfg.merge_iou <= 0.0f || merge_cfg.merge_iou > 1.0f) {
+            throw std::runtime_error("post.sahiMerge merge_iou must be in (0, 1]");
+        }
+        if (merge_cfg.merge_ios <= 0.0f || merge_cfg.merge_ios > 1.0f) {
+            throw std::runtime_error("post.sahiMerge merge_ios must be in (0, 1]");
+        }
+        if (merge_cfg.stale_timeout_ms < 1) {
+            throw std::runtime_error("post.sahiMerge stale_timeout_ms must be >= 1");
+        }
+        return std::make_unique<SahiMergeStage>(cfg.id, merge_cfg);
+    }
     if (cfg.type == "sink.publish") {
         return std::make_unique<SinkKafkaStage>(cfg.id, ctx.publisher);
     }
@@ -121,6 +175,13 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         ff_cfg.reconnect_max_ms = getIntWithDefault(cfg.with, "reconnect_max_ms", ff_cfg.reconnect_max_ms);
         ff_cfg.draw_conf_thresh = getFloatWithDefault(cfg.with, "draw_conf_thresh", ff_cfg.draw_conf_thresh);
         ff_cfg.line_thickness = getIntWithDefault(cfg.with, "line_thickness", ff_cfg.line_thickness);
+        ff_cfg.draw_timestamp = getBoolWithDefault(cfg.with, "draw_timestamp", ff_cfg.draw_timestamp);
+        ff_cfg.draw_timestamp_with_stream_id = getBoolWithDefault(
+            cfg.with, "draw_timestamp_with_stream_id", ff_cfg.draw_timestamp_with_stream_id);
+        ff_cfg.timestamp_x = getIntWithDefault(cfg.with, "timestamp_x", ff_cfg.timestamp_x);
+        ff_cfg.timestamp_y = getIntWithDefault(cfg.with, "timestamp_y", ff_cfg.timestamp_y);
+        ff_cfg.timestamp_font_scale = getFloatWithDefault(cfg.with, "timestamp_font_scale", ff_cfg.timestamp_font_scale);
+        ff_cfg.timestamp_thickness = getIntWithDefault(cfg.with, "timestamp_thickness", ff_cfg.timestamp_thickness);
         const auto drop_policy = getStringWithDefault(cfg.with, "drop_policy", "drop_oldest");
         if (drop_policy == "drop_oldest") {
             ff_cfg.drop_policy = StreamDropPolicy::DropOldest;
@@ -152,12 +213,30 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         }
         validateShellSafeUrl(stream_cfg.output_url, "sink.stream");
         stream_cfg.fps = getFloatWithDefault(cfg.with, "fps", static_cast<float>(stream_cfg.fps));
+        stream_cfg.gop = getIntWithDefault(cfg.with, "gop", stream_cfg.gop);
         stream_cfg.bitrate_kbps = getIntWithDefault(cfg.with, "bitrate_kbps", stream_cfg.bitrate_kbps);
         stream_cfg.queue_capacity = getIntWithDefault(cfg.with, "queue_capacity", stream_cfg.queue_capacity);
         stream_cfg.reconnect_initial_ms = getIntWithDefault(cfg.with, "reconnect_initial_ms", stream_cfg.reconnect_initial_ms);
         stream_cfg.reconnect_max_ms = getIntWithDefault(cfg.with, "reconnect_max_ms", stream_cfg.reconnect_max_ms);
         stream_cfg.draw_conf_thresh = getFloatWithDefault(cfg.with, "draw_conf_thresh", stream_cfg.draw_conf_thresh);
         stream_cfg.line_thickness = getIntWithDefault(cfg.with, "line_thickness", stream_cfg.line_thickness);
+        stream_cfg.draw_timestamp = getBoolWithDefault(cfg.with, "draw_timestamp", stream_cfg.draw_timestamp);
+        stream_cfg.draw_timestamp_with_stream_id = getBoolWithDefault(
+            cfg.with, "draw_timestamp_with_stream_id", stream_cfg.draw_timestamp_with_stream_id);
+        stream_cfg.timestamp_x = getIntWithDefault(cfg.with, "timestamp_x", stream_cfg.timestamp_x);
+        stream_cfg.timestamp_y = getIntWithDefault(cfg.with, "timestamp_y", stream_cfg.timestamp_y);
+        stream_cfg.timestamp_font_scale = getFloatWithDefault(
+            cfg.with, "timestamp_font_scale", stream_cfg.timestamp_font_scale);
+        stream_cfg.timestamp_thickness = getIntWithDefault(cfg.with, "timestamp_thickness", stream_cfg.timestamp_thickness);
+        stream_cfg.ascend_device_id = getIntWithDefault(cfg.with, "ascend_device_id", stream_cfg.ascend_device_id);
+        const auto encoder = getStringWithDefault(cfg.with, "encoder", "ffmpeg_x264");
+        if (encoder == "ffmpeg_x264") {
+            stream_cfg.video_encoder = StreamVideoEncoder::FfmpegLibx264;
+        } else if (encoder == "ascend_venc") {
+            stream_cfg.video_encoder = StreamVideoEncoder::AscendVenc;
+        } else {
+            throw std::runtime_error("sink.stream encoder must be one of: ffmpeg_x264, ascend_venc");
+        }
         const auto drop_policy = getStringWithDefault(cfg.with, "drop_policy", "drop_oldest");
         if (drop_policy == "drop_oldest") {
             stream_cfg.drop_policy = StreamDropPolicy::DropOldest;
@@ -172,10 +251,13 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         if (stream_cfg.fps <= 0) {
             throw std::runtime_error("sink.stream fps must be > 0");
         }
+        if (stream_cfg.gop < 0) {
+            throw std::runtime_error("sink.stream gop must be >= 0");
+        }
         if (stream_cfg.reconnect_initial_ms < 1 || stream_cfg.reconnect_max_ms < stream_cfg.reconnect_initial_ms) {
             throw std::runtime_error("sink.stream reconnect settings invalid");
         }
-        return std::make_unique<DrawAndStreamStage>(cfg.id, stream_cfg);
+        return std::make_unique<DrawAndStreamStage>(cfg.id, stream_cfg, ctx.ingest_ascend_device_id);
     }
     throw std::runtime_error("unsupported stage type: " + cfg.type);
 }

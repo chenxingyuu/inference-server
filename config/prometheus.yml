@@ -5,5 +5,5 @@ global:
 scrape_configs:
   - job_name: "inference-server"
     static_configs:
-      - targets: ["infer-trt:8080"]
+      - targets: ["infer-server:8080"]
     metrics_path: /metrics

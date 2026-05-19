@@ -11,8 +11,9 @@ namespace {
 
 class FakeStreamWriter final : public IStreamWriter {
 public:
-    bool open(const std::string&, const std::string&, double, int, int, int) override {
+    bool open(const std::string&, const std::string&, double, int gop, int, int, int) override {
         open_calls++;
+        last_gop = gop;
         opened = true;
         return true;
     }
@@ -29,6 +30,7 @@ public:
 
     std::atomic<int> open_calls{0};
     std::atomic<int> write_calls{0};
+    std::atomic<int> last_gop{0};
     cv::Mat last_frame;
     bool opened{false};
 };
@@ -54,6 +56,7 @@ TEST(DrawAndStreamStage, DrawsAndWritesFrame) {
     cfg.output_url = "rtsp://localhost/live/test";
     cfg.protocol = "rtsp";
     cfg.queue_capacity = 2;
+    cfg.gop = 12;
 
     auto writer = std::make_unique<FakeStreamWriter>();
     auto* writer_ptr = writer.get();
@@ -84,10 +87,40 @@ TEST(DrawAndStreamStage, DrawsAndWritesFrame) {
 
     ASSERT_TRUE(emitted);
     ASSERT_GT(writer_ptr->open_calls.load(), 0);
+    EXPECT_EQ(writer_ptr->last_gop.load(), 12);
     ASSERT_GT(writer_ptr->write_calls.load(), 0);
     ASSERT_FALSE(writer_ptr->last_frame.empty());
     const auto pixel = writer_ptr->last_frame.at<cv::Vec3b>(10, 10);
     EXPECT_GT(pixel[1], 0);
+}
+
+TEST(DrawAndStreamStage, AutoGopUsesRoundedFps) {
+    DrawAndStreamConfig cfg;
+    cfg.output_url = "rtsp://localhost/live/test";
+    cfg.protocol = "rtsp";
+    cfg.queue_capacity = 2;
+    cfg.fps = 24.6;
+    cfg.gop = 0; // auto
+
+    auto writer = std::make_unique<FakeStreamWriter>();
+    auto* writer_ptr = writer.get();
+    DrawAndStreamStage stage("draw_stream_auto_gop", cfg, std::move(writer));
+    stage.start();
+
+    EventEnvelope in;
+    in.stream_id = "cam_01";
+    in.frame = std::make_shared<Frame>();
+    in.frame->image = cv::Mat::zeros(8, 8, CV_8UC3);
+
+    stage.process(in, [](const EventEnvelope&) {});
+
+    for (int i = 0; i < 20 && writer_ptr->open_calls.load() == 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    stage.stop();
+
+    ASSERT_GT(writer_ptr->open_calls.load(), 0);
+    EXPECT_EQ(writer_ptr->last_gop.load(), 25);
 }
 
 } // namespace

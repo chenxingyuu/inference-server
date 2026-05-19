@@ -16,7 +16,11 @@
 
 *.log
 
-models
+# Weight blobs under models/; keep README + repository_demo tracked.
+/models/*
+!/models/README.md
+!/models/repository_demo/
+!/models/repository_demo/**/*
 
 build
 cmake-build-debug
@@ -31,8 +35,11 @@ cmake-build-release-tsan
 cmake-build-release-ubsan
 cmake-build-release-msan
 
-build_tests/
-build_agent/
+build_*/
 
 __pycache__/
 .venv/
+tools/bin/
+
+dist/
+node_modules/
