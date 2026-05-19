@@ -248,9 +248,6 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
             className={`flex-1 min-w-0 py-1.5 ${isEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
           />
         </div>
-        <button type="button" onClick={handleAutoLayout} className="btn-ghost text-[12px]">
-          {t('pipelines.editor.auto_layout')}
-        </button>
         <button
           type="button"
           onClick={handleSave}
@@ -277,6 +274,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
           setNodes={setNodes}
           setEdges={setEdges}
           fitViewRequest={fitViewRequest}
+          onAutoLayout={handleAutoLayout}
           onSelectionChange={(node, edge) => {
             setSelectedNode(node)
             setSelectedEdge(edge)

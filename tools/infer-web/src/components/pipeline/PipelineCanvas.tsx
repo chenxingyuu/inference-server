@@ -31,6 +31,7 @@ interface PipelineCanvasProps {
   onSelectionChange: (node: Node<PipelineNodeData> | null, edge: Edge<PipelineEdgeData> | null) => void
   /** Increment after pipeline graph is first loaded to fit viewport to all nodes. */
   fitViewRequest?: number
+  onAutoLayout: () => void
 }
 
 export function PipelineCanvas({
@@ -42,6 +43,7 @@ export function PipelineCanvas({
   setEdges,
   onSelectionChange,
   fitViewRequest = 0,
+  onAutoLayout,
 }: PipelineCanvasProps) {
   const { t } = useT()
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
@@ -144,7 +146,7 @@ export function PipelineCanvas({
         className="pipeline-editor-flow bg-bg-base"
       >
         <Background gap={16} size={1} color="#1e2d3d" />
-        <PipelineFlowControls />
+        <PipelineFlowControls onAutoLayout={onAutoLayout} layoutDisabled={nodes.length === 0} />
         <MiniMap
           className="pipeline-flow-minimap"
           maskColor="rgba(11, 15, 20, 0.72)"
