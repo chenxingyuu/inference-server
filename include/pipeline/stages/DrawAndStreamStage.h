@@ -18,6 +18,10 @@
 
 namespace infer {
 
+// CPU sink.stream (ffmpeg libx264): -threads in child ffmpeg. Set from server.ffmpeg_encode_threads at startup.
+// 0 = ffmpeg auto; 1 = single-threaded encode (A/B baseline).
+void setFfmpegEncodeThreads(int threads);
+
 enum class StreamVideoEncoder {
     FfmpegLibx264,
     AscendVenc,

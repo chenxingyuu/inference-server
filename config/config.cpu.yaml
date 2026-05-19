@@ -15,6 +15,8 @@ server:
   ffmpeg_log_level: "warning"
   # CPU 软解 libavcodec 线程数：0=自动，1=单线程（便于 profiling），>1=帧/片并行（默认 2）
   ffmpeg_decode_threads: 2
+  # sink.stream ffmpeg_x264 编码线程：0=ffmpeg 自动（逻辑核数），1=单线程基线，>1=固定线程数
+  ffmpeg_encode_threads: 0
   log_level: "debug"
   # 仓库根：其下每个子目录若含 config.yaml 则注册为一个 model_id（如 models/yolov8n_cpu/）。
   model_repository: "models"

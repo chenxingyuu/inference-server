@@ -18,6 +18,10 @@
 
 namespace infer {
 
+int g_ffmpeg_encode_threads = 0;
+
+void setFfmpegEncodeThreads(int threads) { g_ffmpeg_encode_threads = std::max(0, threads); }
+
 namespace {
 
 std::string buildOutputUrl(const std::string& url, const std::string& protocol) {
@@ -370,7 +374,8 @@ bool DrawAndStreamStage::OpenCvStreamWriter::open(
         "-f rawvideo -pix_fmt bgr24 "
         "-s " + std::to_string(width) + "x" + std::to_string(height) + " "
         "-r " + std::to_string(fps) + " -i - "
-        "-an -c:v libx264 -pix_fmt yuv420p -preset veryfast -tune zerolatency "
+        "-an -c:v libx264 -threads " + std::to_string(g_ffmpeg_encode_threads) +
+        " -pix_fmt yuv420p -preset veryfast -tune zerolatency "
         "-g " + std::to_string(gop) + " -keyint_min " + std::to_string(gop) + " -sc_threshold 0 "
         "-b:v " + std::to_string(bitrate_kbps) + "k "
         "-f " + format + " " + shellQuote(output_url);

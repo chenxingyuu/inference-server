@@ -12,6 +12,7 @@ server:
   socket_path: "/var/run/infer/infer.sock"
   ffmpeg_log_level: "fatal"
   ffmpeg_decode_threads: 2
+  ffmpeg_encode_threads: 0
   log_level: debug
   model_repository: "models"
 

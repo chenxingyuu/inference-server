@@ -120,6 +120,7 @@ int main(int argc, char* argv[]) {
         infer::setFfmpegLogLevel(env ? std::string(env) : cfg.server.ffmpeg_log_level);
     }
     infer::setFfmpegDecodeThreads(cfg.server.ffmpeg_decode_threads);
+    infer::setFfmpegEncodeThreads(cfg.server.ffmpeg_encode_threads);
 
     // ── Signal handling ───────────────────────────────────────────────────────
     std::signal(SIGINT,  signalHandler);

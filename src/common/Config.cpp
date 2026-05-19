@@ -598,12 +598,19 @@ AppConfig loadConfig(const std::string& yaml_path) {
         cfg.server.ffmpeg_log_level    = sn["ffmpeg_log_level"].as<std::string>("warning");
         cfg.server.ffmpeg_decode_threads =
             sn["ffmpeg_decode_threads"].as<int>(cfg.server.ffmpeg_decode_threads);
+        cfg.server.ffmpeg_encode_threads =
+            sn["ffmpeg_encode_threads"].as<int>(cfg.server.ffmpeg_encode_threads);
         cfg.server.log_level           = sn["log_level"].as<std::string>("info");
         cfg.server.model_repository    = sn["model_repository"].as<std::string>("");
         if (cfg.server.ffmpeg_decode_threads < 0 ||
             cfg.server.ffmpeg_decode_threads > 64) {
             throw std::runtime_error(
                 "server.ffmpeg_decode_threads must be in [0, 64] (0 = libavcodec auto)");
+        }
+        if (cfg.server.ffmpeg_encode_threads < 0 ||
+            cfg.server.ffmpeg_encode_threads > 64) {
+            throw std::runtime_error(
+                "server.ffmpeg_encode_threads must be in [0, 64] (0 = ffmpeg/libx264 auto)");
         }
     }
     if (root["models"]) {

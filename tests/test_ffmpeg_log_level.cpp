@@ -11,6 +11,7 @@ TEST(FfmpegLogLevel, ServerConfigDefault) {
     ServerConfig cfg;
     EXPECT_EQ(cfg.ffmpeg_log_level, "warning");
     EXPECT_EQ(cfg.ffmpeg_decode_threads, 2);
+    EXPECT_EQ(cfg.ffmpeg_encode_threads, 0);
 }
 
 // ─── YAML parsing ─────────────────────────────────────────────────────────────
@@ -74,5 +75,18 @@ TEST(FfmpegDecodeThreads, YamlParsesExplicitValue) {
 TEST(FfmpegDecodeThreads, RejectsOutOfRange) {
     std::string yaml =
         std::string("server:\n  ffmpeg_decode_threads: 99\n") + kMinimalYaml;
+    EXPECT_THROW(loadFromString(yaml), std::runtime_error);
+}
+
+TEST(FfmpegEncodeThreads, YamlParsesExplicitValue) {
+    std::string yaml =
+        std::string("server:\n  ffmpeg_encode_threads: 8\n") + kMinimalYaml;
+    AppConfig cfg = loadFromString(yaml);
+    EXPECT_EQ(cfg.server.ffmpeg_encode_threads, 8);
+}
+
+TEST(FfmpegEncodeThreads, RejectsOutOfRange) {
+    std::string yaml =
+        std::string("server:\n  ffmpeg_encode_threads: 99\n") + kMinimalYaml;
     EXPECT_THROW(loadFromString(yaml), std::runtime_error);
 }

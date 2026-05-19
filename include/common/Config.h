@@ -17,6 +17,8 @@ struct ServerConfig {
     // libavcodec AVCodecContext::thread_count for CPU software decode (ignored for NVDEC hwdec).
     // 0 = leave unset (libavcodec auto); 1 = single-threaded decode; >1 = frame/slice workers.
     int         ffmpeg_decode_threads{2};
+    // sink.stream ffmpeg_x264 child process: libx264 -threads N. 0 = ffmpeg auto (all logical CPUs).
+    int         ffmpeg_encode_threads{0};
     std::string log_level{"info"};            // spdlog level (trace/debug/info/warn/error/critical/off)
     // Triton-style model repository root (<root>/<model_id>/config.yaml + version subdirs). Empty disables scan.
     // If set, non-empty env INFER_MODEL_REPOSITORY overrides this value after YAML parse.

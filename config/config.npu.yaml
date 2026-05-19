@@ -13,6 +13,7 @@ server:
   ffmpeg_log_level: "fatal"
   # DVPP 不可用时的 FFmpeg 软解回退；全景 7680 可酌情调大（如 8）
   ffmpeg_decode_threads: 2
+  ffmpeg_encode_threads: 0
   log_level: "debug"
   model_repository: "models"
 
