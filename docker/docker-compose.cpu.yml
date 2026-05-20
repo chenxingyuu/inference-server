@@ -6,8 +6,7 @@ version: "3.9"
 # Usage:
 #   docker compose -f docker/docker-compose.cpu.yml up --build
 #
-# Place your ONNX model at ./models/ and update ./config/config.cpu.yaml
-# with backend: cpu before starting.
+# Place your ONNX model under ./models/ and mount ./config/config.yaml.
 
 services:
   # ── Inference service (ONNX Runtime / CPU) ────────────────────────────────

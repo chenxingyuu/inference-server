@@ -88,11 +88,11 @@ make build-gpu
 make build-npu
 make build-tests
 
-# 本地运行（默认使用 config/config.cpu.yaml）
+# 本地运行（默认使用 config/config.yaml）
 make run
 
 # 覆盖配置文件运行
-make run CONFIG=config/config.cpu.yaml
+make run CONFIG=config/config.yaml
 
 # 质量门禁与测试
 make validate
@@ -135,7 +135,7 @@ echo '{"cmd":"stop_task","id":"task_cam_001"}' | socat - UNIX-CONNECT:./infer.so
 
 配置文件以 `sources` 描述输入源（`id`、`url` 与重连相关字段），以 `pipelines` 描述可编排 DAG 模板（nodes/edges），以 `tasks` 绑定「哪路源跑哪张图」。
 每条 `tasks` 可单独设置 **`sample_fps`**（默认 `5`，须 ≥ 1）与 **`use_hwdec`**（默认 `false`）；二者已从 `sources` 迁出，若在 `sources` 下仍写 `sample_fps` / `use_hwdec`，加载配置时会报错提示迁移到对应 task。
-示例见 `config/config.cpu.yaml` / `config/config.gpu.yaml` / `config/config.npu.yaml`。
+示例见 `config/config.yaml`。
 
 常见 stage：
 - `source.rtsp`：RTSP 输入（内部使用 `FFmpegDecoder`）

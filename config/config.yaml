@@ -1,35 +1,25 @@
-# CPU / ONNX Runtime 模板（需编译 BUILD_ONNX_BACKEND=ON，见 docker/Dockerfile.cpu）
-#
-# 使用方式：
-#   本地：  ./build/infer_server config/config.cpu.yaml
-#   Docker：默认入口为 /config/config.yaml，可二选一：
-#     - 将本文件复制/软链为 config/config.yaml，或
-#     - 覆盖启动参数，例如：docker run ... infer_server /config/config.cpu.yaml
-#
-# 将导出的 YOLO ONNX 放到 models/ 下，并按实际文件名修改 onnx_path。
-
 server:
   stream_pool_threads: 16
   max_streams: 50
+  # Docker 部署时建议改为绝对路径，如 /var/run/infer/infer.sock
   socket_path: "./infer.sock"
-  ffmpeg_log_level: "warning"
-  # CPU 软解 libavcodec 线程数：0=自动，1=单线程（便于 profiling），>1=帧/片并行（默认 2）
+  # CPU 软解线程数：0=自动，1=单线程（便于 profiling），>1=帧/片并行
   ffmpeg_decode_threads: 2
-  # sink.stream ffmpeg_x264 编码线程：0=ffmpeg 自动（逻辑核数），1=单线程基线，>1=固定线程数
+  # sink.stream 编码线程：0=ffmpeg 自动，1=单线程基线，>1=固定线程数
   ffmpeg_encode_threads: 0
-  log_level: "debug"
-  # 仓库根：其下每个子目录若含 config.yaml 则注册为一个 model_id（如 models/yolov8n_cpu/）。
+  ffmpeg_log_level: "warning"
+  log_level: "info"
+  # 模型仓库根目录；每个含 config.yaml 的子目录注册为一个 model_id
   model_repository: "models"
 
 # sources / pipelines / tasks 通过 API 管理，由 infer-server 持久化到 state.json 并在启动时重放。
 
-# 推理结果发布（buildPublisher）：至少须有一个 enabled: true。
+# 推理结果发布：至少须有一个 enabled: true。
 # Kafka 随主目标始终编译；gRPC/Redis 需 cmake 打开 BUILD_GRPC_PUBLISHER / BUILD_REDIS_PUBLISHER。
-# 管线里用 sink.publish 把 join 输出交给上述 IPublisher。
 publishers:
   kafka:
     enabled: false
-    brokers: "192.168.3.135:9092"
+    brokers: "localhost:9092"
     topic: "inference-results"
     batch_size: 100
     linger_ms: 5
@@ -53,6 +43,10 @@ frame_archive:
   save_interval: 1
   jpeg_quality: 90
   queue_capacity: 4096
+  # GPU/NPU 环境：allow_gpu_frames: true 可避免 GPU→CPU 拷贝
+  # allow_gpu_frames: false
+  # NPU 多路归档时可增大并发 worker 数
+  # worker_count: 1
   minio:
     enabled: false
     endpoint: "minio:9000"

@@ -13,7 +13,7 @@ services:
       - ../config:/config:ro
       - /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro
       - infer-socket:/var/run/infer
-    command: ["/app/infer_server", "/config/config.npu.yaml"]
+    command: ["/app/infer_server", "/config/config.yaml"]
     environment:
       - ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
       - LD_LIBRARY_PATH=/usr/local/Ascend/ascend-toolkit/latest/lib64:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:/usr/local/lib:/usr/lib

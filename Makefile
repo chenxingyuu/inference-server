@@ -14,7 +14,7 @@ WEB_DIR := tools/infer-web
 
 BUILD_DIR ?= build
 BUILD_TYPE ?= Release
-CONFIG ?= config/config.cpu.yaml
+CONFIG ?= config/config.yaml
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 GO   ?= $(shell which go 2>/dev/null || ls $(HOME)/sdk/go*/bin/go 2>/dev/null | sort -V | tail -1)
 SWAG ?= $(shell which swag 2>/dev/null || echo $(HOME)/go/bin/swag)
@@ -92,14 +92,8 @@ build-tests: configure-tests
 run:
 	$(INFER_BIN) "$(CONFIG)"
 
-run-cpu:
-	$(INFER_BIN) config/config.cpu.yaml
-
-run-gpu:
-	$(INFER_BIN) config/config.gpu.yaml
-
-run-npu:
-	$(INFER_BIN) config/config.npu.yaml
+run-cpu run-gpu run-npu:
+	$(INFER_BIN) config/config.yaml
 
 test:
 	ctest --test-dir $(BUILD_DIR) --output-on-failure
