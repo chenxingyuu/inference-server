@@ -151,8 +151,8 @@ struct InferResult {
     // Internal-only monotonic capture timestamp (ns). Not serialized.
     uint64_t                 frame_mono_ns{0};
     std::string              frame_local_path;   // local archived frame path
-    std::string              frame_url;          // optional MinIO URL
-    std::string              frame_upload_state; // pending/uploaded/failed/disabled
+    std::string              frame_url;          // reserved (empty); legacy Kafka field
+    std::string              frame_upload_state; // queued|failed|disabled (local async archive)
 };
 
 // ── Device type ───────────────────────────────────────────────────────────────

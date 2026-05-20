@@ -10,29 +10,74 @@
     }
   ],
   "__requires": [
-    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
-    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
-    { "type": "panel", "id": "gauge", "name": "Gauge", "version": "" },
-    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
-    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
-    { "type": "panel", "id": "table", "name": "Table", "version": "" },
-    { "type": "panel", "id": "heatmap", "name": "Heatmap", "version": "" }
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "heatmap",
+      "name": "Heatmap",
+      "version": ""
+    }
   ],
   "title": "Inference Server",
   "uid": "inference-server-v1",
   "schemaVersion": 38,
   "version": 1,
   "refresh": "10s",
-  "time": { "from": "now-30m", "to": "now" },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
   "timepicker": {},
-  "tags": ["inference", "video", "yolo"],
+  "tags": [
+    "inference",
+    "video",
+    "yolo"
+  ],
   "templating": {
     "list": [
       {
         "name": "model_id",
         "label": "Model",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
         "query": "label_values(infer_latency_ms_count, model_id)",
         "refresh": 2,
         "multi": true,
@@ -44,7 +89,10 @@
         "name": "stream_id",
         "label": "Stream",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
         "query": "label_values(stream_state, stream_id)",
         "refresh": 2,
         "multi": true,
@@ -55,24 +103,39 @@
     ]
   },
   "panels": [
-
     {
       "type": "row",
       "title": "Overview",
       "collapsed": false,
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
       "id": 100
     },
-
     {
       "id": 1,
       "type": "stat",
       "title": "Streams Online",
       "description": "Number of streams in STREAMING state (state=1)",
-      "gridPos": { "x": 0, "y": 1, "w": 4, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto"
@@ -82,8 +145,14 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           },
           "mappings": []
@@ -91,22 +160,36 @@
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "count(stream_state == 1)",
           "legendFormat": "Online"
         }
       ]
     },
-
     {
       "id": 2,
       "type": "stat",
       "title": "Streams Reconnecting",
       "description": "Streams in RECONNECTING or DEGRADED state",
-      "gridPos": { "x": 4, "y": 1, "w": 4, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "colorMode": "background",
         "graphMode": "none"
       },
@@ -115,31 +198,54 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 1 },
-              { "color": "red", "value": 3 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
             ]
           }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "count(stream_state >= 2) or vector(0)",
           "legendFormat": "Unhealthy"
         }
       ]
     },
-
     {
       "id": 3,
       "type": "stat",
       "title": "Infer Throughput",
       "description": "Total frames per second going through inference",
-      "gridPos": { "x": 8, "y": 1, "w": 4, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "colorMode": "value",
         "graphMode": "area"
       },
@@ -149,31 +255,54 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 10 },
-              { "color": "green", "value": 50 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "green",
+                "value": 50
+              }
             ]
           }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "sum(rate(frames_decoded_total[1m]))",
           "legendFormat": "fps"
         }
       ]
     },
-
     {
       "id": 4,
       "type": "stat",
       "title": "Kafka Drop Rate",
       "description": "Fraction of messages dropped vs published",
-      "gridPos": { "x": 12, "y": 1, "w": 4, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "colorMode": "background",
         "graphMode": "none"
       },
@@ -183,31 +312,54 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 0.01 },
-              { "color": "red", "value": 0.05 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
             ]
           }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "rate(kafka_dropped_total[1m]) / (rate(kafka_published_total[1m]) + rate(kafka_dropped_total[1m]) + 1e-9)",
           "legendFormat": "drop %"
         }
       ]
     },
-
     {
       "id": 5,
       "type": "stat",
       "title": "Frame Drop Rate",
       "description": "FrameBuffer drop rate across all streams",
-      "gridPos": { "x": 16, "y": 1, "w": 4, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "colorMode": "background",
         "graphMode": "none"
       },
@@ -217,31 +369,54 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 0.02 },
-              { "color": "red", "value": 0.1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.02
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
             ]
           }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "sum(rate(frames_dropped_total[1m])) / (sum(rate(frames_decoded_total[1m])) + 1e-9)",
           "legendFormat": "drop %"
         }
       ]
     },
-
     {
       "id": 6,
       "type": "stat",
       "title": "E2E Latency p99",
       "description": "99th percentile end-to-end latency across all streams",
-      "gridPos": { "x": 20, "y": 1, "w": 4, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "colorMode": "background",
         "graphMode": "none"
       },
@@ -251,196 +426,370 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 80 },
-              { "color": "red", "value": 150 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 150
+              }
             ]
           }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "histogram_quantile(0.99, sum by(le) (rate(e2e_latency_ms_bucket[1m])))",
           "legendFormat": "p99"
         }
       ]
     },
-
     {
       "type": "row",
       "title": "Inference Performance",
       "collapsed": false,
-      "gridPos": { "x": 0, "y": 5, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 1
+      },
       "id": 101
     },
-
     {
       "id": 10,
       "type": "timeseries",
       "title": "Infer Latency (p50 / p99)",
       "description": "Batch inference latency percentiles per model. Wide p50-p99 gap = high jitter.",
-      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
-          "custom": { "lineWidth": 2 }
+          "custom": {
+            "lineWidth": 2
+          }
         }
       },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "histogram_quantile(0.50, sum by(le, model_id) (rate(infer_latency_ms_bucket{model_id=~\"$model_id\"}[1m])))",
           "legendFormat": "p50 {{model_id}}"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "histogram_quantile(0.99, sum by(le, model_id) (rate(infer_latency_ms_bucket{model_id=~\"$model_id\"}[1m])))",
           "legendFormat": "p99 {{model_id}}"
         }
       ]
     },
-
     {
       "id": 11,
       "type": "timeseries",
       "title": "Avg Batch Size per Model",
-      "description": "Average batch size over time. Consistently low (≈1) means BatchScheduler is timeout-firing, not filling batches — root cause of latency jitter.",
-      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Average batch size over time. Consistently low (\u22481) means BatchScheduler is timeout-firing, not filling batches \u2014 root cause of latency jitter.",
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "min": 0,
-          "custom": { "lineWidth": 2 }
+          "custom": {
+            "lineWidth": 2
+          }
         }
       },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "rate(infer_batch_size_sum{model_id=~\"$model_id\"}[1m]) / rate(infer_batch_size_count{model_id=~\"$model_id\"}[1m])",
           "legendFormat": "avg batch {{model_id}}"
         }
       ]
     },
-
     {
       "id": 12,
       "type": "heatmap",
       "title": "Batch Size Distribution",
       "description": "Heatmap of batch size histogram. Concentrated at 1 = fragmented inference. Concentrated at max = GPU fully utilized.",
-      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "options": {
         "calculate": false,
-        "yAxis": { "unit": "short", "decimals": 0 },
-        "color": { "scheme": "Spectral", "mode": "scheme" }
+        "yAxis": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "color": {
+          "scheme": "Spectral",
+          "mode": "scheme"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "sum by(le) (increase(infer_batch_size_bucket{model_id=~\"$model_id\"}[2m]))",
           "format": "heatmap",
           "legendFormat": "{{le}}"
         }
       ]
     },
-
     {
       "id": 13,
       "type": "timeseries",
       "title": "E2E Latency (p50 / p90 / p99) per Stream",
       "description": "End-to-end latency from frame capture to Kafka publish.",
-      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
-          "custom": { "lineWidth": 1 }
+          "custom": {
+            "lineWidth": 1
+          }
         }
       },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "histogram_quantile(0.50, sum by(le, stream_id) (rate(e2e_latency_ms_bucket{stream_id=~\"$stream_id\"}[1m])))",
           "legendFormat": "p50 {{stream_id}}"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "histogram_quantile(0.90, sum by(le, stream_id) (rate(e2e_latency_ms_bucket{stream_id=~\"$stream_id\"}[1m])))",
           "legendFormat": "p90 {{stream_id}}"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "histogram_quantile(0.99, sum by(le, stream_id) (rate(e2e_latency_ms_bucket{stream_id=~\"$stream_id\"}[1m])))",
           "legendFormat": "p99 {{stream_id}}"
         }
       ]
     },
-
     {
       "type": "row",
       "title": "Stream Health",
       "collapsed": false,
-      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 1
+      },
       "id": 102
     },
-
     {
       "id": 20,
       "type": "table",
       "title": "Stream Status",
       "description": "Per-stream health snapshot. State: 0=CONNECTING 1=STREAMING 2=RECONNECTING 3=DEGRADED 4=STOPPED",
-      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "State" },
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
             "properties": [
               {
                 "id": "mappings",
                 "value": [
-                  { "type": "value", "options": { "0": { "text": "CONNECTING",   "color": "blue"   } } },
-                  { "type": "value", "options": { "1": { "text": "STREAMING",    "color": "green"  } } },
-                  { "type": "value", "options": { "2": { "text": "RECONNECTING", "color": "orange" } } },
-                  { "type": "value", "options": { "3": { "text": "DEGRADED",     "color": "red"    } } },
-                  { "type": "value", "options": { "4": { "text": "STOPPED",      "color": "grey"   } } }
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "CONNECTING",
+                        "color": "blue"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "1": {
+                        "text": "STREAMING",
+                        "color": "green"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "2": {
+                        "text": "RECONNECTING",
+                        "color": "orange"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "3": {
+                        "text": "DEGRADED",
+                        "color": "red"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "4": {
+                        "text": "STOPPED",
+                        "color": "grey"
+                      }
+                    }
+                  }
                 ]
               },
-              { "id": "custom.displayMode", "value": "color-background" }
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Last Frame Age (s)" },
+            "matcher": {
+              "id": "byName",
+              "options": "Last Frame Age (s)"
+            },
             "properties": [
               {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    { "color": "green", "value": null },
-                    { "color": "orange", "value": 5 },
-                    { "color": "red", "value": 15 }
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 5
+                    },
+                    {
+                      "color": "red",
+                      "value": 15
+                    }
                   ]
                 }
               },
-              { "id": "custom.displayMode", "value": "color-background" }
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
             ]
           }
         ]
       },
       "options": {
-        "sortBy": [{ "displayName": "State", "desc": true }],
-        "footer": { "show": false }
+        "sortBy": [
+          {
+            "displayName": "State",
+            "desc": true
+          }
+        ],
+        "footer": {
+          "show": false
+        }
       },
       "transformations": [
-        { "id": "merge", "options": {} },
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
@@ -456,28 +805,40 @@
       ],
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "stream_state{stream_id=~\"$stream_id\"}",
           "legendFormat": "{{stream_id}}",
           "instant": true,
           "refId": "A"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "stream_reconnect_count{stream_id=~\"$stream_id\"}",
           "legendFormat": "{{stream_id}}",
           "instant": true,
           "refId": "B"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "stream_consecutive_failures{stream_id=~\"$stream_id\"}",
           "legendFormat": "{{stream_id}}",
           "instant": true,
           "refId": "C"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "stream_last_frame_age_seconds{stream_id=~\"$stream_id\"}",
           "legendFormat": "{{stream_id}}",
           "instant": true,
@@ -485,218 +846,325 @@
         }
       ]
     },
-
     {
       "id": 21,
       "type": "timeseries",
       "title": "Last Frame Age per Stream",
       "description": "Seconds since last decoded frame. Sustained >5s = camera disconnected or decoder stuck.",
-      "gridPos": { "x": 0, "y": 31, "w": 12, "h": 7 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "custom": { "lineWidth": 1 },
+          "custom": {
+            "lineWidth": 1
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 5 },
-              { "color": "red", "value": 15 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 15
+              }
             ]
           }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "stream_last_frame_age_seconds{stream_id=~\"$stream_id\"}",
           "legendFormat": "{{stream_id}}"
         }
       ]
     },
-
     {
       "id": 22,
       "type": "timeseries",
       "title": "Consecutive Reconnect Failures",
       "description": "Cleared on successful reconnect. Rising = stream becoming permanently unavailable.",
-      "gridPos": { "x": 12, "y": 31, "w": 12, "h": 7 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 12,
+        "y": 31,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "lineWidth": 1 },
+          "custom": {
+            "lineWidth": 1
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 2 },
-              { "color": "red", "value": 4 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 4
+              }
             ]
           }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "stream_consecutive_failures{stream_id=~\"$stream_id\"}",
           "legendFormat": "{{stream_id}}"
         }
       ]
     },
-
     {
       "type": "row",
       "title": "Pipeline Throughput",
       "collapsed": false,
-      "gridPos": { "x": 0, "y": 38, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 24,
+        "h": 1
+      },
       "id": 103
     },
-
     {
       "id": 30,
       "type": "timeseries",
       "title": "Decode Rate vs Drop Rate per Stream",
-      "description": "Drops indicate FrameBuffer is full — BatchScheduler cannot consume fast enough.",
-      "gridPos": { "x": 0, "y": 39, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Drops indicate FrameBuffer is full \u2014 BatchScheduler cannot consume fast enough.",
+      "gridPos": {
+        "x": 0,
+        "y": 39,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "fps",
-          "custom": { "lineWidth": 1 }
+          "custom": {
+            "lineWidth": 1
+          }
         }
       },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "rate(frames_decoded_total{stream_id=~\"$stream_id\"}[1m])",
           "legendFormat": "decoded {{stream_id}}"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "rate(frames_dropped_total{stream_id=~\"$stream_id\"}[1m])",
           "legendFormat": "dropped {{stream_id}}"
         }
       ]
     },
-
     {
       "id": 31,
       "type": "timeseries",
       "title": "Kafka Publish Rate vs Drop Rate",
       "description": "Drop rate > 0 means publish queue is saturated.",
-      "gridPos": { "x": 12, "y": 39, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 12,
+        "y": 39,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "custom": { "lineWidth": 2 }
+          "custom": {
+            "lineWidth": 2
+          }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "rate(kafka_published_total[1m])",
           "legendFormat": "published"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "rate(kafka_dropped_total[1m])",
           "legendFormat": "dropped"
         }
       ]
     },
-
     {
       "id": 32,
       "type": "timeseries",
       "title": "Inference Batch Rate per Model",
-      "description": "batches/s × avg_batch_size = frames/s processed by each model.",
-      "gridPos": { "x": 0, "y": 47, "w": 12, "h": 7 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "batches/s \u00d7 avg_batch_size = frames/s processed by each model.",
+      "gridPos": {
+        "x": 0,
+        "y": 47,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "custom": { "lineWidth": 2 }
+          "custom": {
+            "lineWidth": 2
+          }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "rate(infer_batches_total{model_id=~\"$model_id\"}[1m])",
           "legendFormat": "{{model_id}}"
         }
       ]
     },
-
     {
       "id": 33,
       "type": "timeseries",
-      "title": "Infer Latency p99 / Batch Size — Stability Ratio",
+      "title": "Infer Latency p99 / Batch Size \u2014 Stability Ratio",
       "description": "p99_latency_ms / avg_batch_size. Rising ratio = GPU efficiency dropping. Stable = pipeline healthy.",
-      "gridPos": { "x": 12, "y": 47, "w": 12, "h": 7 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": {
+        "x": 12,
+        "y": 47,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
-          "custom": { "lineWidth": 2 }
+          "custom": {
+            "lineWidth": 2
+          }
         }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "histogram_quantile(0.99, sum by(le, model_id) (rate(infer_latency_ms_bucket{model_id=~\"$model_id\"}[1m]))) / (rate(infer_batch_size_sum{model_id=~\"$model_id\"}[1m]) / rate(infer_batch_size_count{model_id=~\"$model_id\"}[1m]))",
           "legendFormat": "ms/frame {{model_id}}"
         }
       ]
     },
-
     {
       "type": "row",
       "title": "Archive & Storage",
       "collapsed": true,
-      "gridPos": { "x": 0, "y": 54, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 54,
+        "w": 24,
+        "h": 1
+      },
       "id": 104,
       "panels": [
         {
           "id": 40,
           "type": "timeseries",
           "title": "Archive Rate vs Drop Rate",
-          "gridPos": { "x": 0, "y": 55, "w": 8, "h": 7 },
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "fieldConfig": { "defaults": { "unit": "fps" } },
+          "gridPos": {
+            "x": 0,
+            "y": 55,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "fps"
+            }
+          },
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
               "expr": "rate(frames_archived_total[1m])",
               "legendFormat": "archived"
             },
             {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
               "expr": "rate(frames_archive_dropped_total[1m])",
               "legendFormat": "dropped"
-            }
-          ]
-        },
-        {
-          "id": 41,
-          "type": "timeseries",
-          "title": "MinIO Upload Rate vs Failure Rate",
-          "gridPos": { "x": 8, "y": 55, "w": 8, "h": 7 },
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "fieldConfig": { "defaults": { "unit": "fps" } },
-          "targets": [
-            {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "expr": "rate(frames_uploaded_total[1m])",
-              "legendFormat": "uploaded"
-            },
-            {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "expr": "rate(frames_upload_failed_total[1m])",
-              "legendFormat": "failed"
             }
           ]
         },
@@ -705,10 +1173,22 @@
           "type": "gauge",
           "title": "Archive Queue Depth",
           "description": "Approaching capacity = archiver I/O is the bottleneck.",
-          "gridPos": { "x": 16, "y": 55, "w": 8, "h": 7 },
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": {
+            "x": 12,
+            "y": 55,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "options": {
-            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
             "minVizValue": 0,
             "maxVizValue": 1000
           },
@@ -718,16 +1198,28 @@
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "orange", "value": 500 },
-                  { "color": "red", "value": 900 }
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 500
+                  },
+                  {
+                    "color": "red",
+                    "value": 900
+                  }
                 ]
               }
             }
           },
           "targets": [
             {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
               "expr": "frame_archive_queue_depth",
               "legendFormat": "depth"
             }
@@ -735,14 +1227,15 @@
         }
       ]
     }
-
   ],
-
   "annotations": {
     "list": [
       {
         "name": "Stream Reconnects",
-        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
         "enable": true,
         "hide": false,
         "iconColor": "orange",

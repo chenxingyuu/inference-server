@@ -26,7 +26,6 @@ void JoinByFrameStage::process(const EventEnvelope& input, const EmitFn& emit) {
             EventEnvelope out = input;
             out.infer_result = state.infer;
             out.infer_result->frame_local_path = state.archive->local_path;
-            out.infer_result->frame_url = state.archive->frame_url;
             out.infer_result->frame_upload_state = state.archive->upload_state;
             pending_.erase(input.event_id);
             completed = std::move(out);

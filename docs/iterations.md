@@ -180,22 +180,21 @@
 
 ---
 
-## Phase 9 — 帧归档并行化（Local + MinIO）
+## Phase 9 — 帧归档并行化（本地 JPEG）
 
 **完成**：2026-04-15
 
 **目标**：检测发布不被文件 I/O 或云上传阻塞；单事件中携带可追溯的帧位置信息。
 
 **新增**：
-- `frame_archive` 配置块：本地目录、采样间隔、JPEG 质量、队列容量、MinIO 连接参数
-- `FrameArchiver`：异步队列写盘，按需上传 MinIO（后台线程）
-- `InferResult` 新字段：`frame_local_path` / `frame_url` / `frame_upload_state`
-- `KafkaPublisher`：单事件输出 frame 元数据，不等待上传结果
+- `frame_archive` 配置块：本地目录、采样间隔、JPEG 质量、队列容量
+- `FrameArchiver`：异步队列写本地 JPEG（后台线程）
+- `InferResult` 新字段：`frame_local_path` / `frame_url`（保留空串）/ `frame_upload_state`（`queued`/`failed`/`disabled`）
+- `KafkaPublisher`：单事件输出 frame 元数据，不等待写盘完成
 
 **关键决策**：
-- 主推理线程只做归档任务入队，不做写盘与上传，保持检测路径低延迟
-- 单事件发布默认最终一致：MinIO 开启时 `frame_upload_state=pending`，失败仅记指标
-- MinIO key 按 `stream_id/timestamp_frameSeq.jpg` 幂等命名，便于重放与追溯
+- 主推理线程只做归档任务入队，不做写盘，保持检测路径低延迟
+- 本地文件按 `stream_id/timestamp_frameSeq.jpg` 幂等命名，便于重放与追溯
 
 ---
 

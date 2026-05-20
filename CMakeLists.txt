@@ -48,8 +48,6 @@ find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc imgcodecs videoio)
 
 # librdkafka
 pkg_check_modules(RDKAFKA REQUIRED rdkafka)
-find_package(CURL REQUIRED)
-
 # ── Optional backends ─────────────────────────────────────────────────────────
 if(BUILD_TRT_BACKEND)
     find_package(TensorRT REQUIRED)
@@ -354,7 +352,6 @@ target_link_libraries(infer_core PUBLIC
     spdlog::spdlog
     ${OpenCV_LIBS}
     ${RDKAFKA_LIBRARIES}
-    CURL::libcurl
 $<$<BOOL:${BUILD_TRT_BACKEND}>:TensorRT::nvinfer>
     $<$<BOOL:${BUILD_TRT_BACKEND}>:CUDA::cudart>
     $<$<BOOL:${BUILD_ASCEND_BACKEND}>:AscendCL::ascendcl>

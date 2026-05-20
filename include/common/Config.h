@@ -176,19 +176,6 @@ struct PublisherConfig {
     RedisConfig redis;
 };
 
-struct MinioConfig {
-    bool        enabled{false};
-    std::string endpoint;
-    std::string bucket;
-    std::string access_key;
-    std::string secret_key;
-    std::string region{"us-east-1"};
-    bool        use_ssl{false};
-    int         connect_timeout_ms{1500};
-    int         request_timeout_ms{3000};
-    int         max_retries{2};
-};
-
 struct FrameArchiveConfig {
     bool        enabled{false};
     bool        allow_gpu_frames{true};
@@ -197,7 +184,6 @@ struct FrameArchiveConfig {
     int         save_interval{1};      // save every N frames
     int         jpeg_quality{90};      // [1,100]
     int         queue_capacity{4096};  // async archive queue
-    MinioConfig minio;
 };
 
 struct AppConfig {

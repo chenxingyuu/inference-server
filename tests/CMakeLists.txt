@@ -159,7 +159,6 @@ target_link_directories(test_archive_raw_stage PRIVATE
 target_link_libraries(test_archive_raw_stage PRIVATE
     infer_testable
     GTest::gtest_main
-    CURL::libcurl
     ${FFMPEG_LIBRARIES}
 )
 add_test(NAME test_archive_raw_stage COMMAND test_archive_raw_stage
@@ -179,7 +178,6 @@ target_link_libraries(test_gpu_fault_recovery PRIVATE
     infer_testable
     GTest::gtest_main
     GTest::gmock
-    CURL::libcurl
 )
 add_test(NAME test_gpu_fault_recovery COMMAND test_gpu_fault_recovery
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)

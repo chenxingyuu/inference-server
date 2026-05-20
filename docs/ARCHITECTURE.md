@@ -12,7 +12,7 @@ Two sampling modes are available via `tasks[].sampling_mode`:
 
 1. Source ingest (`source.rtsp` / `source.file`): default `FFmpegDecoder` (optional NVDEC via `use_hwdec`); on Ascend builds with `use_ascend_dvpp: true`, `DVPPDecoder` demuxes with FFmpeg and hardware-decodes to NPU HBM (see **Ascend ingest** below).
 2. Fan-out to parallel branches (e.g. `archive.raw` and inference path).
-3. Optional frame archiving (`archive.raw` via `FrameArchiver` → local JPEG + MinIO).
+3. Optional frame archiving (`archive.raw` via `FrameArchiver` → local JPEG).
 4. Inference (`infer.engine` → `InferEngineWorkerStage` → `InferWorkerGroup` using `TRTBackend` / `AscendBackend` / `OnnxBackend`) with per-edge backpressure. The stage accumulates frames into a batch and flushes when the batch is full **or** a background deadline timer fires (`max_queue_delay_us / 2` poll interval), ensuring low-fps streams are not stalled waiting for the next frame. `models[].instance_count` and `models[].device_ids` select parallel workers (see `InferWorkerGroup`). A separate hot-path (`ModelManager` + `BatchScheduler` + `InferWorkerGroup`) still exists for stream-pool–centric scheduling; the DAG stage does not use `BatchScheduler`.
 5. YOLO decode (`IYOLODecoder` / `ClassifierDecoder`) and optional tracking (`track.bytetrack`) — decode runs inside each `InferWorker` after the backend forward pass.
 6. Optional join/merge (`join.byFrameId`) to enrich inference results with archive metadata.

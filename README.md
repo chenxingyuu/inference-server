@@ -205,8 +205,6 @@ publishers:
 | `infer_batches_total` | counter | `model_id` | 已处理批次数 |
 | `frames_archived_total` | counter | 无 | 本地归档成功帧数 |
 | `frames_archive_dropped_total` | counter | 无 | 归档队列溢出或写盘失败 |
-| `frames_uploaded_total` | counter | 无 | MinIO 上传成功数 |
-| `frames_upload_failed_total` | counter | 无 | MinIO 上传失败数 |
 | `frame_archive_queue_depth` | gauge | 无 | 当前归档队列深度 |
 
 ## 目标追踪（可选）
@@ -244,7 +242,7 @@ inference-server/
 │   ├── publisher/    发布器
 │   ├── metrics/      指标导出
 │   ├── server/       Unix Socket 管理接口
-│   ├── archive/      帧归档与 MinIO 上传
+│   ├── archive/      帧归档（本地 JPEG）
 │   └── cuda/         CUDA 预处理头文件
 ├── src/              对应实现
 ├── config/           服务、Prometheus、Grafana 配置

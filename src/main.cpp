@@ -13,8 +13,6 @@
 #endif
 #include "server/UnixSocketServer.h"
 #include "archive/FrameArchiver.h"
-#include <curl/curl.h>
-
 #include <csignal>
 #include <atomic>
 #include <cstdlib>
@@ -25,11 +23,6 @@
 namespace {
 std::atomic<bool> g_shutdown{false};
 void signalHandler(int) { g_shutdown.store(true); }
-struct CurlGlobalGuard {
-    CurlGlobalGuard() = default;
-    ~CurlGlobalGuard() { curl_global_cleanup(); }
-};
-
 // Returns an owning map of id → publisher. Callers retain ownership and pass
 // a non-owning registry (raw pointers) to TaskManager.
 std::unordered_map<std::string, std::unique_ptr<infer::IPublisher>>
@@ -86,11 +79,6 @@ void logConfiguredPipelinesAndTasks(const infer::AppConfig& cfg) {
 } // namespace
 
 int main(int argc, char* argv[]) {
-    if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
-        LOG_CRITICAL("Failed to initialize libcurl globals");
-        return 1;
-    }
-    CurlGlobalGuard curl_guard;
     const std::string config_path = (argc > 1) ? argv[1] : "/config/config.yaml";
 
     // ── Init logging ──────────────────────────────────────────────────────────

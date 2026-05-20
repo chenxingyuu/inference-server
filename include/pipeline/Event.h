@@ -9,7 +9,6 @@ namespace infer {
 
 struct ArchiveInfo {
     std::string local_path;
-    std::string frame_url;
     std::string upload_state;
 };
 

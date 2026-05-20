@@ -195,16 +195,6 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cfg.frame_archive.save_interval, 2);
     EXPECT_EQ(cfg.frame_archive.jpeg_quality, 85);
     EXPECT_EQ(cfg.frame_archive.queue_capacity, 128);
-    EXPECT_TRUE(cfg.frame_archive.minio.enabled);
-    EXPECT_EQ(cfg.frame_archive.minio.endpoint, "minio.local:9000");
-    EXPECT_EQ(cfg.frame_archive.minio.bucket, "infer-frames");
-    EXPECT_EQ(cfg.frame_archive.minio.access_key, "test_access");
-    EXPECT_EQ(cfg.frame_archive.minio.secret_key, "test_secret");
-    EXPECT_EQ(cfg.frame_archive.minio.region, "us-east-1");
-    EXPECT_FALSE(cfg.frame_archive.minio.use_ssl);
-    EXPECT_EQ(cfg.frame_archive.minio.connect_timeout_ms, 1200);
-    EXPECT_EQ(cfg.frame_archive.minio.request_timeout_ms, 2800);
-    EXPECT_EQ(cfg.frame_archive.minio.max_retries, 3);
 }
 
 TEST(LoadConfig, LogLevelDefaultsToInfo) {

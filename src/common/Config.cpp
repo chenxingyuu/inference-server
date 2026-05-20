@@ -739,18 +739,6 @@ AppConfig loadConfig(const std::string& yaml_path) {
         if (cfg.frame_archive.save_interval <= 0) throw std::runtime_error("frame_archive.save_interval must be >= 1");
         if (cfg.frame_archive.jpeg_quality < 1 || cfg.frame_archive.jpeg_quality > 100) throw std::runtime_error("frame_archive.jpeg_quality must be in [1, 100]");
         if (cfg.frame_archive.queue_capacity <= 0) throw std::runtime_error("frame_archive.queue_capacity must be >= 1");
-        if (auto mn = an["minio"]) {
-            cfg.frame_archive.minio.enabled            = mn["enabled"].as<bool>(false);
-            cfg.frame_archive.minio.endpoint           = mn["endpoint"].as<std::string>("");
-            cfg.frame_archive.minio.bucket             = mn["bucket"].as<std::string>("");
-            cfg.frame_archive.minio.access_key         = mn["access_key"].as<std::string>("");
-            cfg.frame_archive.minio.secret_key         = mn["secret_key"].as<std::string>("");
-            cfg.frame_archive.minio.region             = mn["region"].as<std::string>("us-east-1");
-            cfg.frame_archive.minio.use_ssl            = mn["use_ssl"].as<bool>(false);
-            cfg.frame_archive.minio.connect_timeout_ms = mn["connect_timeout_ms"].as<int>(1500);
-            cfg.frame_archive.minio.request_timeout_ms = mn["request_timeout_ms"].as<int>(3000);
-            cfg.frame_archive.minio.max_retries        = mn["max_retries"].as<int>(2);
-        }
     }
     if (const char* env_repo = std::getenv("INFER_MODEL_REPOSITORY")) {
         if (env_repo[0] != '\0') cfg.server.model_repository = env_repo;

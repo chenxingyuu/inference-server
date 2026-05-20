@@ -16,7 +16,6 @@ namespace infer {
 
 struct FrameArchiveResult {
     std::string local_path;
-    std::string frame_url;
     std::string upload_state{"disabled"};
 };
 
@@ -44,7 +43,6 @@ private:
     std::string buildLocalPath(const StreamMeta& meta) const;
     bool enqueue(ArchiveTask task);
     void workerLoop();
-    bool uploadToMinio(const std::string& local_path, const std::string& object_key) const;
 
     FrameArchiveConfig      cfg_;
     std::atomic<bool>       stop_{false};

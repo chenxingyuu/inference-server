@@ -22,7 +22,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libspdlog-dev \
     libboost-dev \
     librdkafka-dev \
-    libcurl4-openssl-dev \
     libgrpc++-dev \
     libprotobuf-dev \
     protobuf-compiler \
@@ -59,7 +58,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libyaml-cpp0.7 \
     librdkafka1 \
     libspdlog1 \
-    libcurl4 \
     libgrpc++1 \
     libprotobuf32 \
     && rm -rf /var/lib/apt/lists/*

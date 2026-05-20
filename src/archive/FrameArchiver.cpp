@@ -1,10 +1,8 @@
 #include "archive/FrameArchiver.h"
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
-#include <curl/curl.h>
 #include <opencv2/imgcodecs.hpp>
 #include <filesystem>
-#include <fstream>
 #include <sstream>
 #include <chrono>
 
@@ -31,8 +29,8 @@ FrameArchiver::FrameArchiver(FrameArchiveConfig cfg)
         LOG_INFO("FrameArchiver: disabled");
         return;
     }
-    LOG_INFO("FrameArchiver: starting local_dir={} interval={} minio={} worker_count={}",
-             cfg_.local_dir, cfg_.save_interval, cfg_.minio.enabled ? "on" : "off", cfg_.worker_count);
+    LOG_INFO("FrameArchiver: starting local_dir={} interval={} worker_count={}",
+             cfg_.local_dir, cfg_.save_interval, cfg_.worker_count);
     workers_.reserve(static_cast<std::size_t>(cfg_.worker_count));
     for (int i = 0; i < cfg_.worker_count; ++i) {
         workers_.emplace_back(&FrameArchiver::workerLoop, this);
@@ -98,11 +96,7 @@ FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* 
 
     const std::string object_key = buildObjectKey(meta);
     out.local_path = fs::path(cfg_.local_dir).append(object_key).string();
-    out.upload_state = cfg_.minio.enabled ? "pending" : "disabled";
-    if (cfg_.minio.enabled) {
-        const std::string scheme = cfg_.minio.use_ssl ? "https://" : "http://";
-        out.frame_url = scheme + cfg_.minio.endpoint + "/" + cfg_.minio.bucket + "/" + object_key;
-    }
+    out.upload_state = "queued";
 
     ArchiveTask task;
     task.local_path = out.local_path;
@@ -148,70 +142,11 @@ void FrameArchiver::workerLoop() {
                       write_ms,
                       queue_depth_after_pop,
                       worker_tid);
-            if (cfg_.minio.enabled) {
-                if (uploadToMinio(task.local_path, task.object_key)) {
-                    Metrics::get().incFramesUploaded();
-                    LOG_DEBUG("FrameArchiver: uploaded {}", task.object_key);
-                } else {
-                    Metrics::get().incFramesUploadFailed();
-                }
-            }
         } catch (const std::exception& e) {
             Metrics::get().incFramesArchiveDropped();
             LOG_WARN("FrameArchiver: task failed: {}", e.what());
         }
     }
-}
-
-bool FrameArchiver::uploadToMinio(const std::string& local_path, const std::string& object_key) const {
-    const std::string scheme = cfg_.minio.use_ssl ? "https://" : "http://";
-    const std::string url = scheme + cfg_.minio.endpoint + "/" + cfg_.minio.bucket + "/" + object_key;
-    const std::string auth = cfg_.minio.access_key + ":" + cfg_.minio.secret_key;
-    for (int attempt = 0; attempt <= cfg_.minio.max_retries; ++attempt) {
-        std::ifstream file(local_path, std::ios::binary | std::ios::ate);
-        if (!file) return false;
-        const std::streamsize file_size = file.tellg();
-        file.seekg(0, std::ios::beg);
-
-        CURL* curl = curl_easy_init();
-        if (!curl) return false;
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
-#if LIBCURL_VERSION_NUM >= 0x074B00  // 7.75.0: CURLOPT_AWS_SIGV4 introduced
-        curl_easy_setopt(curl, CURLOPT_AWS_SIGV4, ("aws:amz:" + cfg_.minio.region + ":s3").c_str());
-        curl_easy_setopt(curl, CURLOPT_USERPWD, auth.c_str());
-#else
-        // libcurl < 7.75: SigV4 unavailable; upload proceeds unsigned.
-        // Configure MinIO with anonymous/policy-based access for this to succeed.
-        curl_easy_setopt(curl, CURLOPT_USERPWD, auth.c_str());
-#endif
-        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(cfg_.minio.connect_timeout_ms));
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(cfg_.minio.request_timeout_ms));
-        curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(file_size));
-        curl_easy_setopt(curl, CURLOPT_READFUNCTION, +[](char* buffer, size_t size, size_t nitems, void* userdata) -> size_t {
-            auto* in = static_cast<std::ifstream*>(userdata);
-            in->read(buffer, static_cast<std::streamsize>(size * nitems));
-            return static_cast<size_t>(in->gcount());
-        });
-        curl_easy_setopt(curl, CURLOPT_READDATA, &file);
-
-        struct curl_slist* headers = nullptr;
-        headers = curl_slist_append(headers, "Content-Type: image/jpeg");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-
-        const CURLcode rc = curl_easy_perform(curl);
-        long code = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-        if (rc == CURLE_OK && code >= 200 && code < 300) {
-            return true;
-        }
-        LOG_WARN("FrameArchiver: upload attempt {}/{} failed curl={} http={} url={}",
-                 attempt + 1, cfg_.minio.max_retries + 1, static_cast<int>(rc), code, url);
-    }
-    LOG_WARN("FrameArchiver: upload exhausted retries url={}", url);
-    return false;
 }
 
 } // namespace infer
