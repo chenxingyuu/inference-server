@@ -12,11 +12,13 @@
 #include "pipeline/stages/SourceFileStage.h"
 #include "pipeline/stages/SourceRtspStage.h"
 #include "pipeline/stages/TrackByteTrackStage.h"
+#include "publisher/MultiPublisher.h"
 
 #include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace infer {
 
@@ -165,7 +167,44 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         return std::make_unique<SahiMergeStage>(cfg.id, merge_cfg);
     }
     if (cfg.type == "sink.publish") {
-        return std::make_unique<SinkKafkaStage>(cfg.id, ctx.publisher);
+        // Resolve target publisher ids from with.to (string or comma-separated list).
+        // If omitted, fan-out to all registered publishers.
+        std::vector<std::string> ids;
+        auto to_it = cfg.with.find("to");
+        if (to_it != cfg.with.end() && !to_it->second.empty()) {
+            // with.to is stored as a plain string; support comma-separated list.
+            std::string token;
+            for (char c : to_it->second) {
+                if (c == ',') {
+                    if (!token.empty()) { ids.push_back(token); token.clear(); }
+                } else if (c != ' ') {
+                    token += c;
+                }
+            }
+            if (!token.empty()) ids.push_back(token);
+        }
+
+        std::vector<IPublisher*> targets;
+        if (ids.empty()) {
+            // No to: specified — use all publishers.
+            for (auto& [_, pub] : ctx.publishers) targets.push_back(pub);
+        } else {
+            for (const auto& id : ids) {
+                auto it = ctx.publishers.find(id);
+                if (it == ctx.publishers.end())
+                    throw std::runtime_error(
+                        "sink.publish: unknown publisher id '" + id +
+                        "' (check publishers: in config)");
+                targets.push_back(it->second);
+            }
+        }
+
+        if (targets.size() == 1) {
+            return std::make_unique<SinkKafkaStage>(cfg.id, *targets[0]);
+        }
+        return std::make_unique<SinkKafkaStage>(
+            cfg.id,
+            std::make_unique<MultiPublisher>(std::move(targets)));
     }
     if (cfg.type == "sink.ffplay") {
         SinkFfplayConfig ff_cfg;

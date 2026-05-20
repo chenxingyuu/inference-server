@@ -146,7 +146,6 @@ struct TaskConfig {
 };
 
 struct KafkaConfig {
-    bool        enabled{true};
     std::string brokers{"kafka:9092"};
     std::string topic{"inference-results"};
     int         batch_size{100};
@@ -156,13 +155,11 @@ struct KafkaConfig {
 };
 
 struct GrpcConfig {
-    bool enabled{false};
-    int  port{50051};
-    int  max_connections{100};
+    int port{50051};
+    int max_connections{100};
 };
 
 struct RedisConfig {
-    bool        enabled{false};
     std::string host{"localhost"};
     int         port{6379};
     std::string stream_prefix{"inference"};
@@ -170,14 +167,13 @@ struct RedisConfig {
     int         queue_capacity{10000};
 };
 
-struct PublishersConfig {
+// A named, typed publisher entry. type is one of: "kafka" | "grpc" | "redis".
+struct PublisherConfig {
+    std::string id;
+    std::string type;
     KafkaConfig kafka;
     GrpcConfig  grpc;
     RedisConfig redis;
-
-    bool anyEnabled() const noexcept {
-        return kafka.enabled || grpc.enabled || redis.enabled;
-    }
 };
 
 struct MinioConfig {
@@ -211,7 +207,7 @@ struct AppConfig {
     std::vector<PipelineSourceConfig> sources;
     std::vector<PipelineConfig> pipelines;
     std::vector<TaskConfig>    tasks;
-    PublishersConfig        publishers;
+    std::vector<PublisherConfig> publishers;
     FrameArchiveConfig      frame_archive;
 
     // Find by id helpers

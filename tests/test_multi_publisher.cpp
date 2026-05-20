@@ -27,7 +27,7 @@ static InferResult makeResult(const std::string& stream_id = "cam_01") {
 }
 
 TEST(MultiPublisher, EmptyListThrows) {
-    EXPECT_THROW(MultiPublisher({}), std::invalid_argument);
+    EXPECT_THROW(MultiPublisher(std::vector<IPublisher*>{}), std::invalid_argument);
 }
 
 TEST(MultiPublisher, SinglePublisherForwardsPublish) {

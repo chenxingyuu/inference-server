@@ -51,7 +51,6 @@ static InferResult makeResult(const std::string& stream_id = "cam_01") {
 
 static RedisConfig makeCfg(const std::string& prefix = "inference", int maxlen = 1000, int qcap = 10000) {
     RedisConfig c;
-    c.enabled       = true;
     c.host          = "localhost";
     c.port          = 6379;
     c.stream_prefix = prefix;

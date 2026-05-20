@@ -44,7 +44,6 @@ protected:
     void SetUp() override {
         port = freePort();
         GrpcConfig cfg;
-        cfg.enabled = true;
         cfg.port    = port;
         publisher   = std::make_unique<GrpcPublisher>(cfg);
 

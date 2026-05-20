@@ -179,10 +179,13 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(t->ascend_device_id, 2);
     EXPECT_EQ(cfg.findTask("missing"), nullptr);
 
-    // kafka (via legacy fallback into publishers.kafka)
-    EXPECT_EQ(cfg.publishers.kafka.brokers, "localhost:9092");
-    EXPECT_EQ(cfg.publishers.kafka.topic,   "test-results");
-    EXPECT_EQ(cfg.publishers.kafka.batch_size, 50);
+    // kafka publisher
+    ASSERT_EQ(cfg.publishers.size(), 1u);
+    EXPECT_EQ(cfg.publishers[0].id,   "kafka_main");
+    EXPECT_EQ(cfg.publishers[0].type, "kafka");
+    EXPECT_EQ(cfg.publishers[0].kafka.brokers,    "localhost:9092");
+    EXPECT_EQ(cfg.publishers[0].kafka.topic,      "test-results");
+    EXPECT_EQ(cfg.publishers[0].kafka.batch_size, 50);
 
     // frame archive
     EXPECT_TRUE(cfg.frame_archive.enabled);
@@ -654,34 +657,44 @@ TEST(LoadConfig, SinkFfplayInvalidFpsRejected) {
 
 // ── Publishers config ─────────────────────────────────────────────────────
 
+namespace {
+const PublisherConfig* findPub(const std::vector<PublisherConfig>& pubs, const std::string& id) {
+    for (const auto& p : pubs) if (p.id == id) return &p;
+    return nullptr;
+}
+} // namespace
+
 TEST(LoadConfig, ParsePublishersBlock) {
     AppConfig cfg = loadConfig("data/test_config_publishers.yaml");
-    EXPECT_TRUE(cfg.publishers.kafka.enabled);
-    EXPECT_EQ(cfg.publishers.kafka.brokers, "broker:9093");
-    EXPECT_EQ(cfg.publishers.kafka.topic, "pub-results");
-    EXPECT_EQ(cfg.publishers.kafka.batch_size, 200);
-    EXPECT_EQ(cfg.publishers.kafka.linger_ms, 15);
-    EXPECT_EQ(cfg.publishers.kafka.compression, "gzip");
-    EXPECT_EQ(cfg.publishers.kafka.queue_capacity, 5000);
-    EXPECT_TRUE(cfg.publishers.grpc.enabled);
-    EXPECT_EQ(cfg.publishers.grpc.port, 50052);
-    EXPECT_EQ(cfg.publishers.grpc.max_connections, 50);
-    EXPECT_TRUE(cfg.publishers.redis.enabled);
-    EXPECT_EQ(cfg.publishers.redis.host, "redis-host");
-    EXPECT_EQ(cfg.publishers.redis.port, 6380);
-    EXPECT_EQ(cfg.publishers.redis.stream_prefix, "infer");
-    EXPECT_EQ(cfg.publishers.redis.max_len, 500);
-    EXPECT_EQ(cfg.publishers.redis.queue_capacity, 2000);
+    ASSERT_EQ(cfg.publishers.size(), 3u);
+
+    const auto* kafka = findPub(cfg.publishers, "kafka_main");
+    ASSERT_NE(kafka, nullptr);
+    EXPECT_EQ(kafka->type, "kafka");
+    EXPECT_EQ(kafka->kafka.brokers,        "broker:9093");
+    EXPECT_EQ(kafka->kafka.topic,          "pub-results");
+    EXPECT_EQ(kafka->kafka.batch_size,     200);
+    EXPECT_EQ(kafka->kafka.linger_ms,      15);
+    EXPECT_EQ(kafka->kafka.compression,    "gzip");
+    EXPECT_EQ(kafka->kafka.queue_capacity, 5000);
+
+    const auto* grpc = findPub(cfg.publishers, "grpc_rt");
+    ASSERT_NE(grpc, nullptr);
+    EXPECT_EQ(grpc->type, "grpc");
+    EXPECT_EQ(grpc->grpc.port,            50052);
+    EXPECT_EQ(grpc->grpc.max_connections, 50);
+
+    const auto* redis = findPub(cfg.publishers, "redis_stream");
+    ASSERT_NE(redis, nullptr);
+    EXPECT_EQ(redis->type, "redis");
+    EXPECT_EQ(redis->redis.host,           "redis-host");
+    EXPECT_EQ(redis->redis.port,           6380);
+    EXPECT_EQ(redis->redis.stream_prefix,  "infer");
+    EXPECT_EQ(redis->redis.max_len,        500);
+    EXPECT_EQ(redis->redis.queue_capacity, 2000);
 }
 
-TEST(LoadConfig, LegacyKafkaKeyFallback) {
-    AppConfig cfg = loadConfig("data/test_config.yaml");
-    EXPECT_TRUE(cfg.publishers.kafka.enabled);
-    EXPECT_EQ(cfg.publishers.kafka.brokers, "localhost:9092");
-    EXPECT_EQ(cfg.publishers.kafka.topic, "test-results");
-}
-
-TEST(LoadConfig, NoPublisherEnabledThrows) {
+TEST(LoadConfig, NoPublishersThrows) {
     const std::string path = "data/test_no_publisher.yaml";
     {
         std::ofstream out(path);
@@ -690,26 +703,40 @@ TEST(LoadConfig, NoPublisherEnabledThrows) {
         out << "pipelines:\n  - id: p1\n    nodes:\n      - id: cam_1\n        type: source.rtsp\n";
         out << "      - id: sink_1\n        type: sink.kafka\n    edges:\n      - from: cam_1\n        to: sink_1\n";
         out << "tasks:\n  - id: t1\n    source_id: cam_1\n    pipeline_id: p1\n";
-        out << "publishers:\n  kafka:\n    enabled: false\n  grpc:\n    enabled: false\n  redis:\n    enabled: false\n";
+        out << "publishers: []\n";
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());
 }
 
-TEST(LoadConfig, GrpcConfigDefaults) {
-    AppConfig cfg = loadConfig("data/test_config.yaml");
-    EXPECT_FALSE(cfg.publishers.grpc.enabled);
-    EXPECT_EQ(cfg.publishers.grpc.port, 50051);
-    EXPECT_EQ(cfg.publishers.grpc.max_connections, 100);
+TEST(LoadConfig, PublisherDuplicateIdThrows) {
+    const std::string path = "data/test_dup_publisher.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n  - id: cam_1\n    url: rtsp://localhost/test\n";
+        out << "models:\n  - id: m1\n    version: yolov8\n    backend: tensorrt\n    input_size: [640, 640]\n";
+        out << "pipelines:\n  - id: p1\n    nodes:\n      - id: cam_1\n        type: source.rtsp\n";
+        out << "      - id: sink_1\n        type: sink.kafka\n    edges:\n      - from: cam_1\n        to: sink_1\n";
+        out << "tasks:\n  - id: t1\n    source_id: cam_1\n    pipeline_id: p1\n";
+        out << "publishers:\n  - id: k1\n    type: kafka\n  - id: k1\n    type: kafka\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
 }
 
-TEST(LoadConfig, RedisConfigDefaults) {
-    AppConfig cfg = loadConfig("data/test_config.yaml");
-    EXPECT_FALSE(cfg.publishers.redis.enabled);
-    EXPECT_EQ(cfg.publishers.redis.host, "localhost");
-    EXPECT_EQ(cfg.publishers.redis.port, 6379);
-    EXPECT_EQ(cfg.publishers.redis.stream_prefix, "inference");
-    EXPECT_EQ(cfg.publishers.redis.max_len, 1000);
+TEST(LoadConfig, PublisherUnknownTypeThrows) {
+    const std::string path = "data/test_bad_pub_type.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n  - id: cam_1\n    url: rtsp://localhost/test\n";
+        out << "models:\n  - id: m1\n    version: yolov8\n    backend: tensorrt\n    input_size: [640, 640]\n";
+        out << "pipelines:\n  - id: p1\n    nodes:\n      - id: cam_1\n        type: source.rtsp\n";
+        out << "      - id: sink_1\n        type: sink.kafka\n    edges:\n      - from: cam_1\n        to: sink_1\n";
+        out << "tasks:\n  - id: t1\n    source_id: cam_1\n    pipeline_id: p1\n";
+        out << "publishers:\n  - id: p1\n    type: unknown_type\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
 }
 
 TEST(LoadConfig, FrameArchiveWorkerCountDefaultsToOne) {

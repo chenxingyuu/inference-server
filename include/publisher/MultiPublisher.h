@@ -14,16 +14,23 @@ namespace infer {
 // adds no additional synchronization.
 class MultiPublisher final : public IPublisher {
 public:
+    // Owning: takes exclusive ownership of each child publisher.
     // Throws std::invalid_argument if publishers is empty.
     explicit MultiPublisher(std::vector<std::unique_ptr<IPublisher>> publishers);
+
+    // Non-owning: borrows raw pointers from an external registry.
+    // Callers must ensure all pointed-to publishers outlive this object.
+    // Throws std::invalid_argument if publishers is empty.
+    explicit MultiPublisher(std::vector<IPublisher*> publishers);
 
     void publish(InferResult result) override;
     void flush() override;
 
-    std::size_t size() const noexcept { return publishers_.size(); }
+    std::size_t size() const noexcept { return refs_.size(); }
 
 private:
-    std::vector<std::unique_ptr<IPublisher>> publishers_;
+    std::vector<std::unique_ptr<IPublisher>> owned_;  // non-empty for owning variant
+    std::vector<IPublisher*>                 refs_;   // always valid (points into owned_ or external)
 };
 
 } // namespace infer

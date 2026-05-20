@@ -683,35 +683,49 @@ AppConfig loadConfig(const std::string& yaml_path) {
             cfg.tasks.push_back(std::move(t));
         }
     }
-    auto parseKafkaNode = [](const YAML::Node& kn, KafkaConfig& k) {
-        k.enabled               = kn["enabled"].as<bool>(true);
-        k.brokers               = kn["brokers"].as<std::string>("kafka:9092");
-        k.topic                 = kn["topic"].as<std::string>("inference-results");
-        k.batch_size            = kn["batch_size"].as<int>(100);
-        k.linger_ms             = kn["linger_ms"].as<int>(5);
-        k.compression           = kn["compression"].as<std::string>("lz4");
-        k.queue_capacity        = kn["queue_capacity"].as<int>(10000);
-    };
     if (auto pn = root["publishers"]) {
-        if (auto kn = pn["kafka"]) parseKafkaNode(kn, cfg.publishers.kafka);
-        if (auto gn = pn["grpc"]) {
-            cfg.publishers.grpc.enabled        = gn["enabled"].as<bool>(false);
-            cfg.publishers.grpc.port           = gn["port"].as<int>(50051);
-            cfg.publishers.grpc.max_connections = gn["max_connections"].as<int>(100);
+        if (!pn.IsSequence()) {
+            throw std::runtime_error(
+                "publishers: must be a list of {id, type, ...} entries");
         }
-        if (auto rn = pn["redis"]) {
-            cfg.publishers.redis.enabled        = rn["enabled"].as<bool>(false);
-            cfg.publishers.redis.host           = rn["host"].as<std::string>("localhost");
-            cfg.publishers.redis.port           = rn["port"].as<int>(6379);
-            cfg.publishers.redis.stream_prefix  = rn["stream_prefix"].as<std::string>("inference");
-            cfg.publishers.redis.max_len        = rn["max_len"].as<int>(1000);
-            cfg.publishers.redis.queue_capacity = rn["queue_capacity"].as<int>(10000);
+        std::unordered_set<std::string> seen_ids;
+        for (const auto& entry : pn) {
+            PublisherConfig pc;
+            pc.id   = entry["id"].as<std::string>("");
+            pc.type = entry["type"].as<std::string>("");
+            if (pc.id.empty())
+                throw std::runtime_error("publishers[]: each entry must have a non-empty 'id'");
+            if (pc.type.empty())
+                throw std::runtime_error("publishers[" + pc.id + "]: 'type' is required (kafka|grpc|redis)");
+            if (!seen_ids.insert(pc.id).second)
+                throw std::runtime_error("publishers[]: duplicate id '" + pc.id + "'");
+            if (pc.type == "kafka") {
+                pc.kafka.brokers        = entry["brokers"].as<std::string>("kafka:9092");
+                pc.kafka.topic          = entry["topic"].as<std::string>("inference-results");
+                pc.kafka.batch_size     = entry["batch_size"].as<int>(100);
+                pc.kafka.linger_ms      = entry["linger_ms"].as<int>(5);
+                pc.kafka.compression    = entry["compression"].as<std::string>("lz4");
+                pc.kafka.queue_capacity = entry["queue_capacity"].as<int>(10000);
+            } else if (pc.type == "grpc") {
+                pc.grpc.port            = entry["port"].as<int>(50051);
+                pc.grpc.max_connections = entry["max_connections"].as<int>(100);
+            } else if (pc.type == "redis") {
+                pc.redis.host           = entry["host"].as<std::string>("localhost");
+                pc.redis.port           = entry["port"].as<int>(6379);
+                pc.redis.stream_prefix  = entry["stream_prefix"].as<std::string>("inference");
+                pc.redis.max_len        = entry["max_len"].as<int>(1000);
+                pc.redis.queue_capacity = entry["queue_capacity"].as<int>(10000);
+            } else {
+                throw std::runtime_error(
+                    "publishers[" + pc.id + "]: unknown type '" + pc.type +
+                    "' (must be kafka|grpc|redis)");
+            }
+            cfg.publishers.push_back(std::move(pc));
         }
-    } else if (auto kn = root["kafka"]) {
-        parseKafkaNode(kn, cfg.publishers.kafka);
     }
-    if (!cfg.publishers.anyEnabled()) {
-        throw std::runtime_error("At least one publisher must be enabled under publishers:");
+    if (cfg.publishers.empty()) {
+        throw std::runtime_error(
+            "No publishers configured. Add at least one entry under publishers:");
     }
     if (auto an = root["frame_archive"]) {
         cfg.frame_archive.enabled        = an["enabled"].as<bool>(false);

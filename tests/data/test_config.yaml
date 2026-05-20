@@ -98,13 +98,15 @@ tasks:
     use_ascend_dvpp: true
     ascend_device_id: 2
 
-kafka:
-  brokers: localhost:9092
-  topic: test-results
-  batch_size: 50
-  linger_ms: 10
-  compression: lz4
-  queue_capacity: 5000
+publishers:
+  - id: kafka_main
+    type: kafka
+    brokers: localhost:9092
+    topic: test-results
+    batch_size: 50
+    linger_ms: 10
+    compression: lz4
+    queue_capacity: 5000
 
 frame_archive:
   enabled: true

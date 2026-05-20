@@ -88,11 +88,11 @@ void interpolatePipelineForTask(PipelineConfig& runtime_cfg, const TaskConfig& t
 
 TaskManager::TaskManager(AppConfig cfg,
                          std::string config_path,
-                         IPublisher& publisher,
+                         std::unordered_map<std::string, IPublisher*> publishers,
                          std::shared_ptr<FrameArchiver> frame_archiver)
     : cfg_(std::move(cfg))
     , config_path_(std::move(config_path))
-    , publisher_(publisher)
+    , publishers_(std::move(publishers))
     , frame_archiver_(std::move(frame_archiver))
 {
     runtime_state_ = loadRuntimeState(runtimeStatePath(config_path_));
@@ -158,7 +158,7 @@ bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
     StageFactory::Context ctx{
         cfg_,
         *source,
-        publisher_,
+        publishers_,
         frame_archiver_,
         task.sample_fps,
         task.sampling_mode,

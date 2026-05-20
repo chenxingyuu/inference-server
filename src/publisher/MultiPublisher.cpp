@@ -5,14 +5,21 @@
 namespace infer {
 
 MultiPublisher::MultiPublisher(std::vector<std::unique_ptr<IPublisher>> publishers)
-    : publishers_(std::move(publishers)) {
-    if (publishers_.empty()) {
+    : owned_(std::move(publishers)) {
+    if (owned_.empty())
         throw std::invalid_argument("MultiPublisher: at least one publisher is required");
-    }
+    refs_.reserve(owned_.size());
+    for (auto& p : owned_) refs_.push_back(p.get());
+}
+
+MultiPublisher::MultiPublisher(std::vector<IPublisher*> publishers)
+    : refs_(std::move(publishers)) {
+    if (refs_.empty())
+        throw std::invalid_argument("MultiPublisher: at least one publisher is required");
 }
 
 void MultiPublisher::publish(InferResult result) {
-    for (auto& pub : publishers_) {
+    for (auto* pub : refs_) {
         try {
             pub->publish(result);
         } catch (const std::exception& e) {
@@ -22,7 +29,7 @@ void MultiPublisher::publish(InferResult result) {
 }
 
 void MultiPublisher::flush() {
-    for (auto& pub : publishers_) {
+    for (auto* pub : refs_) {
         try {
             pub->flush();
         } catch (const std::exception& e) {

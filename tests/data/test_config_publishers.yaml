@@ -29,20 +29,20 @@ tasks:
     pipeline_id: p1
 
 publishers:
-  kafka:
-    enabled: true
+  - id: kafka_main
+    type: kafka
     brokers: "broker:9093"
     topic: "pub-results"
     batch_size: 200
     linger_ms: 15
     compression: "gzip"
     queue_capacity: 5000
-  grpc:
-    enabled: true
+  - id: grpc_rt
+    type: grpc
     port: 50052
     max_connections: 50
-  redis:
-    enabled: true
+  - id: redis_stream
+    type: redis
     host: "redis-host"
     port: 6380
     stream_prefix: "infer"

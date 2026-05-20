@@ -18,7 +18,10 @@ double nsToMs(uint64_t ns) { return static_cast<double>(ns) / 1e6; }
 } // namespace
 
 SinkKafkaStage::SinkKafkaStage(std::string id, IPublisher& publisher)
-    : id_(std::move(id)), publisher_(publisher) {}
+    : id_(std::move(id)), pub_(&publisher) {}
+
+SinkKafkaStage::SinkKafkaStage(std::string id, std::unique_ptr<IPublisher> publisher)
+    : id_(std::move(id)), owned_(std::move(publisher)), pub_(owned_.get()) {}
 
 std::string SinkKafkaStage::id() const { return id_; }
 
@@ -39,7 +42,7 @@ void SinkKafkaStage::process(const EventEnvelope& input, const EmitFn&) {
               input.infer_result->detections.size(),
               input.infer_result->latency_ms,
               input.infer_result->queue_latency_ms);
-    publisher_.publish(*input.infer_result);
+    pub_->publish(*input.infer_result);
 }
 
 } // namespace infer

@@ -18,9 +18,11 @@ public:
     using State = ITaskManager::State;
 
     // config_path is stored for runtime-state persistence (sidecar JSON).
+    // publishers is a non-owning registry: callers must ensure all pointed-to
+    // publishers outlive the TaskManager.
     TaskManager(AppConfig cfg,
                 std::string config_path,
-                IPublisher& publisher,
+                std::unordered_map<std::string, IPublisher*> publishers,
                 std::shared_ptr<FrameArchiver> frame_archiver);
 
     void loadAll();
@@ -64,7 +66,7 @@ private:
     std::string  config_path_;
     RuntimeState runtime_state_;
 
-    IPublisher& publisher_;
+    std::unordered_map<std::string, IPublisher*> publishers_;
     std::shared_ptr<FrameArchiver> frame_archiver_;
     mutable std::mutex mu_;
     std::unordered_map<std::string, Entry> entries_;

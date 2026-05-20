@@ -14,28 +14,30 @@ server:
 
 # sources / pipelines / tasks 通过 API 管理，由 infer-server 持久化到 state.json 并在启动时重放。
 
-# 推理结果发布：至少须有一个 enabled: true。
+# 推理结果发布：list 格式，每项有唯一 id 和 type（kafka|grpc|redis）。
+# sink.publish stage 通过 with.to: <id> 或 with.to: [id1, id2] 指定目标；
+# 省略 to: 时扇出到所有注册的 publisher。
 # Kafka 随主目标始终编译；gRPC/Redis 需 cmake 打开 BUILD_GRPC_PUBLISHER / BUILD_REDIS_PUBLISHER。
 publishers:
-  kafka:
-    enabled: false
-    brokers: "localhost:9092"
-    topic: "inference-results"
-    batch_size: 100
-    linger_ms: 5
-    compression: "lz4"
-    queue_capacity: 10000
-  grpc:
-    enabled: true
+  - id: grpc_rt
+    type: grpc
     port: 50051
     max_connections: 100
-  redis:
-    enabled: false
-    host: "127.0.0.1"
-    port: 6379
-    stream_prefix: "inference"
-    max_len: 1000
-    queue_capacity: 10000
+  # - id: kafka_main
+  #   type: kafka
+  #   brokers: "localhost:9092"
+  #   topic: "inference-results"
+  #   batch_size: 100
+  #   linger_ms: 5
+  #   compression: "lz4"
+  #   queue_capacity: 10000
+  # - id: redis_stream
+  #   type: redis
+  #   host: "127.0.0.1"
+  #   port: 6379
+  #   stream_prefix: "inference"
+  #   max_len: 1000
+  #   queue_capacity: 10000
 
 frame_archive:
   enabled: false

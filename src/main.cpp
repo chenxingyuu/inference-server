@@ -30,38 +30,38 @@ struct CurlGlobalGuard {
     ~CurlGlobalGuard() { curl_global_cleanup(); }
 };
 
-std::unique_ptr<infer::IPublisher> buildPublisher(const infer::PublishersConfig& cfg) {
-    std::vector<std::unique_ptr<infer::IPublisher>> pubs;
-    if (cfg.kafka.enabled)
-        pubs.push_back(std::make_unique<infer::KafkaPublisher>(cfg.kafka));
+// Returns an owning map of id → publisher. Callers retain ownership and pass
+// a non-owning registry (raw pointers) to TaskManager.
+std::unordered_map<std::string, std::unique_ptr<infer::IPublisher>>
+buildPublisherRegistry(const std::vector<infer::PublisherConfig>& cfgs) {
+    std::unordered_map<std::string, std::unique_ptr<infer::IPublisher>> registry;
+    for (const auto& pc : cfgs) {
+        std::unique_ptr<infer::IPublisher> pub;
+        if (pc.type == "kafka") {
+            pub = std::make_unique<infer::KafkaPublisher>(pc.kafka);
+        } else if (pc.type == "redis") {
 #ifdef BUILD_REDIS_PUBLISHER
-    if (cfg.redis.enabled)
-        pubs.push_back(std::make_unique<infer::RedisPublisher>(cfg.redis));
+            pub = std::make_unique<infer::RedisPublisher>(pc.redis);
+#else
+            throw std::runtime_error(
+                "publishers[" + pc.id + "]: type=redis but binary built without "
+                "BUILD_REDIS_PUBLISHER (re-run cmake with -DBUILD_REDIS_PUBLISHER=ON)");
 #endif
+        } else if (pc.type == "grpc") {
 #ifdef BUILD_GRPC_PUBLISHER
-    if (cfg.grpc.enabled)
-        pubs.push_back(std::make_unique<infer::GrpcPublisher>(cfg.grpc));
+            pub = std::make_unique<infer::GrpcPublisher>(pc.grpc);
+#else
+            throw std::runtime_error(
+                "publishers[" + pc.id + "]: type=grpc but binary built without "
+                "BUILD_GRPC_PUBLISHER (re-run cmake with -DBUILD_GRPC_PUBLISHER=ON)");
 #endif
-    if (pubs.empty()) {
-        std::ostringstream msg;
-        msg << "No result publisher could be constructed: ";
-        if (!cfg.kafka.enabled)
-            msg << "publishers.kafka.enabled is false; ";
-#if !defined(BUILD_REDIS_PUBLISHER)
-        if (cfg.redis.enabled)
-            msg << "publishers.redis.enabled but binary built without BUILD_REDIS_PUBLISHER; ";
-#endif
-#if !defined(BUILD_GRPC_PUBLISHER)
-        if (cfg.grpc.enabled)
-            msg << "publishers.grpc.enabled but binary built without BUILD_GRPC_PUBLISHER; ";
-#endif
-        msg << "set publishers.kafka.enabled: true, or re-run cmake with "
-               "-DBUILD_REDIS_PUBLISHER=ON -DBUILD_GRPC_PUBLISHER=ON (see Makefile configure-cpu).";
-        throw std::runtime_error(msg.str());
+        } else {
+            throw std::runtime_error("publishers[" + pc.id + "]: unknown type '" + pc.type + "'");
+        }
+        LOG_INFO("Publisher registered: id={} type={}", pc.id, pc.type);
+        registry.emplace(pc.id, std::move(pub));
     }
-    if (pubs.size() == 1)
-        return std::move(pubs[0]);
-    return std::make_unique<infer::MultiPublisher>(std::move(pubs));
+    return registry;
 }
 
 void logConfiguredPipelinesAndTasks(const infer::AppConfig& cfg) {
@@ -108,7 +108,6 @@ int main(int argc, char* argv[]) {
 
     // cfg will be moved into TaskManager. Snapshot fields needed afterwards.
     const auto mgmt_socket_path = cfg.server.socket_path;
-    const auto kafka_cfg        = cfg.publishers.kafka;
     const auto task_count       = cfg.tasks.size();
 
     // Re-apply log level from config now that it is parsed.
@@ -128,17 +127,23 @@ int main(int argc, char* argv[]) {
     std::signal(SIGTERM, signalHandler);
     std::signal(SIGPIPE, SIG_IGN);
 
-    // ── Create publisher ──────────────────────────────────────────────────────
-    std::unique_ptr<infer::IPublisher> publisher;
+    // ── Build publisher registry ──────────────────────────────────────────────
+    std::unordered_map<std::string, std::unique_ptr<infer::IPublisher>> owned_publishers;
     try {
-        publisher = buildPublisher(cfg.publishers);
+        owned_publishers = buildPublisherRegistry(cfg.publishers);
     } catch (const std::exception& e) {
         LOG_CRITICAL("Publisher init failed: {}", e.what());
         return 1;
     }
 
+    // Build non-owning registry to pass to TaskManager (owned_publishers outlives it).
+    std::unordered_map<std::string, infer::IPublisher*> publisher_registry;
+    for (auto& [id, pub] : owned_publishers)
+        publisher_registry.emplace(id, pub.get());
+
     auto frame_archiver = std::make_shared<infer::FrameArchiver>(cfg.frame_archive);
-    infer::TaskManager task_manager(std::move(cfg), config_path, *publisher, frame_archiver);
+    infer::TaskManager task_manager(
+        std::move(cfg), config_path, std::move(publisher_registry), frame_archiver);
     task_manager.loadAll();
     task_manager.startAll();
 
@@ -162,7 +167,7 @@ int main(int argc, char* argv[]) {
 
     mgmt_server.stop();
 
-    publisher->flush();
+    for (auto& [id, pub] : owned_publishers) pub->flush();
     LOG_INFO("inference-server stopped");
     return 0;
 }
