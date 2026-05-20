@@ -33,7 +33,7 @@ export const NODE_TYPE_DEFS: NodeTypeDef[] = [
   ]},
   { type: 'join.byFrameId',    category: 'join',        withTemplate: [] },
   { type: 'archive.raw',       category: 'archive',     withTemplate: [] },
-  { type: 'sink.publish',      category: 'sink',        withTemplate: [] },
+  { type: 'sink.publish',      category: 'sink',        withTemplate: [{ k: 'to', v: '' }] },
   { type: 'sink.ffplay',       category: 'sink',        withTemplate: [
     { k: 'fps',             v: '5'           },
     { k: 'draw_conf_thresh', v: '0.25'       },
