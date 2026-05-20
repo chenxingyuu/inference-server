@@ -1,0 +1,22 @@
+sources:
+  - id: cam_1
+    url: rtsp://localhost/test
+models:
+  - id: m1
+    version: yolov8
+    backend: tensorrt
+    input_size: [640, 640]
+pipelines:
+  - id: p1
+    nodes:
+      - id: cam_1
+        type: source.rtsp
+      - id: sink_1
+        type: sink.kafka
+    edges:
+      - from: cam_1
+        to: sink_1
+tasks:
+  - id: t1
+    source_id: cam_1
+    pipeline_id: p1
