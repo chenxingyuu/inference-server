@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import type { Edge, Node } from '@xyflow/react'
 import { Field, Input, Select } from '../ui/Field'
 import { ParamKeyCombobox } from '../ui/ParamKeyCombobox'
+import { ParamValueInput } from '../ui/ParamValueInput'
 import { useT } from '../../lib/i18n'
 import { NODE_CATEGORIES, NODE_TYPE_DEFS, getNodeTypeDef } from '../../lib/nodeTypes'
 import type { PipelineEdgeData, PipelineNodeData } from '../../lib/pipelineGraph'
@@ -256,30 +257,34 @@ function NodeInspectorForm({
       <div>
         <span className="label block mb-2">{t('pipelines.editor.params')}</span>
         <div className="space-y-2">
-          {pairs.map((p, i) => (
-            <div key={i} className="flex gap-1">
-              <ParamKeyCombobox
-                value={p.k}
-                options={typeDef?.withTemplate ?? []}
-                onChange={(k) => updatePair(i, { k })}
-                placeholder={t('pipelines.col.key')}
-                className="flex-1"
-              />
-              <Input
-                placeholder={t('pipelines.col.value')}
-                value={p.v}
-                onChange={(e) => updatePair(i, { v: e.target.value })}
-                className="flex-1 text-[11px]"
-              />
-              <button
-                type="button"
-                onClick={() => handlePairsChange(pairs.filter((_, j) => j !== i))}
-                className="btn-icon text-danger/50 hover:text-danger"
-              >
-                ×
-              </button>
-            </div>
-          ))}
+          {pairs.map((p, i) => {
+            const paramDef = typeDef?.withTemplate.find((d) => d.k === p.k)
+            return (
+              <div key={i} className="flex gap-1">
+                <ParamKeyCombobox
+                  value={p.k}
+                  options={typeDef?.withTemplate ?? []}
+                  onChange={(k) => updatePair(i, { k })}
+                  placeholder={t('pipelines.col.key')}
+                  className="flex-1"
+                />
+                <ParamValueInput
+                  paramDef={paramDef}
+                  value={p.v}
+                  onChange={(v) => updatePair(i, { v })}
+                  placeholder={t('pipelines.col.value')}
+                  className="flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => handlePairsChange(pairs.filter((_, j) => j !== i))}
+                  className="btn-icon text-danger/50 hover:text-danger"
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
           <button
             type="button"
             onClick={() => handlePairsChange([...pairs, { k: '', v: '' }])}
