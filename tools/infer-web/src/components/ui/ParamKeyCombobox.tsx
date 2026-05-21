@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ParamDef } from '../../lib/nodeTypes'
+import { useT } from '../../lib/i18n'
 
 interface ParamKeyComboboxProps {
   value: string
@@ -17,6 +18,7 @@ export function ParamKeyCombobox({
   placeholder,
   className = '',
 }: ParamKeyComboboxProps) {
+  const { lang } = useT()
   const [query, setQuery] = useState(value)
   const [open, setOpen] = useState(false)
   const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0 })
@@ -83,7 +85,9 @@ export function ParamKeyCombobox({
             className="bg-bg-surface border border-border rounded shadow-xl max-h-52 overflow-y-auto py-1"
           >
             {filtered.length === 0 ? (
-              <p className="px-3 py-2 text-[10px] text-ink-muted">No matching params</p>
+              <p className="px-3 py-2 text-[10px] text-ink-muted">
+                {lang === 'zh' ? '无匹配参数' : 'No matching params'}
+              </p>
             ) : (
               filtered.map((o) => (
                 <button
@@ -100,7 +104,7 @@ export function ParamKeyCombobox({
                   </span>
                   {o.description && (
                     <span className="text-[10px] text-ink-muted leading-snug">
-                      {o.description}
+                      {o.description[lang]}
                     </span>
                   )}
                 </button>
