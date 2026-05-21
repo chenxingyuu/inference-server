@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import type { Edge, Node } from '@xyflow/react'
 import { Field, Input, Select } from '../ui/Field'
+import { ParamKeyCombobox } from '../ui/ParamKeyCombobox'
 import { useT } from '../../lib/i18n'
 import { NODE_CATEGORIES, NODE_TYPE_DEFS, getNodeTypeDef } from '../../lib/nodeTypes'
 import type { PipelineEdgeData, PipelineNodeData } from '../../lib/pipelineGraph'
@@ -163,6 +164,7 @@ function NodeInspectorForm({
   }, [node.id])
 
   const selectValue = getNodeTypeDef(data.stageType) ? data.stageType : (data.stageType ? CUSTOM : '')
+  const typeDef = getNodeTypeDef(data.stageType)
 
   const applyData = (
     patch: Partial<PipelineNodeData>,
@@ -256,11 +258,12 @@ function NodeInspectorForm({
         <div className="space-y-2">
           {pairs.map((p, i) => (
             <div key={i} className="flex gap-1">
-              <Input
-                placeholder={t('pipelines.col.key')}
+              <ParamKeyCombobox
                 value={p.k}
-                onChange={(e) => updatePair(i, { k: e.target.value })}
-                className="flex-1 text-[11px]"
+                options={typeDef?.withTemplate ?? []}
+                onChange={(k) => updatePair(i, { k })}
+                placeholder={t('pipelines.col.key')}
+                className="flex-1"
               />
               <Input
                 placeholder={t('pipelines.col.value')}
