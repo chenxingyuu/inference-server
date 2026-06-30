@@ -151,6 +151,313 @@
                 }
             }
         },
+        "/models/repository": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns all models discoverable in the model_repository directory, with a `loaded` flag.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "List models in the repository",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/infer-server.RepositoryModel"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "engine unreachable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/repository/{id}/load": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "Load a model from the repository by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.OkResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "engine unreachable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/upload": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Accepts multipart/form-data. Server generates config.yaml from form fields.\nFor Ascend: supply batch_1 file (required) and batch_4/batch_8/batch_16 (optional).\nAlternatively, supply a token from POST /models/upload/analyze to deploy a previously analyzed archive.\nFor TRT: supply engine file. For CPU: supply onnx file.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "Upload model weights and auto-load",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID (^[A-Za-z0-9_-]+$)",
+                        "name": "id",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "cpu",
+                            "trt",
+                            "ascend"
+                        ],
+                        "type": "string",
+                        "description": "Backend",
+                        "name": "backend",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "v5",
+                            "v8",
+                            "v11",
+                            "v26"
+                        ],
+                        "type": "string",
+                        "description": "YOLO version",
+                        "name": "yolo_version",
+                        "in": "formData"
+                    },
+                    {
+                        "enum": [
+                            "detector",
+                            "classifier"
+                        ],
+                        "type": "string",
+                        "description": "Model type",
+                        "name": "model_type",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max batch size",
+                        "name": "batch_size",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Confidence threshold",
+                        "name": "conf_thresh",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "number",
+                        "description": "NMS threshold",
+                        "name": "nms_thresh",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Number of classes",
+                        "name": "num_classes",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Worker instances",
+                        "name": "instance_count",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "TRT .engine file",
+                        "name": "engine",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "ONNX .onnx file",
+                        "name": "onnx",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Ascend .om for batch=1 (required for Ascend)",
+                        "name": "batch_1",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Ascend .om for batch=4",
+                        "name": "batch_4",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Ascend .om for batch=8",
+                        "name": "batch_8",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Ascend .om for batch=16",
+                        "name": "batch_16",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.OkResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "model ID already exists in repository",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "engine unreachable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/upload/analyze": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Extracts the archive, detects backend and model files, parses config.yaml if present.\nReturns a token valid for 10 minutes. Submit the token to POST /models/upload to deploy.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "Analyze a model archive (.zip or .tar.gz)",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Archive file (.zip or .tar.gz)",
+                        "name": "archive",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ArchiveAnalysisResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/models/{id}": {
             "delete": {
                 "security": [
@@ -302,6 +609,79 @@
             }
         },
         "/pipelines/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Update a pipeline",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pipeline ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Pipeline definition",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.PipelineCreate"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.OkResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "pipeline is in use by a task",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "engine unreachable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -603,6 +983,73 @@
             }
         },
         "/tasks/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Update a task (must be stopped)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Task definition",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.TaskCreate"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.OkResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "task is running",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "engine unreachable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -717,6 +1164,50 @@
         }
     },
     "definitions": {
+        "infer-server.ArchiveAnalysisResponse": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "type": "string"
+                },
+                "batch_size": {
+                    "type": "integer"
+                },
+                "conf_thresh": {
+                    "type": "number"
+                },
+                "files_found": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "has_config": {
+                    "type": "boolean"
+                },
+                "instance_count": {
+                    "type": "integer"
+                },
+                "model_type": {
+                    "type": "string"
+                },
+                "nms_thresh": {
+                    "type": "number"
+                },
+                "num_classes": {
+                    "type": "integer"
+                },
+                "suggested_id": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "yolo_version": {
+                    "type": "string"
+                }
+            }
+        },
         "infer-server.EdgeConfig": {
             "type": "object",
             "required": [
@@ -892,6 +1383,12 @@
                 "num_classes": {
                     "type": "integer"
                 },
+                "om_paths": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "onnx_path": {
                     "type": "string"
                 },
@@ -1005,6 +1502,41 @@
                     "additionalProperties": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "infer-server.RepositoryModel": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "type": "string"
+                },
+                "batch_size": {
+                    "type": "integer"
+                },
+                "conf_thresh": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "instance_count": {
+                    "type": "integer"
+                },
+                "loaded": {
+                    "type": "boolean"
+                },
+                "model_type": {
+                    "type": "string"
+                },
+                "nms_thresh": {
+                    "type": "number"
+                },
+                "num_classes": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1127,7 +1659,22 @@
         "infer-server.TaskInfo": {
             "type": "object",
             "properties": {
+                "ascend_device_id": {
+                    "type": "integer"
+                },
                 "id": {
+                    "type": "string"
+                },
+                "pipeline_id": {
+                    "type": "string"
+                },
+                "sample_fps": {
+                    "type": "number"
+                },
+                "sampling_mode": {
+                    "type": "string"
+                },
+                "source_id": {
                     "type": "string"
                 },
                 "state": {
@@ -1136,6 +1683,12 @@
                         "running",
                         "stopped"
                     ]
+                },
+                "use_ascend_dvpp": {
+                    "type": "boolean"
+                },
+                "use_hwdec": {
+                    "type": "boolean"
                 }
             }
         }

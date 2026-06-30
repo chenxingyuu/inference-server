@@ -1,5 +1,34 @@
 basePath: /
 definitions:
+  infer-server.ArchiveAnalysisResponse:
+    properties:
+      backend:
+        type: string
+      batch_size:
+        type: integer
+      conf_thresh:
+        type: number
+      files_found:
+        items:
+          type: string
+        type: array
+      has_config:
+        type: boolean
+      instance_count:
+        type: integer
+      model_type:
+        type: string
+      nms_thresh:
+        type: number
+      num_classes:
+        type: integer
+      suggested_id:
+        type: string
+      token:
+        type: string
+      yolo_version:
+        type: string
+    type: object
   infer-server.EdgeConfig:
     properties:
       capacity:
@@ -118,6 +147,10 @@ definitions:
         type: number
       num_classes:
         type: integer
+      om_paths:
+        additionalProperties:
+          type: string
+        type: object
       onnx_path:
         type: string
       preferred_batch_sizes:
@@ -197,6 +230,29 @@ definitions:
         additionalProperties:
           type: string
         type: object
+    type: object
+  infer-server.RepositoryModel:
+    properties:
+      backend:
+        type: string
+      batch_size:
+        type: integer
+      conf_thresh:
+        type: number
+      id:
+        type: string
+      instance_count:
+        type: integer
+      loaded:
+        type: boolean
+      model_type:
+        type: string
+      nms_thresh:
+        type: number
+      num_classes:
+        type: integer
+      version:
+        type: string
     type: object
   infer-server.SourceCreate:
     properties:
@@ -279,13 +335,27 @@ definitions:
     type: object
   infer-server.TaskInfo:
     properties:
+      ascend_device_id:
+        type: integer
       id:
+        type: string
+      pipeline_id:
+        type: string
+      sample_fps:
+        type: number
+      sampling_mode:
+        type: string
+      source_id:
         type: string
       state:
         enum:
         - running
         - stopped
         type: string
+      use_ascend_dvpp:
+        type: boolean
+      use_hwdec:
+        type: boolean
     type: object
 info:
   contact: {}
@@ -422,6 +492,213 @@ paths:
       summary: Unload a model
       tags:
       - models
+  /models/repository:
+    get:
+      description: Returns all models discoverable in the model_repository directory,
+        with a `loaded` flag.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/infer-server.RepositoryModel'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: List models in the repository
+      tags:
+      - models
+  /models/repository/{id}/load:
+    post:
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Load a model from the repository by ID
+      tags:
+      - models
+  /models/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: |-
+        Accepts multipart/form-data. Server generates config.yaml from form fields.
+        For Ascend: supply batch_1 file (required) and batch_4/batch_8/batch_16 (optional).
+        Alternatively, supply a token from POST /models/upload/analyze to deploy a previously analyzed archive.
+        For TRT: supply engine file. For CPU: supply onnx file.
+      parameters:
+      - description: Model ID (^[A-Za-z0-9_-]+$)
+        in: formData
+        name: id
+        required: true
+        type: string
+      - description: Backend
+        enum:
+        - cpu
+        - trt
+        - ascend
+        in: formData
+        name: backend
+        required: true
+        type: string
+      - description: YOLO version
+        enum:
+        - v5
+        - v8
+        - v11
+        - v26
+        in: formData
+        name: yolo_version
+        type: string
+      - description: Model type
+        enum:
+        - detector
+        - classifier
+        in: formData
+        name: model_type
+        type: string
+      - description: Max batch size
+        in: formData
+        name: batch_size
+        type: integer
+      - description: Confidence threshold
+        in: formData
+        name: conf_thresh
+        type: number
+      - description: NMS threshold
+        in: formData
+        name: nms_thresh
+        type: number
+      - description: Number of classes
+        in: formData
+        name: num_classes
+        type: integer
+      - description: Worker instances
+        in: formData
+        name: instance_count
+        type: integer
+      - description: TRT .engine file
+        in: formData
+        name: engine
+        type: file
+      - description: ONNX .onnx file
+        in: formData
+        name: onnx
+        type: file
+      - description: Ascend .om for batch=1 (required for Ascend)
+        in: formData
+        name: batch_1
+        type: file
+      - description: Ascend .om for batch=4
+        in: formData
+        name: batch_4
+        type: file
+      - description: Ascend .om for batch=8
+        in: formData
+        name: batch_8
+        type: file
+      - description: Ascend .om for batch=16
+        in: formData
+        name: batch_16
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "409":
+          description: model ID already exists in repository
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Upload model weights and auto-load
+      tags:
+      - models
+  /models/upload/analyze:
+    post:
+      consumes:
+      - multipart/form-data
+      description: |-
+        Extracts the archive, detects backend and model files, parses config.yaml if present.
+        Returns a token valid for 10 minutes. Submit the token to POST /models/upload to deploy.
+      parameters:
+      - description: Archive file (.zip or .tar.gz)
+        in: formData
+        name: archive
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.ArchiveAnalysisResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Analyze a model archive (.zip or .tar.gz)
+      tags:
+      - models
   /pipelines:
     get:
       produces:
@@ -514,6 +791,53 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Remove a pipeline
+      tags:
+      - pipelines
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pipeline ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Pipeline definition
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/infer-server.PipelineCreate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "409":
+          description: pipeline is in use by a task
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Update a pipeline
       tags:
       - pipelines
   /sources:
@@ -700,6 +1024,49 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Remove a task
+      tags:
+      - tasks
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Task definition
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/infer-server.TaskCreate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.OkResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "409":
+          description: task is running
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Update a task (must be stopped)
       tags:
       - tasks
   /tasks/{id}/{action}:
