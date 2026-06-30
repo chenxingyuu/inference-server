@@ -13,9 +13,9 @@
 ## 架构概览
 
 ```text
-RTSP(source) -> decode.ffmpeg | decode.dvpp (Ascend 可选) -> (fan-out)
+RTSP(source.rtsp | source.file，内含 FFmpeg/DVPP 解码) -> (fan-out)
             -> archive.raw (可选)
-            -> preprocess.yolo -> infer.engine -> postprocess.yolo
+            -> infer.engine（内含 preprocess + YOLO decode）
             -> track.bytetrack (可选)
             -> join.byFrameId (可选)
             -> sink.publish（publishers: 配置可同时扇出到 Kafka / gRPC / Redis）
@@ -138,13 +138,11 @@ echo '{"cmd":"stop_task","id":"task_cam_001"}' | socat - UNIX-CONNECT:./infer.so
 示例见 `config/config.yaml`。
 
 常见 stage：
-- `source.rtsp`：RTSP 输入（内部使用 `FFmpegDecoder`）
+- `source.rtsp`：RTSP 输入（内部使用 `FFmpegDecoder`；Ascend 可选 `use_ascend_dvpp` 走 DVPP 硬解）
 - `source.file`：本地视频文件输入
-- `decode.ffmpeg`：解码阶段（当前为占位 passthrough，解码由 source 完成）
 - `archive.raw`：原图归档（复用 `FrameArchiver`，支持 `use_hwdec=true` 的 GPU 帧，默认开启）
   - 可通过 `frame_archive.worker_count` 配置归档并发 worker 数（默认 `1`）。
-- `preprocess.yolo` / `postprocess.yolo`：占位 passthrough（后续可落地真实算子）
-- `infer.engine`：推理 stage（引用 `models[].id`）；DAG 路径下由 `InferWorkerGroup` 执行，支持 `models[].instance_count` 与 `models[].device_ids`（每实例一个后端；`device_ids` 拼写须正确）。攒批策略与 `batch_size`、`max_queue_delay_us` 一致（与 `ModelManager` + `BatchScheduler` 的流池攒批路径不同）。
+- `infer.engine`：推理 stage（引用 `models[].id`）；DAG 路径下由 `InferWorkerGroup` 执行，内含 preprocess 与 YOLO decode，支持 `models[].instance_count` 与 `models[].device_ids`（每实例一个后端；`device_ids` 拼写须正确）。攒批策略与 `batch_size`、`max_queue_delay_us` 一致（与 `ModelManager` + `BatchScheduler` 的流池攒批路径不同）。
 - `infer.sahiScheduler`：SAHI 滑窗切块，将大分辨率帧切成重叠 tile 后送入下游 `infer.engine`，最后由 `infer.sahiMerge` 合并 NMS 结果。参数：`tile_width`、`tile_height`、`overlap_ratio`、`full_interval`（每 N 帧插入一次全图推理）、`max_tiles_per_frame`。
 - `track.bytetrack`：ByteTrack 追踪
 - `join.byFrameId`：归档信息回填到推理结果（按 frame id join）

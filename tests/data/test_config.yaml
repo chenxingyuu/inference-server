@@ -48,18 +48,12 @@ pipelines:
     nodes:
       - id: cam_01
         type: source.rtsp
-      - id: decode_1
-        type: decode.ffmpeg
       - id: archive_1
         type: archive.raw
-      - id: pre_1
-        type: preprocess.yolo
       - id: infer_1
         type: infer.engine
         with:
           model_id: yolo_det
-      - id: post_1
-        type: postprocess.yolo
       - id: track_1
         type: track.bytetrack
       - id: join_1
@@ -68,19 +62,13 @@ pipelines:
         type: sink.kafka
     edges:
       - from: cam_01
-        to: decode_1
-      - from: decode_1
         to: archive_1
         queue:
           capacity: 128
           drop_policy: drop_oldest
-      - from: decode_1
-        to: pre_1
-      - from: pre_1
+      - from: cam_01
         to: infer_1
       - from: infer_1
-        to: post_1
-      - from: post_1
         to: track_1
       - from: track_1
         to: join_1

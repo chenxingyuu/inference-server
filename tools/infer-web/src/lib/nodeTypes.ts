@@ -27,7 +27,6 @@ export const NODE_TYPE_DEFS: NodeTypeDef[] = [
       zh: '是否循环播放文件',
     }},
   ]},
-  { type: 'decode.ffmpeg',     category: 'decode',      withTemplate: [] },
   { type: 'infer.sahiScheduler', category: 'infer',     withTemplate: [
     { k: 'tile_width',          v: '960',  type: 'number', min: 1, step: 1,    description: { en: 'Width of each SAHI tile in pixels',                                 zh: '每个 SAHI 分块的宽度（像素）' } },
     { k: 'tile_height',         v: '1144', type: 'number', min: 1, step: 1,    description: { en: 'Height of each SAHI tile in pixels',                                zh: '每个 SAHI 分块的高度（像素）' } },
@@ -45,7 +44,6 @@ export const NODE_TYPE_DEFS: NodeTypeDef[] = [
     { k: 'merge_ios',        v: '0.8',  type: 'number', min: 0, max: 1, step: 0.01, description: { en: 'Intersection-over-smaller threshold for merging detections (0.0–1.0)', zh: '合并检测框的 IoS（较小框交集占比）阈值（0.0–1.0）' } },
     { k: 'stale_timeout_ms', v: '2000', type: 'number', min: 0, step: 1,             description: { en: 'Discard tile results older than this value (ms)',                       zh: '丢弃超过此时间的分块结果（毫秒）' } },
   ]},
-  { type: 'postprocess.yolo',  category: 'postprocess', withTemplate: [] },
   { type: 'track.bytetrack',   category: 'track',       withTemplate: [
     { k: 'high_det_thresh',     v: '0.5', type: 'number', min: 0, max: 1, step: 0.01, description: { en: 'Confidence threshold for high-quality detections (primary matching)',  zh: '高质量检测框的置信度阈值，用于主匹配' } },
     { k: 'low_det_thresh',      v: '0.1', type: 'number', min: 0, max: 1, step: 0.01, description: { en: 'Confidence threshold for low-quality detections (secondary matching)', zh: '低质量检测框的置信度阈值，用于二次匹配' } },
@@ -86,7 +84,7 @@ export const NODE_TYPE_DEFS: NodeTypeDef[] = [
   ]},
 ]
 
-export const NODE_CATEGORIES = ['source', 'decode', 'infer', 'postprocess', 'track', 'join', 'archive', 'sink'] as const
+export const NODE_CATEGORIES = ['source', 'infer', 'postprocess', 'track', 'join', 'archive', 'sink'] as const
 
 export const getNodeTypeDef = (type: string) =>
   NODE_TYPE_DEFS.find((d) => d.type === type)

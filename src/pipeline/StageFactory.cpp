@@ -5,7 +5,6 @@
 #include "pipeline/stages/InferEngineWorkerStage.h"
 #include "pipeline/stages/SinkFfplayStage.h"
 #include "pipeline/stages/JoinByFrameStage.h"
-#include "pipeline/stages/PassthroughStage.h"
 #include "pipeline/stages/SahiMergeStage.h"
 #include "pipeline/stages/SahiSchedulerStage.h"
 #include "pipeline/stages/SinkKafkaStage.h"
@@ -92,9 +91,6 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
     if (cfg.type == "source.file") {
         bool loop = getBoolWithDefault(cfg.with, "loop", false);
         return std::make_unique<SourceFileStage>(cfg.id, ctx.source, ctx.ingest_sample_fps, ctx.ingest_sampling_mode, ctx.ingest_use_hwdec, loop);
-    }
-    if (cfg.type == "decode.ffmpeg" || cfg.type == "preprocess.yolo" || cfg.type == "postprocess.yolo") {
-        return std::make_unique<PassthroughStage>(cfg.id);
     }
     if (cfg.type == "archive.raw") {
         return std::make_unique<ArchiveRawStage>(

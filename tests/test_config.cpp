@@ -158,10 +158,10 @@ TEST(LoadConfig, ParsesFullYaml) {
     // pipelines (templates, no source_id)
     ASSERT_EQ(cfg.pipelines.size(), 1u);
     EXPECT_EQ(cfg.pipelines[0].id, "pipe_01");
-    ASSERT_EQ(cfg.pipelines[0].nodes.size(), 9u);
-    ASSERT_EQ(cfg.pipelines[0].edges.size(), 9u);
-    EXPECT_EQ(cfg.pipelines[0].nodes[4].type, "infer.engine");
-    EXPECT_EQ(cfg.pipelines[0].nodes[4].with.at("model_id"), "yolo_det");
+    ASSERT_EQ(cfg.pipelines[0].nodes.size(), 6u);
+    ASSERT_EQ(cfg.pipelines[0].edges.size(), 6u);
+    EXPECT_EQ(cfg.pipelines[0].nodes[2].type, "infer.engine");
+    EXPECT_EQ(cfg.pipelines[0].nodes[2].with.at("model_id"), "yolo_det");
 
     // tasks
     ASSERT_EQ(cfg.tasks.size(), 1u);
@@ -532,7 +532,7 @@ TEST(LoadConfig, InvalidPipelineGraphThrows) {
         out << "      - id: cam_1\n";
         out << "        type: source.rtsp\n";
         out << "      - id: stage_2\n";
-        out << "        type: decode.ffmpeg\n";
+        out << "        type: archive.raw\n";
         out << "    edges:\n";
         out << "      - from: cam_1\n";
         out << "        to: stage_2\n";

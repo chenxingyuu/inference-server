@@ -176,7 +176,6 @@ const en = {
   'pipelines.editor.error.sink_stream_output_url': 'sink.stream requires output_url.',
 
   'pipelines.node.category.source':      'Source',
-  'pipelines.node.category.decode':      'Decode',
   'pipelines.node.category.infer':       'Inference',
   'pipelines.node.category.postprocess': 'Post-process',
   'pipelines.node.category.track':       'Tracking',
@@ -186,11 +185,9 @@ const en = {
 
   'pipelines.node.type.source.rtsp':         'RTSP source',
   'pipelines.node.type.source.file':         'File source',
-  'pipelines.node.type.decode.ffmpeg':       'FFmpeg decode',
   'pipelines.node.type.infer.sahiScheduler': 'SAHI scheduler',
   'pipelines.node.type.infer.engine':        'Inference engine',
   'pipelines.node.type.post.sahiMerge':      'SAHI merge',
-  'pipelines.node.type.postprocess.yolo':    'YOLO post-process',
   'pipelines.node.type.track.bytetrack':     'ByteTrack',
   'pipelines.node.type.join.byFrameId':      'Join by frame ID',
   'pipelines.node.type.archive.raw':         'Raw archive',
@@ -397,7 +394,6 @@ const zh: Record<keyof typeof en, string> = {
   'pipelines.editor.error.sink_stream_output_url': 'sink.stream 需要配置 output_url。',
 
   'pipelines.node.category.source':      '数据源',
-  'pipelines.node.category.decode':      '解码',
   'pipelines.node.category.infer':       '推理',
   'pipelines.node.category.postprocess': '后处理',
   'pipelines.node.category.track':       '跟踪',
@@ -407,11 +403,9 @@ const zh: Record<keyof typeof en, string> = {
 
   'pipelines.node.type.source.rtsp':         'RTSP 源流',
   'pipelines.node.type.source.file':         '文件源',
-  'pipelines.node.type.decode.ffmpeg':       'FFmpeg 解码',
   'pipelines.node.type.infer.sahiScheduler': 'SAHI 分块调度',
   'pipelines.node.type.infer.engine':        '推理引擎',
   'pipelines.node.type.post.sahiMerge':      'SAHI 合并',
-  'pipelines.node.type.postprocess.yolo':    'YOLO 后处理',
   'pipelines.node.type.track.bytetrack':     'ByteTrack 跟踪',
   'pipelines.node.type.join.byFrameId':      '按帧 ID 合并',
   'pipelines.node.type.archive.raw':         '原始归档',

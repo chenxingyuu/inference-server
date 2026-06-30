@@ -24,7 +24,6 @@ export function getCategoryColor(stageType: string): string {
   const cat = getNodeTypeDef(stageType)?.category ?? 'infer'
   const colors: Record<string, string> = {
     source: '#22c55e',
-    decode: '#3b82f6',
     infer: '#a855f7',
     postprocess: '#f59e0b',
     track: '#06b6d4',
