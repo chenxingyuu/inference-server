@@ -7,7 +7,7 @@ namespace infer {
 
 // YOLOv5 output layout: [batch, num_anchors_total, 5 + num_classes]
 //   anchor_total = (80x80 + 40x40 + 20x20) × 3 = 25200 for 640-input
-//   each prediction: [cx, cy, w, h, obj_conf, cls0..clsN]  (sigmoid applied)
+//   each prediction: [cx, cy, w, h, obj_conf, cls0..clsN]  (normalised or pixel)
 class YOLOv5Decoder : public IYOLODecoder {
 public:
     explicit YOLOv5Decoder(int num_classes = 80);

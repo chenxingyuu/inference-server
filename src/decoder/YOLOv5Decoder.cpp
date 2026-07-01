@@ -7,13 +7,31 @@ namespace infer {
 YOLOv5Decoder::YOLOv5Decoder(int num_classes)
     : num_classes_(num_classes) {}
 
+namespace {
+
+// Ultralytics / Ascend exports often emit cx,cy,w,h in model-input pixels (0..W/H),
+// while legacy TRT paths use normalised [0,1] coords.  Detect once per tensor.
+bool yolov5OutputUsesPixelCoords(const float* data, int num_preds, int step) {
+    const int sample = std::min(num_preds, 64);
+    for (int i = 0; i < sample; ++i) {
+        const float* p = data + i * step;
+        if (p[0] > 1.5f || p[1] > 1.5f || p[2] > 1.5f || p[3] > 1.5f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
 std::vector<Detection> YOLOv5Decoder::decodeSingle(
-    const float* data, int num_preds, int /*stride*/,
+    const float* data, int num_preds, int stride,
     float conf_thresh, float nms_thresh,
     int img_w, int img_h)
 {
-    // Each prediction: [cx, cy, w, h, obj_conf, cls0..clsN-1]  (all post-sigmoid)
+    // Each prediction: [cx, cy, w, h, obj_conf, cls0..clsN-1]
     const int step = 5 + num_classes_;
+    const bool pixel_coords = yolov5OutputUsesPixelCoords(data, num_preds, step);
     std::vector<Detection> dets;
 
     for (int i = 0; i < num_preds; ++i) {
@@ -29,10 +47,18 @@ std::vector<Detection> YOLOv5Decoder::decodeSingle(
         }
         if (best_prob < conf_thresh) continue;
 
-        float cx = p[0] * img_w;
-        float cy = p[1] * img_h;
-        float bw = p[2] * img_w;
-        float bh = p[3] * img_h;
+        float cx, cy, bw, bh;
+        if (pixel_coords) {
+            cx = p[0];
+            cy = p[1];
+            bw = p[2];
+            bh = p[3];
+        } else {
+            cx = p[0] * img_w;
+            cy = p[1] * img_h;
+            bw = p[2] * img_w;
+            bh = p[3] * img_h;
+        }
 
         Detection d;
         d.class_id   = best_cls;

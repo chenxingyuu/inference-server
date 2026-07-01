@@ -95,6 +95,36 @@ TEST(YOLOv5Decoder, LowConfidenceFilteredOut) {
     EXPECT_TRUE(results[0].empty());
 }
 
+TEST(YOLOv5Decoder, PixelSpaceCoordsAscendExport) {
+    // Ascend / ultralytics raw exports: cx,cy,w,h already in model-input pixels.
+    const int num_classes = 46;
+    const int num_preds   = 100;
+    const int step        = 5 + num_classes;
+    std::vector<float> buf(static_cast<size_t>(num_preds) * step, 0.f);
+
+    float* p = buf.data();
+    p[0] = 480.f;  // cx
+    p[1] = 270.f;  // cy
+    p[2] = 100.f;  // w
+    p[3] = 80.f;   // h
+    p[4] = 0.95f;
+    p[5 + 3] = 0.95f;
+
+    YOLOv5Decoder dec(num_classes);
+    InferShape shape;
+    shape.width  = 960;
+    shape.height = 960;
+
+    auto results = dec.decode(buf.data(), 1, shape, 0.4f, 0.45f, buf.size());
+    ASSERT_EQ(results.size(), 1u);
+    ASSERT_EQ(results[0].size(), 1u);
+    const auto& bbox = results[0][0].bbox;
+    EXPECT_NEAR(bbox.x1, 430.f, 1.f);
+    EXPECT_NEAR(bbox.y1, 230.f, 1.f);
+    EXPECT_NEAR(bbox.x2, 530.f, 1.f);
+    EXPECT_NEAR(bbox.y2, 310.f, 1.f);
+}
+
 TEST(YOLOv5Decoder, NmsSuppressesDuplicates) {
     const int num_classes = 1;
     YOLOv5Decoder dec(num_classes);
