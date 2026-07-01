@@ -110,8 +110,10 @@ private:
     bool loaded_{false};
     int  device_id_{0};
 
-    // batch_size → model_id
+    // batch_size → model_id and compiled tensor byte sizes from aclmdlDesc
     std::map<int, uint32_t> model_map_;
+    std::map<int, size_t>   model_input_bytes_;
+    std::map<int, size_t>   model_output_bytes_;
 
     aclrtContext ctx_{nullptr};
     aclrtStream  stream_{nullptr};

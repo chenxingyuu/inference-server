@@ -66,7 +66,15 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
         uint32_t model_id = 0;
         ACL_CHECK(aclmdlLoadFromFile(path.c_str(), &model_id));
         model_map_[bs] = model_id;
-        LOG_INFO("AscendBackend: loaded om {} (batch={})", path, bs);
+
+        aclmdlDesc* desc = aclmdlCreateDesc();
+        ACL_CHECK(aclmdlGetDesc(desc, model_id));
+        model_input_bytes_[bs]  = aclmdlGetInputSizeByIndex(desc, 0);
+        model_output_bytes_[bs] = aclmdlGetOutputSizeByIndex(desc, 0);
+        aclmdlDestroyDesc(desc);
+
+        LOG_INFO("AscendBackend: loaded om {} (batch={} in={} out={})",
+                 path, bs, model_input_bytes_[bs], model_output_bytes_[bs]);
     }
 
     if (model_map_.empty()) {
@@ -79,17 +87,11 @@ void AscendBackend::loadModel(const ModelConfig& cfg) {
     aipp_enabled_ = detect(model_map_.begin()->second);
 
     const int max_bs = model_map_.rbegin()->first;
+    input_bytes_  = model_input_bytes_.at(max_bs);
+    output_bytes_ = model_output_bytes_.at(max_bs);
     if (aipp_enabled_) {
-        // AIPP path: NV12 (YUV420SP) uint8 input.
-        // The AIPP config in our exported .om expects NV12 (see docs/ascend-guide.md).
-        input_bytes_ = static_cast<size_t>(max_bs) * input_h_ * input_w_ * 3 / 2;
         LOG_INFO("AscendBackend: AIPP enabled, input format=NV12(uint8)");
-    } else {
-        // CPU preprocess path: CHW float input
-        input_bytes_  = static_cast<size_t>(max_bs) * 3 * input_h_ * input_w_ * sizeof(float);
     }
-    const int anchors = yoloAnchorCount(input_h_, input_w_);
-    output_bytes_ = static_cast<size_t>(max_bs) * (4 + num_classes_) * anchors * sizeof(float);
 
     buffer_pool_.init(device_id_, ctx_, /*pool_size=*/4, input_bytes_, output_bytes_);
 
@@ -103,6 +105,8 @@ void AscendBackend::unloadModel() {
         aclmdlUnload(id);
     }
     model_map_.clear();
+    model_input_bytes_.clear();
+    model_output_bytes_.clear();
     if (stream_) {
         aclrtDestroyStream(stream_);
         stream_ = nullptr;
@@ -195,10 +199,9 @@ void AscendBackend::infer(const Batch& input, std::vector<float>& output) {
     const int      model_bs = it->first;
     const uint32_t model_id = it->second;
 
-    const size_t out_bytes_model =
-        static_cast<size_t>(model_bs) * (4 + num_classes_) * yoloAnchorCount(input_h_, input_w_) * sizeof(float);
-    const size_t out_bytes_req =
-        static_cast<size_t>(req_bs) * (4 + num_classes_) * yoloAnchorCount(input_h_, input_w_) * sizeof(float);
+    const size_t out_bytes_model = model_output_bytes_.at(model_bs);
+    const size_t out_bytes_req   = out_bytes_model * static_cast<size_t>(req_bs)
+                                   / static_cast<size_t>(model_bs);
 
     // Acquire pre-allocated slot for the output buffer (exception-safe release).
     AscendPooledBuffer* slot = buffer_pool_.acquire();

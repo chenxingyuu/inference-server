@@ -16,7 +16,8 @@ std::vector<std::vector<Detection>> ClassifierDecoder::decode(
         int               batch_size,
         const InferShape& /*shape*/,
         float             conf_thresh,
-        float             /*nms_thresh*/) {
+        float             /*nms_thresh*/,
+        size_t            /*output_count*/) {
     std::vector<std::vector<Detection>> results(batch_size);
 
     for (int b = 0; b < batch_size; ++b) {

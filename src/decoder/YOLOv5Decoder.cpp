@@ -58,11 +58,15 @@ std::vector<std::vector<Detection>> YOLOv5Decoder::decode(
     int               batch_size,
     const InferShape& shape,
     float             conf_thresh,
-    float             nms_thresh)
+    float             nms_thresh,
+    size_t            output_count)
 {
-    // YOLOv5 exports: output[batch, 25200, 5+cls]
-    const int num_preds = 25200;
-    const int step      = 5 + num_classes_;
+    // YOLOv5 exports: output[batch, num_preds, 5+cls]
+    const int step = 5 + num_classes_;
+    int num_preds  = 25200;
+    if (output_count > 0 && batch_size > 0) {
+        num_preds = static_cast<int>(output_count / static_cast<size_t>(batch_size) / step);
+    }
     const int img_w     = shape.width;
     const int img_h     = shape.height;
 

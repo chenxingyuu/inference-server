@@ -29,7 +29,8 @@ public:
         int               batch_size,
         const InferShape& shape,
         float             conf_thresh,
-        float             nms_thresh) override;
+        float             nms_thresh,
+        size_t            output_count = 0) override;
 
     YOLOVersion version() const override { return YOLOVersion::Unknown; }
 

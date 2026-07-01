@@ -152,7 +152,8 @@ void InferWorker::workerLoop() {
             auto decode_start = std::chrono::steady_clock::now();
             auto per_image = decoder_->decode(
                 output.data(), batch.size(), shape,
-                model_cfg_.conf_thresh, model_cfg_.nms_thresh);
+                model_cfg_.conf_thresh, model_cfg_.nms_thresh,
+                output.size());
             const double decode_ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - decode_start).count();
             LOG_DEBUG("InferWorker[{}]: decode done bs={} decode_ms={:.1f}",

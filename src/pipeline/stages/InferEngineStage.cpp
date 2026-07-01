@@ -108,7 +108,8 @@ void InferEngineStage::inferAndEmit(std::vector<EventEnvelope> events, const Emi
 
             const auto decode_start = std::chrono::steady_clock::now();
             decoded = decoder_->decode(output.data(), batch.size(), model_cfg_.input_shape,
-                                       model_cfg_.conf_thresh, model_cfg_.nms_thresh);
+                                       model_cfg_.conf_thresh, model_cfg_.nms_thresh,
+                                       output.size());
             decode_ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - decode_start).count();
 
@@ -220,7 +221,8 @@ void InferEngineStage::inferAndEmit(std::vector<EventEnvelope> events, const Emi
                     {
                         std::lock_guard infer_lock(infer_mutex_);
                         dec = decoder_->decode(out_buf.data(), 1, model_cfg_.input_shape,
-                                               model_cfg_.conf_thresh, model_cfg_.nms_thresh);
+                                               model_cfg_.conf_thresh, model_cfg_.nms_thresh,
+                                               out_buf.size());
                     }
                     const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
                     Metrics::get().recordInferLatency(model_cfg_.id, ms);

@@ -57,10 +57,14 @@ std::vector<std::vector<Detection>> YOLOv8Decoder::decode(
     int               batch_size,
     const InferShape& shape,
     float             conf_thresh,
-    float             nms_thresh)
+    float             nms_thresh,
+    size_t            output_count)
 {
-    const int num_anchors = 8400;
-    const int rows        = 4 + num_classes_; // stride per batch element
+    const int rows = 4 + num_classes_;
+    int num_anchors = 8400;
+    if (output_count > 0 && batch_size > 0) {
+        num_anchors = static_cast<int>(output_count / static_cast<size_t>(batch_size) / rows);
+    }
     const int img_w       = shape.width;
     const int img_h       = shape.height;
 
