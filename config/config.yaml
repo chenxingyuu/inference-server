@@ -45,6 +45,10 @@ frame_archive:
   save_interval: 1
   jpeg_quality: 90
   queue_capacity: 4096
+  # retention:
+  #   enabled: true
+  #   max_age_minutes: 1440      # TTL 最小粒度 1 分钟（按 YYYYMMDD/HH/mm 分桶整目录删除）
+  #   scan_interval_seconds: 60
   # GPU/NPU 环境：allow_gpu_frames: true 可避免 GPU→CPU 拷贝
   # allow_gpu_frames: false
   # NPU 多路归档时可增大并发 worker 数

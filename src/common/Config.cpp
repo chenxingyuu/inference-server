@@ -739,6 +739,21 @@ AppConfig loadConfig(const std::string& yaml_path) {
         if (cfg.frame_archive.save_interval <= 0) throw std::runtime_error("frame_archive.save_interval must be >= 1");
         if (cfg.frame_archive.jpeg_quality < 1 || cfg.frame_archive.jpeg_quality > 100) throw std::runtime_error("frame_archive.jpeg_quality must be in [1, 100]");
         if (cfg.frame_archive.queue_capacity <= 0) throw std::runtime_error("frame_archive.queue_capacity must be >= 1");
+        if (auto rn = an["retention"]) {
+            cfg.frame_archive.retention.enabled = rn["enabled"].as<bool>(false);
+            cfg.frame_archive.retention.max_age_minutes =
+                rn["max_age_minutes"].as<int64_t>(1440);
+            cfg.frame_archive.retention.scan_interval_seconds =
+                rn["scan_interval_seconds"].as<int>(60);
+            if (cfg.frame_archive.retention.enabled) {
+                if (cfg.frame_archive.retention.max_age_minutes < 1) {
+                    throw std::runtime_error("frame_archive.retention.max_age_minutes must be >= 1");
+                }
+                if (cfg.frame_archive.retention.scan_interval_seconds < 1) {
+                    throw std::runtime_error("frame_archive.retention.scan_interval_seconds must be >= 1");
+                }
+            }
+        }
     }
     if (const char* env_repo = std::getenv("INFER_MODEL_REPOSITORY")) {
         if (env_repo[0] != '\0') cfg.server.model_repository = env_repo;

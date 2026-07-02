@@ -131,6 +131,10 @@ void Metrics::incFramesArchiveDropped() {
     frames_archive_dropped_.fetch_add(1, std::memory_order_relaxed);
 }
 
+void Metrics::incFramesArchiveDeleted(uint64_t n) {
+    frames_archive_deleted_.fetch_add(n, std::memory_order_relaxed);
+}
+
 void Metrics::setFrameArchiveQueueDepth(uint64_t depth) {
     frame_archive_queue_depth_.store(depth, std::memory_order_relaxed);
 }
@@ -405,6 +409,9 @@ std::string Metrics::serialize() const {
     out << serializeSimpleCounter("frames_archive_dropped_total",
         "Total frames dropped by archive queue or write failures",
         frames_archive_dropped_.load(std::memory_order_relaxed));
+    out << serializeSimpleCounter("frames_archive_deleted_total",
+        "Total frame archive entries removed by retention GC",
+        frames_archive_deleted_.load(std::memory_order_relaxed));
     out << serializeSimpleGauge("frame_archive_queue_depth",
         "Current pending frame archive queue depth",
         frame_archive_queue_depth_.load(std::memory_order_relaxed));

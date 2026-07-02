@@ -305,6 +305,7 @@ endif()
 
 set(ARCHIVE_SOURCES
     src/archive/FrameArchiver.cpp
+    src/archive/FrameRetentionGc.cpp
 )
 
 set(METRICS_SOURCES

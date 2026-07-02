@@ -32,6 +32,7 @@ add_library(infer_testable STATIC
     ${CMAKE_SOURCE_DIR}/src/stream/GpuDeviceAllocator.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/StopAwareSleep.cpp
     ${CMAKE_SOURCE_DIR}/src/metrics/Metrics.cpp
+    ${CMAKE_SOURCE_DIR}/src/archive/FrameRetentionGc.cpp
 )
 
 target_include_directories(infer_testable PUBLIC
@@ -62,6 +63,7 @@ endfunction()
 # ── Test executables ───────────────────────────────────────────────────────
 add_infer_test(test_types)
 add_infer_test(test_config)
+add_infer_test(test_frame_retention_gc)
 add_infer_test(test_gpu_device_allocator)
 add_infer_test(test_iou_nms)
 add_infer_test(test_yolov5_decoder)

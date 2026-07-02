@@ -1,5 +1,5 @@
 server:
-  model_repository: "/var/folders/zs/4dx_7xz10vd_cqh50dr8y0jh0000gn/T/infer_repo_merge_59113"
+  model_repository: "/var/folders/zs/4dx_7xz10vd_cqh50dr8y0jh0000gn/T/infer_repo_merge_34839"
 sources:
   - id: cam_1
     url: rtsp://localhost/test

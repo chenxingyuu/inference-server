@@ -176,6 +176,12 @@ struct PublisherConfig {
     RedisConfig redis;
 };
 
+struct FrameRetentionConfig {
+    bool    enabled{false};
+    int64_t max_age_minutes{1440};
+    int     scan_interval_seconds{60};
+};
+
 struct FrameArchiveConfig {
     bool        enabled{false};
     bool        allow_gpu_frames{true};
@@ -184,6 +190,7 @@ struct FrameArchiveConfig {
     int         save_interval{1};      // save every N frames
     int         jpeg_quality{90};      // [1,100]
     int         queue_capacity{4096};  // async archive queue
+    FrameRetentionConfig retention;
 };
 
 struct AppConfig {

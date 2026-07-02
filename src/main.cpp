@@ -13,6 +13,7 @@
 #endif
 #include "server/UnixSocketServer.h"
 #include "archive/FrameArchiver.h"
+#include "archive/FrameRetentionGc.h"
 #include <csignal>
 #include <atomic>
 #include <cstdlib>
@@ -130,6 +131,8 @@ int main(int argc, char* argv[]) {
         publisher_registry.emplace(id, pub.get());
 
     auto frame_archiver = std::make_shared<infer::FrameArchiver>(cfg.frame_archive);
+    infer::FrameRetentionGc frame_gc(cfg.frame_archive);
+    frame_gc.start();
     infer::TaskManager task_manager(
         std::move(cfg), config_path, std::move(publisher_registry), frame_archiver);
     task_manager.loadAll();
@@ -153,6 +156,7 @@ int main(int argc, char* argv[]) {
     // Stop inference graphs first so RTSP/ffplay sinks don't race with shutdown.
     task_manager.stopAll();
 
+    frame_gc.stop();
     mgmt_server.stop();
 
     for (auto& [id, pub] : owned_publishers) pub->flush();

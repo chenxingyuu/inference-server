@@ -195,6 +195,9 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_EQ(cfg.frame_archive.save_interval, 2);
     EXPECT_EQ(cfg.frame_archive.jpeg_quality, 85);
     EXPECT_EQ(cfg.frame_archive.queue_capacity, 128);
+    EXPECT_FALSE(cfg.frame_archive.retention.enabled);
+    EXPECT_EQ(cfg.frame_archive.retention.max_age_minutes, 1440);
+    EXPECT_EQ(cfg.frame_archive.retention.scan_interval_seconds, 60);
 }
 
 TEST(LoadConfig, LogLevelDefaultsToInfo) {
@@ -792,6 +795,42 @@ TEST(LoadConfig, FrameArchiveWorkerCountMustBePositive) {
         out << "frame_archive:\n";
         out << "  enabled: true\n";
         out << "  worker_count: 0\n";
+    }
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, FrameArchiveRetentionParsesAndValidates) {
+    const std::string path = "data/test_frame_archive_retention.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n  - id: cam_1\n    url: rtsp://localhost/test\n";
+        out << "models:\n  - id: m1\n    version: yolov8\n    backend: tensorrt\n    input_size: [640, 640]\n";
+        out << "pipelines:\n  - id: p1\n    nodes:\n      - id: cam_1\n        type: source.rtsp\n";
+        out << "      - id: sink_1\n        type: sink.kafka\n    edges:\n      - from: cam_1\n        to: sink_1\n";
+        out << "tasks:\n  - id: t1\n    source_id: cam_1\n    pipeline_id: p1\n";
+        out << "publishers:\n  - id: pub1\n    type: kafka\n";
+        out << "frame_archive:\n  enabled: true\n  retention:\n    enabled: true\n";
+        out << "    max_age_minutes: 120\n    scan_interval_seconds: 30\n";
+    }
+    AppConfig cfg = loadConfig(path);
+    EXPECT_TRUE(cfg.frame_archive.retention.enabled);
+    EXPECT_EQ(cfg.frame_archive.retention.max_age_minutes, 120);
+    EXPECT_EQ(cfg.frame_archive.retention.scan_interval_seconds, 30);
+    std::remove(path.c_str());
+}
+
+TEST(LoadConfig, FrameArchiveRetentionInvalidMaxAgeThrows) {
+    const std::string path = "data/test_frame_archive_retention_invalid.yaml";
+    {
+        std::ofstream out(path);
+        out << "sources:\n  - id: cam_1\n    url: rtsp://localhost/test\n";
+        out << "models:\n  - id: m1\n    version: yolov8\n    backend: tensorrt\n    input_size: [640, 640]\n";
+        out << "pipelines:\n  - id: p1\n    nodes:\n      - id: cam_1\n        type: source.rtsp\n";
+        out << "      - id: sink_1\n        type: sink.kafka\n    edges:\n      - from: cam_1\n        to: sink_1\n";
+        out << "tasks:\n  - id: t1\n    source_id: cam_1\n    pipeline_id: p1\n";
+        out << "publishers:\n  - id: pub1\n    type: kafka\n";
+        out << "frame_archive:\n  enabled: true\n  retention:\n    enabled: true\n    max_age_minutes: 0\n";
     }
     EXPECT_THROW(loadConfig(path), std::runtime_error);
     std::remove(path.c_str());

@@ -40,6 +40,7 @@ public:
     void incInferBatches(const std::string& model_id);
     void incFramesArchived();
     void incFramesArchiveDropped();
+    void incFramesArchiveDeleted(uint64_t n = 1);
     void setFrameArchiveQueueDepth(uint64_t depth);
 
     // ── SinkFfplayStage metrics ───────────────────────────────────────────────
@@ -146,6 +147,7 @@ private:
     LabeledCounter        infer_batches_;
     std::atomic<uint64_t> frames_archived_{0};
     std::atomic<uint64_t> frames_archive_dropped_{0};
+    std::atomic<uint64_t> frames_archive_deleted_{0};
     std::atomic<uint64_t> frame_archive_queue_depth_{0};
 
     // Phase 10: stream-level health gauges
