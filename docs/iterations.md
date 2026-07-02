@@ -194,7 +194,7 @@
 
 **关键决策**：
 - 主推理线程只做归档任务入队，不做写盘，保持检测路径低延迟
-- 本地文件按 `stream_id/timestamp_frameSeq.jpg` 幂等命名，便于重放与追溯
+- 本地文件按 `stream_id/timestamp_frameSeq.jpg` 幂等命名，便于重放与追溯（**后于 2026-07 改为 UTC 时间分桶布局**，见文末「帧归档保留期」）
 
 ---
 
@@ -890,6 +890,24 @@ source.rtsp → infer.sahiScheduler → infer.engine → post.sahiMerge → trac
 **新增**：
 - **`DVPPDecoder`**：新增 `submit_ts_ns` 字段记录帧提交时间戳，解码回调中可计算单帧解码耗时
 - **`FFmpegDecoder`**：新增 `submit_mono_ns`，在 `avcodec_send_packet` 前记录，`avcodec_receive_frame` 后计算 `decode_duration_ms` 并输出 debug 日志，覆盖软解与硬解（NVDEC/CUVID）路径
+
+---
+
+## 帧归档保留期（TTL 分桶删除）
+
+**完成**：2026-07-02
+
+**目标**：本地 JPEG 归档无限增长会占满磁盘；在不遍历海量文件的前提下按 TTL 自动回收。
+
+**新增**：
+- **`FrameLayout`**（`include/archive/FrameLayout.h`）：共享路径约定 `{YYYYMMDD}/{HH}/{mm}/{stream_id}/{ts_ms}_{seq}.jpg`（UTC）
+- **`FrameRetentionGc`**：主进程独立后台线程，按 `frame_archive.retention.*` 定期分层剪枝（天/小时/分钟目录），过期整桶 `remove_all`
+- **配置**：`frame_archive.retention.enabled` / `max_age_minutes` / `scan_interval_seconds`
+- **指标**：`frames_archive_deleted_total`
+
+**关键决策**：
+- GC 与 `FrameArchiver` 解耦：写入热路径不变；`retention.enabled` 时可清理历史帧，即使当前未开启 `frame_archive.enabled`
+- TTL 最小粒度 1 分钟；GC 成本与保留窗口内目录数相关，与单桶内文件数无关
 
 ---
 

@@ -1165,6 +1165,14 @@
               },
               "expr": "rate(frames_archive_dropped_total[1m])",
               "legendFormat": "dropped"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "expr": "rate(frames_archive_deleted_total[1m])",
+              "legendFormat": "retention deleted"
             }
           ]
         },

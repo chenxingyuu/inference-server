@@ -141,6 +141,8 @@ echo '{"cmd":"stop_task","id":"task_cam_001"}' | socat - UNIX-CONNECT:./infer.so
 - `source.file`：本地视频文件输入
 - `archive.raw`：原图归档（复用 `FrameArchiver`，支持 `use_hwdec=true` 的 GPU 帧，默认开启）。须放在 `infer.engine` 下游，将 `frame_local_path` 写回 `InferResult` 后由 `sink.publish` 发出。
   - 可通过 `frame_archive.worker_count` 配置归档并发 worker 数（默认 `1`）。
+  - 本地路径按 UTC 时间分桶：`{YYYYMMDD}/{HH}/{mm}/{stream_id}/{ts_ms}_{seq}.jpg`（见 `include/archive/FrameLayout.h`）。
+  - 主进程独立后台组件 `FrameRetentionGc` 按分钟粒度 TTL 整目录删除过期桶（与 `frame_archive.enabled` 解耦；见下方 `retention` 配置）。
 - `infer.engine`：推理 stage（引用 `models[].id`）；DAG 路径下由 `InferWorkerGroup` 执行，内含 preprocess 与 YOLO decode，支持 `models[].instance_count` 与 `models[].device_ids`（每实例一个后端；`device_ids` 拼写须正确）。攒批策略与 `batch_size`、`max_queue_delay_us` 一致（与 `ModelManager` + `BatchScheduler` 的流池攒批路径不同）。
 - `infer.sahiScheduler`：SAHI 滑窗切块，将大分辨率帧切成重叠 tile 后送入下游 `infer.engine`，最后由 `infer.sahiMerge` 合并 NMS 结果。参数：`tile_width`、`tile_height`、`overlap_ratio`、`full_interval`（每 N 帧插入一次全图推理）、`max_tiles_per_frame`。
 - `track.bytetrack`：ByteTrack 追踪
@@ -181,6 +183,26 @@ publishers:
 
 订阅端示例见 `examples/grpc_subscriber/`（Python / Go）。构建时需加 `-DBUILD_GRPC_PUBLISHER=ON`（需 gRPC）或 `-DBUILD_REDIS_PUBLISHER=ON`（需 hiredis）。
 
+### 帧归档与保留期（`frame_archive`）
+
+```yaml
+frame_archive:
+  enabled: true
+  local_dir: "./data/frames"
+  save_interval: 1          # 每 N 帧写一张
+  jpeg_quality: 90
+  queue_capacity: 4096
+  worker_count: 1
+  retention:
+    enabled: true
+    max_age_minutes: 1440   # TTL，最小粒度 1 分钟
+    scan_interval_seconds: 60
+```
+
+- **写入**：`FrameArchiver` 异步队列 + 多 worker 写 JPEG，不阻塞推理热路径。
+- **回收**：`FrameRetentionGc` 只解析 `YYYYMMDD/HH/mm` 目录名，过期则 `remove_all` 整分钟桶，成本与文件总数无关。
+- **部署**：`local_dir` 建议挂独立卷；生产环境务必开启 `retention.enabled`，否则磁盘会无限增长。
+
 ### ONNX Runtime（CPU/MPS）注意事项
 
 当前 `OnnxBackend` 默认 **按 batch=1 运行**（一些 ORT 版本在输入 shape 自省上可能不稳定；且多数导出的 YOLO ONNX 为静态 batch=1）。
@@ -201,6 +223,7 @@ publishers:
 | `infer_batches_total` | counter | `model_id` | 已处理批次数 |
 | `frames_archived_total` | counter | 无 | 本地归档成功帧数 |
 | `frames_archive_dropped_total` | counter | 无 | 归档队列溢出或写盘失败 |
+| `frames_archive_deleted_total` | counter | 无 | 保留期 GC 删除的归档条目数 |
 | `frame_archive_queue_depth` | gauge | 无 | 当前归档队列深度 |
 
 ## 目标追踪（可选）
