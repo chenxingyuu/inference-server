@@ -187,6 +187,11 @@ struct FrameArchiveConfig {
     bool        allow_gpu_frames{true};
     int         worker_count{1};
     std::string local_dir{"./data/frames"};
+    // Public base URL of the file server (e.g. "http://frame-nginx:8082/frames").
+    // When set, frame_url is emitted as "{public_base_url}/{object_key}" so downstream
+    // consumers get a directly fetchable URL. When empty, frame_url falls back to the
+    // relative object key (backward compatible).
+    std::string public_base_url;
     int         save_interval{1};      // save every N frames
     int         jpeg_quality{90};      // [1,100]
     int         queue_capacity{4096};  // async archive queue

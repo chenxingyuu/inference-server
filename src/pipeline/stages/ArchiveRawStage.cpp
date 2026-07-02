@@ -79,7 +79,7 @@ void ArchiveRawStage::process(const EventEnvelope& input, const EmitFn& emit) {
         auto result = archiver_->submit(input.frame->meta, &archivable);
         if (out.infer_result) {
             out.infer_result->frame_local_path = result.local_path;
-            out.infer_result->frame_url = result.object_key;
+            out.infer_result->frame_url = result.frame_url;
         }
     }
     emit(out);

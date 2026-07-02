@@ -67,6 +67,35 @@ TEST(ArchiveRawStageTest, CpuFrameWritesFrameLocalPathOnInferResult) {
     EXPECT_TRUE(out.infer_result->frame_local_path.find(out.infer_result->frame_url) != std::string::npos);
 }
 
+TEST(ArchiveRawStageTest, PublicBaseUrlProducesFullFrameUrl) {
+    FrameArchiveConfig cfg;
+    cfg.enabled = true;
+    cfg.local_dir = makeTempDir("baseurl");
+    cfg.public_base_url = "http://frame-nginx:8082/frames/";  // trailing slash trimmed
+    cfg.save_interval = 1;
+    cfg.jpeg_quality = 90;
+    cfg.queue_capacity = 16;
+
+    auto archiver = std::make_shared<FrameArchiver>(cfg);
+    ArchiveRawStage stage("archive_stage", archiver, true);
+
+    auto frame = std::make_shared<Frame>(makeFrame("cam_url", 1));
+    frame->is_gpu = false;
+    frame->image = cv::Mat::zeros(8, 8, CV_8UC3);
+
+    EventEnvelope in;
+    in.frame = frame;
+    in.infer_result = makeInferResult("cam_url", 1);
+
+    EventEnvelope out;
+    stage.process(in, [&](EventEnvelope e) { out = std::move(e); });
+
+    ASSERT_TRUE(out.infer_result.has_value());
+    EXPECT_EQ(out.infer_result->frame_url,
+              "http://frame-nginx:8082/frames/20260424/10/16/cam_url/1777025798000_1.jpg");
+    EXPECT_TRUE(out.infer_result->frame_local_path.find("cam_url") != std::string::npos);
+}
+
 TEST(ArchiveRawStageTest, GpuFrameWithFallbackImageShouldStillArchive) {
     FrameArchiveConfig cfg;
     cfg.enabled = true;

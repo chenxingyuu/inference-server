@@ -43,6 +43,15 @@ std::string FrameArchiver::buildLocalPath(const StreamMeta& meta) const {
     return p.string();
 }
 
+std::string FrameArchiver::buildFrameUrl(const std::string& object_key) const {
+    if (cfg_.public_base_url.empty()) {
+        return object_key;  // backward compatible: relative object key
+    }
+    std::string base = cfg_.public_base_url;
+    while (!base.empty() && base.back() == '/') base.pop_back();
+    return base + "/" + object_key;
+}
+
 bool FrameArchiver::enqueue(ArchiveTask task) {
     std::unique_lock<std::mutex> lock(mu_);
     if (queue_.size() >= static_cast<std::size_t>(cfg_.queue_capacity)) {
@@ -78,6 +87,7 @@ FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* 
     const std::string object_key = buildObjectKey(meta);
     out.local_path = fs::path(cfg_.local_dir).append(object_key).string();
     out.object_key = object_key;
+    out.frame_url = buildFrameUrl(object_key);
     out.upload_state = "queued";
 
     ArchiveTask task;

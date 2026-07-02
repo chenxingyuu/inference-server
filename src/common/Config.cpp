@@ -732,6 +732,7 @@ AppConfig loadConfig(const std::string& yaml_path) {
         cfg.frame_archive.allow_gpu_frames = an["allow_gpu_frames"].as<bool>(true);
         cfg.frame_archive.worker_count   = an["worker_count"].as<int>(1);
         cfg.frame_archive.local_dir      = an["local_dir"].as<std::string>("./data/frames");
+        cfg.frame_archive.public_base_url = an["public_base_url"].as<std::string>("");
         cfg.frame_archive.save_interval  = an["save_interval"].as<int>(1);
         cfg.frame_archive.jpeg_quality   = an["jpeg_quality"].as<int>(90);
         cfg.frame_archive.queue_capacity = an["queue_capacity"].as<int>(4096);

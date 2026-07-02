@@ -38,6 +38,6 @@ message DetectionFrame {
   string   model_id    = 5;
   uint64   frame_seq   = 6;
   repeated Detection detections = 7;
-  string   frame_local_path = 8;
-  string   frame_url = 9;
+  string   frame_local_path = 8;  // absolute local path on the inference host
+  string   frame_url = 9;          // full fetchable URL when public_base_url set, else relative object key
 }
