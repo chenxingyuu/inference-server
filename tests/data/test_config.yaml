@@ -56,25 +56,16 @@ pipelines:
           model_id: yolo_det
       - id: track_1
         type: track.bytetrack
-      - id: join_1
-        type: join.byFrameId
       - id: sink_1
-        type: sink.kafka
+        type: sink.publish
     edges:
-      - from: cam_01
-        to: archive_1
-        queue:
-          capacity: 128
-          drop_policy: drop_oldest
       - from: cam_01
         to: infer_1
       - from: infer_1
         to: track_1
       - from: track_1
-        to: join_1
+        to: archive_1
       - from: archive_1
-        to: join_1
-      - from: join_1
         to: sink_1
 
 tasks:

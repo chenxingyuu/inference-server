@@ -11,14 +11,12 @@ Two sampling modes are available via `tasks[].sampling_mode`:
 - **`time_based`**: emit a frame only when `frame_pts_sec − last_emit_pts ≥ 1.0 / sample_fps`; falls back to `frame_count` logic when PTS is unavailable.
 
 1. Source ingest (`source.rtsp` / `source.file`): default `FFmpegDecoder` (optional NVDEC via `use_hwdec`); on Ascend builds with `use_ascend_dvpp: true`, `DVPPDecoder` demuxes with FFmpeg and hardware-decodes to NPU HBM (see **Ascend ingest** below).
-2. Fan-out to parallel branches (e.g. `archive.raw` and inference path).
-3. Optional frame archiving (`archive.raw` via `FrameArchiver` → local JPEG).
-4. Inference (`infer.engine` → `InferEngineWorkerStage` → `InferWorkerGroup` using `TRTBackend` / `AscendBackend` / `OnnxBackend`) with per-edge backpressure. The stage accumulates frames into a batch and flushes when the batch is full **or** a background deadline timer fires (`max_queue_delay_us / 2` poll interval), ensuring low-fps streams are not stalled waiting for the next frame. `models[].instance_count` and `models[].device_ids` select parallel workers (see `InferWorkerGroup`). A separate hot-path (`ModelManager` + `BatchScheduler` + `InferWorkerGroup`) still exists for stream-pool–centric scheduling; the DAG stage does not use `BatchScheduler`.
-5. YOLO decode (`IYOLODecoder` / `ClassifierDecoder`) and optional tracking (`track.bytetrack`) — decode runs inside each `InferWorker` after the backend forward pass.
-6. Optional join/merge (`join.byFrameId`) to enrich inference results with archive metadata.
-7. Optional draw + output: restream via ffmpeg pipe (`sink.stream` → RTSP/RTMP), or local preview via `ffplay` stdin (`sink.ffplay`, raw BGR). For task-shared pipelines, `sink.stream.with.output_url` supports task-time placeholders `{task_id}` / `{source_id}` (unknown tokens are rejected).
-8. Publish via `buildPublisher()` factory (see **Publishers** section below).
-9. Background heartbeat emission (`HeartbeatPublisher`) and the management plane (see **Management plane** below).
+2. Inference (`infer.engine` → `InferEngineWorkerStage` → `InferWorkerGroup` using `TRTBackend` / `AscendBackend` / `OnnxBackend`) with per-edge backpressure. The stage accumulates frames into a batch and flushes when the batch is full **or** a background deadline timer fires (`max_queue_delay_us / 2` poll interval), ensuring low-fps streams are not stalled waiting for the next frame. `models[].instance_count` and `models[].device_ids` select parallel workers (see `InferWorkerGroup`). A separate hot-path (`ModelManager` + `BatchScheduler` + `InferWorkerGroup`) still exists for stream-pool–centric scheduling; the DAG stage does not use `BatchScheduler`.
+3. YOLO decode (`IYOLODecoder` / `ClassifierDecoder`) and optional tracking (`track.bytetrack`) — decode runs inside each `InferWorker` after the backend forward pass.
+4. Optional frame archiving (`archive.raw` via `FrameArchiver` → local JPEG). Must be placed **after** `infer.engine` so it can write `frame_local_path` back onto `InferResult` before publish.
+5. Optional draw + output: restream via ffmpeg pipe (`sink.stream` → RTSP/RTMP), or local preview via `ffplay` stdin (`sink.ffplay`, raw BGR). For task-shared pipelines, `sink.stream.with.output_url` supports task-time placeholders `{task_id}` / `{source_id}` (unknown tokens are rejected).
+6. Publish via `buildPublisher()` factory (see **Publishers** section below).
+7. Background heartbeat emission (`HeartbeatPublisher`) and the management plane (see **Management plane** below).
 
 ## Management plane
 

@@ -4,7 +4,6 @@
 #include "pipeline/stages/DrawAndStreamStage.h"
 #include "pipeline/stages/InferEngineWorkerStage.h"
 #include "pipeline/stages/SinkFfplayStage.h"
-#include "pipeline/stages/JoinByFrameStage.h"
 #include "pipeline/stages/SahiMergeStage.h"
 #include "pipeline/stages/SahiSchedulerStage.h"
 #include "pipeline/stages/SinkKafkaStage.h"
@@ -117,9 +116,6 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         bt.min_hits_to_confirm = getIntWithDefault(cfg.with, "min_hits_to_confirm", bt.min_hits_to_confirm);
         bt.max_lost_frames = getIntWithDefault(cfg.with, "max_lost_frames", bt.max_lost_frames);
         return std::make_unique<TrackByteTrackStage>(cfg.id, bt);
-    }
-    if (cfg.type == "join.byFrameId") {
-        return std::make_unique<JoinByFrameStage>(cfg.id);
     }
     if (cfg.type == "infer.sahiScheduler") {
         SahiSchedulerConfig sahi_cfg;

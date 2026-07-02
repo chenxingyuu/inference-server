@@ -189,7 +189,7 @@
 **新增**：
 - `frame_archive` 配置块：本地目录、采样间隔、JPEG 质量、队列容量
 - `FrameArchiver`：异步队列写本地 JPEG（后台线程）
-- `InferResult` 新字段：`frame_local_path` / `frame_url`（保留空串）/ `frame_upload_state`（`queued`/`failed`/`disabled`）
+- `InferResult` 新字段：`frame_local_path` / `frame_url`（保留空串）
 - `KafkaPublisher`：单事件输出 frame 元数据，不等待写盘完成
 
 **关键决策**：
@@ -240,12 +240,12 @@
 
 **完成**：2026-04-16
 
-**目标**：将固定式 `streams -> model_id` 的链路升级为可编排 DAG pipeline，支持分支并行与汇合（例如 `decode -> {archive, infer} -> join`）。
+**目标**：将固定式 `streams -> model_id` 的链路升级为可编排 DAG pipeline，支持分支并行与串行归档（例如 `infer -> archive -> sink`）。
 
 **新增**：
 - 新配置格式：`sources`（输入源）+ `pipelines`（仅 nodes/edges 的图模板）+ `tasks`（`source_id` + `pipeline_id`，运行实例）
 - 运行时：`TaskManager` + `GraphExecutor` + `EdgeQueue`（每条边独立背压策略；每个 task 一份 executor）
-- Stage：`source.rtsp` / `infer.engine` / `archive.raw` / `track.bytetrack` / `join.byFrameId` / `sink.kafka`（其余为占位 passthrough）
+- Stage：`source.rtsp` / `infer.engine` / `archive.raw` / `track.bytetrack` / `sink.publish`（其余为占位 passthrough）
 - 管理接口：`GET /tasks`、`POST /tasks/{id}/start|stop`
 
 **关键决策**：

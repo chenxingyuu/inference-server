@@ -27,9 +27,18 @@ Frame makeFrame(const std::string& stream_id, uint64_t frame_seq) {
     return f;
 }
 
+InferResult makeInferResult(const std::string& stream_id, uint64_t frame_seq) {
+    InferResult r;
+    r.stream_id = stream_id;
+    r.frame_seq = frame_seq;
+    r.frame_ts = 1777025798.0;
+    r.model_id = "yolo_det";
+    return r;
+}
+
 } // namespace
 
-TEST(ArchiveRawStageTest, CpuFrameWritesArchiveInfoLocalPath) {
+TEST(ArchiveRawStageTest, CpuFrameWritesFrameLocalPathOnInferResult) {
     FrameArchiveConfig cfg;
     cfg.enabled = true;
     cfg.local_dir = makeTempDir("cpu");
@@ -46,12 +55,14 @@ TEST(ArchiveRawStageTest, CpuFrameWritesArchiveInfoLocalPath) {
 
     EventEnvelope in;
     in.frame = frame;
+    in.infer_result = makeInferResult("cam_cpu", 1);
 
     EventEnvelope out;
     stage.process(in, [&](EventEnvelope e) { out = std::move(e); });
 
-    ASSERT_TRUE(out.archive_info.has_value());
-    EXPECT_FALSE(out.archive_info->local_path.empty());
+    ASSERT_TRUE(out.infer_result.has_value());
+    EXPECT_FALSE(out.infer_result->frame_local_path.empty());
+    EXPECT_TRUE(out.infer_result->frame_local_path.find("cam_cpu") != std::string::npos);
 }
 
 TEST(ArchiveRawStageTest, GpuFrameWithFallbackImageShouldStillArchive) {
@@ -71,12 +82,37 @@ TEST(ArchiveRawStageTest, GpuFrameWithFallbackImageShouldStillArchive) {
 
     EventEnvelope in;
     in.frame = frame;
+    in.infer_result = makeInferResult("cam_gpu", 2);
 
     EventEnvelope out;
     stage.process(in, [&](EventEnvelope e) { out = std::move(e); });
 
-    ASSERT_TRUE(out.archive_info.has_value());
-    EXPECT_FALSE(out.archive_info->local_path.empty());
+    ASSERT_TRUE(out.infer_result.has_value());
+    EXPECT_FALSE(out.infer_result->frame_local_path.empty());
+}
+
+TEST(ArchiveRawStageTest, WithoutInferResultDoesNotSetPath) {
+    FrameArchiveConfig cfg;
+    cfg.enabled = true;
+    cfg.local_dir = makeTempDir("no_infer");
+    cfg.save_interval = 1;
+    cfg.jpeg_quality = 90;
+    cfg.queue_capacity = 16;
+
+    auto archiver = std::make_shared<FrameArchiver>(cfg);
+    ArchiveRawStage stage("archive_stage", archiver, true);
+
+    auto frame = std::make_shared<Frame>(makeFrame("cam_only", 3));
+    frame->is_gpu = false;
+    frame->image = cv::Mat::zeros(8, 8, CV_8UC3);
+
+    EventEnvelope in;
+    in.frame = frame;
+
+    EventEnvelope out;
+    stage.process(in, [&](EventEnvelope e) { out = std::move(e); });
+
+    EXPECT_FALSE(out.infer_result.has_value());
 }
 
 } // namespace infer

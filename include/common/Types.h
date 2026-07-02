@@ -152,7 +152,6 @@ struct InferResult {
     uint64_t                 frame_mono_ns{0};
     std::string              frame_local_path;   // local archived frame path
     std::string              frame_url;          // reserved (empty); legacy Kafka field
-    std::string              frame_upload_state; // queued|failed|disabled (local async archive)
 };
 
 // ── Device type ───────────────────────────────────────────────────────────────

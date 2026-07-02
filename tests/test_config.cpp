@@ -158,8 +158,8 @@ TEST(LoadConfig, ParsesFullYaml) {
     // pipelines (templates, no source_id)
     ASSERT_EQ(cfg.pipelines.size(), 1u);
     EXPECT_EQ(cfg.pipelines[0].id, "pipe_01");
-    ASSERT_EQ(cfg.pipelines[0].nodes.size(), 6u);
-    ASSERT_EQ(cfg.pipelines[0].edges.size(), 6u);
+    ASSERT_EQ(cfg.pipelines[0].nodes.size(), 5u);
+    ASSERT_EQ(cfg.pipelines[0].edges.size(), 4u);
     EXPECT_EQ(cfg.pipelines[0].nodes[2].type, "infer.engine");
     EXPECT_EQ(cfg.pipelines[0].nodes[2].with.at("model_id"), "yolo_det");
 

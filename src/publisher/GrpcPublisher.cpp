@@ -96,6 +96,7 @@ inference::DetectionFrame GrpcPublisher::toProto(const InferResult& r) {
     frame.set_latency_ms(r.latency_ms);
     frame.set_model_id(r.model_id);
     frame.set_frame_seq(r.frame_seq);
+    frame.set_frame_local_path(r.frame_local_path);
 
     for (const auto& d : r.detections) {
         auto* det = frame.add_detections();

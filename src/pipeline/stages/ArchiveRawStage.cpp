@@ -77,15 +77,10 @@ void ArchiveRawStage::process(const EventEnvelope& input, const EmitFn& emit) {
     const bool should_attempt_archive = !input.frame || !input.frame->is_gpu || allow_gpu_frames_;
     if (archiver_ && input.frame && should_attempt_archive && toArchivableMat(*input.frame, archivable)) {
         auto result = archiver_->submit(input.frame->meta, &archivable);
-        out.archive_info = ArchiveInfo{result.local_path, result.upload_state};
-    } else {
-        if (input.frame && input.frame->is_gpu && archiver_ && allow_gpu_frames_) {
-            LOG_WARN("ArchiveRawStage: unable to archive GPU frame stream={} seq={}",
-                     input.frame->meta.stream_id,
-                     input.frame->meta.frame_seq);
+        if (out.infer_result) {
+            out.infer_result->frame_local_path = result.local_path;
+            out.infer_result->frame_url.clear();
         }
-        // Archive disabled/unavailable: set disabled so JoinByFrameStage is not blocked.
-        out.archive_info = ArchiveInfo{"", "disabled"};
     }
     emit(out);
 }

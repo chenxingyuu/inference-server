@@ -179,7 +179,6 @@ const en = {
   'pipelines.node.category.infer':       'Inference',
   'pipelines.node.category.postprocess': 'Post-process',
   'pipelines.node.category.track':       'Tracking',
-  'pipelines.node.category.join':        'Join',
   'pipelines.node.category.archive':     'Archive',
   'pipelines.node.category.sink':        'Sink',
 
@@ -189,7 +188,6 @@ const en = {
   'pipelines.node.type.infer.engine':        'Inference engine',
   'pipelines.node.type.post.sahiMerge':      'SAHI merge',
   'pipelines.node.type.track.bytetrack':     'ByteTrack',
-  'pipelines.node.type.join.byFrameId':      'Join by frame ID',
   'pipelines.node.type.archive.raw':         'Raw archive',
   'pipelines.node.type.sink.publish':        'Publish sink',
   'pipelines.node.type.sink.ffplay':         'FFplay preview',
@@ -397,7 +395,6 @@ const zh: Record<keyof typeof en, string> = {
   'pipelines.node.category.infer':       '推理',
   'pipelines.node.category.postprocess': '后处理',
   'pipelines.node.category.track':       '跟踪',
-  'pipelines.node.category.join':        '合并',
   'pipelines.node.category.archive':     '归档',
   'pipelines.node.category.sink':        '输出',
 
@@ -407,7 +404,6 @@ const zh: Record<keyof typeof en, string> = {
   'pipelines.node.type.infer.engine':        '推理引擎',
   'pipelines.node.type.post.sahiMerge':      'SAHI 合并',
   'pipelines.node.type.track.bytetrack':     'ByteTrack 跟踪',
-  'pipelines.node.type.join.byFrameId':      '按帧 ID 合并',
   'pipelines.node.type.archive.raw':         '原始归档',
   'pipelines.node.type.sink.publish':        '发布输出',
   'pipelines.node.type.sink.ffplay':         'FFplay 预览',

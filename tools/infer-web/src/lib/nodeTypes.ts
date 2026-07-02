@@ -51,7 +51,6 @@ export const NODE_TYPE_DEFS: NodeTypeDef[] = [
     { k: 'min_hits_to_confirm', v: '2',   type: 'number', min: 1, step: 1,             description: { en: 'Consecutive detections required to confirm a new track',              zh: '确认新轨迹所需的连续检测帧数' } },
     { k: 'max_lost_frames',     v: '30',  type: 'number', min: 1, step: 1,             description: { en: 'Frames a track can disappear before being dropped',                   zh: '轨迹消失超过此帧数后被删除' } },
   ]},
-  { type: 'join.byFrameId',    category: 'join',        withTemplate: [] },
   { type: 'archive.raw',       category: 'archive',     withTemplate: [] },
   { type: 'sink.publish',      category: 'sink',        withTemplate: [
     { k: 'to', v: '', type: 'string', description: { en: 'Name of the publisher to route results to (e.g. kafka, redis)', zh: '结果路由到的发布者名称（如 kafka、redis）' } },
@@ -84,7 +83,7 @@ export const NODE_TYPE_DEFS: NodeTypeDef[] = [
   ]},
 ]
 
-export const NODE_CATEGORIES = ['source', 'infer', 'postprocess', 'track', 'join', 'archive', 'sink'] as const
+export const NODE_CATEGORIES = ['source', 'infer', 'postprocess', 'track', 'archive', 'sink'] as const
 
 export const getNodeTypeDef = (type: string) =>
   NODE_TYPE_DEFS.find((d) => d.type === type)

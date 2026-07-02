@@ -7,11 +7,6 @@
 
 namespace infer {
 
-struct ArchiveInfo {
-    std::string local_path;
-    std::string upload_state;
-};
-
 struct SahiTileInfo {
     uint64_t parent_frame_seq{0};
     uint64_t tile_frame_seq{0};
@@ -37,7 +32,6 @@ struct EventEnvelope {
     std::shared_ptr<Frame> frame;
     std::optional<SahiTileInfo> sahi_tile;
     std::optional<InferResult> infer_result;
-    std::optional<ArchiveInfo> archive_info;
 };
 
 } // namespace infer

@@ -150,7 +150,6 @@ set(PIPELINE_SOURCES
     src/pipeline/stages/SinkFfplayStage.cpp
     src/pipeline/stages/InferEngineStage.cpp
     src/pipeline/stages/InferEngineWorkerStage.cpp
-    src/pipeline/stages/JoinByFrameStage.cpp
     src/pipeline/stages/SahiMergeStage.cpp
     src/pipeline/stages/SahiRoiRegistry.cpp
     src/pipeline/stages/SahiSchedulerStage.cpp

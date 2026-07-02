@@ -38,4 +38,5 @@ message DetectionFrame {
   string   model_id    = 5;
   uint64   frame_seq   = 6;
   repeated Detection detections = 7;
+  string   frame_local_path = 8;
 }

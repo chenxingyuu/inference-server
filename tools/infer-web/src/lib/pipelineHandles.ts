@@ -14,9 +14,6 @@ export function getHandleConfig(stageType: string): HandleConfig {
   if (stageType.startsWith('sink.')) {
     return { inputs: 'single', outputs: 'none' }
   }
-  if (stageType === 'join.byFrameId') {
-    return { inputs: 'multi', outputs: 'single' }
-  }
   return { inputs: 'single', outputs: 'single' }
 }
 
@@ -27,7 +24,6 @@ export function getCategoryColor(stageType: string): string {
     infer: '#a855f7',
     postprocess: '#f59e0b',
     track: '#06b6d4',
-    join: '#ec4899',
     archive: '#64748b',
     sink: '#ef4444',
   }

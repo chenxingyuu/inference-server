@@ -41,6 +41,7 @@ static InferResult makeResult(const std::string& stream_id = "cam_01") {
     r.stream_id  = stream_id;
     r.frame_ts   = 1.0;
     r.model_id   = "yolov8";
+    r.frame_local_path = "/data/frames/cam_01/1000_1.jpg";
     Detection d;
     d.class_id   = 1;
     d.class_name = "car";
@@ -87,6 +88,27 @@ TEST(RedisPublisher, XaddCalledWithCorrectKey) {
     std::lock_guard<std::mutex> lock(raw->mu);
     ASSERT_EQ(raw->calls.size(), 1u);
     EXPECT_EQ(raw->calls[0].key, "infer:stream_99");
+}
+
+TEST(RedisPublisher, JsonPayloadIncludesFrameLocalPath) {
+    auto mock = std::make_unique<MockRedisClient>();
+    auto* raw = mock.get();
+    RedisPublisher pub(makeCfg(), std::move(mock));
+
+    pub.publish(makeResult("cam_02"));
+    pub.flush();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::lock_guard<std::mutex> lock(raw->mu);
+    ASSERT_FALSE(raw->calls.empty());
+    bool found_path = false;
+    for (const auto& [k, v] : raw->calls[0].fields) {
+        if (k == "data") {
+            found_path = (v.find("frame_local_path") != std::string::npos &&
+                          v.find("/data/frames/cam_01/1000_1.jpg") != std::string::npos);
+        }
+    }
+    EXPECT_TRUE(found_path);
 }
 
 TEST(RedisPublisher, XaddCarriesJsonPayload) {

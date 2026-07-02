@@ -152,8 +152,7 @@ std::string KafkaPublisher::serialize(const InferResult& r) const {
         {"model_id",          r.model_id},
         {"detections",        dets},
         {"frame_local_path",  r.frame_local_path},
-        {"frame_url",         r.frame_url},
-        {"frame_upload_state",r.frame_upload_state}
+        {"frame_url",         r.frame_url}
     };
     return msg.dump();
 }
