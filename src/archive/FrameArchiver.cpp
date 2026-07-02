@@ -77,6 +77,7 @@ FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* 
 
     const std::string object_key = buildObjectKey(meta);
     out.local_path = fs::path(cfg_.local_dir).append(object_key).string();
+    out.object_key = object_key;
     out.upload_state = "queued";
 
     ArchiveTask task;

@@ -21,6 +21,7 @@ static InferResult makeResult(const std::string& stream_id = "cam_01",
     r.model_id   = "yolov8m";
     r.frame_seq  = 7;
     r.frame_local_path = "/data/frames/cam_01/1777025798000_7.jpg";
+    r.frame_url = "20260424/10/16/cam_01/1777025798000_7.jpg";
     Detection d;
     d.class_id   = 0;
     d.class_name = "person";
@@ -144,6 +145,7 @@ TEST_F(GrpcPublisherTest, ProtoFieldsMatchInferResult) {
     EXPECT_FLOAT_EQ(d.bbox().x1(), 10.f);
     EXPECT_FLOAT_EQ(d.bbox().y2(), 200.f);
     EXPECT_EQ(got.frame_local_path(), "/data/frames/cam_01/1777025798000_7.jpg");
+    EXPECT_EQ(got.frame_url(), "20260424/10/16/cam_01/1777025798000_7.jpg");
 }
 
 TEST_F(GrpcPublisherTest, MultipleSubscribersEachReceive) {

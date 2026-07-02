@@ -41,7 +41,7 @@ publishers:
 
 frame_archive:
   enabled: false
-  local_dir: "./data/frames"
+  local_dir: "/data/frames"
   save_interval: 1
   jpeg_quality: 90
   queue_capacity: 4096

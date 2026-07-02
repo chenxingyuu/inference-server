@@ -116,6 +116,7 @@ std::string RedisPublisher::serialize(const InferResult& r) const {
     j["model_id"]   = r.model_id;
     j["frame_seq"]  = r.frame_seq;
     j["frame_local_path"] = r.frame_local_path;
+    j["frame_url"] = r.frame_url;
     j["detections"] = nlohmann::json::array();
     for (const auto& d : r.detections) {
         nlohmann::json det;

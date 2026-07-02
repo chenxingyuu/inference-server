@@ -13,6 +13,7 @@ services:
       - ../config:/config:ro
       - /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro
       - infer-socket:/var/run/infer
+      - infer-frames:/data/frames
     command: ["/app/infer_server", "/config/config.yaml"]
     environment:
       - ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
@@ -27,6 +28,18 @@ services:
       options:
         max-size: "100m"
         max-file: "5"
+  # ── Frame archive static file server (nginx) ───────────────────────────────
+  frame-nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8082:80"
+    volumes:
+      - infer-frames:/data/frames:ro
+      - ../config/frame-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - infer-ascend
+    restart: unless-stopped
+
   # ── Web UI ────────────────────────────────────────────────────────────────
   infer-web:
     image: registry.cn-hangzhou.aliyuncs.com/daxx/infer-web:latest
@@ -93,3 +106,4 @@ volumes:
   kafka-data:
   infer-socket:
   infer-state:
+  infer-frames:

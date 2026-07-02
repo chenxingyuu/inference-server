@@ -63,6 +63,8 @@ TEST(ArchiveRawStageTest, CpuFrameWritesFrameLocalPathOnInferResult) {
     ASSERT_TRUE(out.infer_result.has_value());
     EXPECT_FALSE(out.infer_result->frame_local_path.empty());
     EXPECT_TRUE(out.infer_result->frame_local_path.find("cam_cpu") != std::string::npos);
+    EXPECT_EQ(out.infer_result->frame_url, "20260424/10/16/cam_cpu/1777025798000_1.jpg");
+    EXPECT_TRUE(out.infer_result->frame_local_path.find(out.infer_result->frame_url) != std::string::npos);
 }
 
 TEST(ArchiveRawStageTest, GpuFrameWithFallbackImageShouldStillArchive) {
@@ -89,6 +91,7 @@ TEST(ArchiveRawStageTest, GpuFrameWithFallbackImageShouldStillArchive) {
 
     ASSERT_TRUE(out.infer_result.has_value());
     EXPECT_FALSE(out.infer_result->frame_local_path.empty());
+    EXPECT_EQ(out.infer_result->frame_url, "20260424/10/16/cam_gpu/1777025798000_2.jpg");
 }
 
 TEST(ArchiveRawStageTest, WithoutInferResultDoesNotSetPath) {

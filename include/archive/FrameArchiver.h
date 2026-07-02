@@ -16,6 +16,7 @@ namespace infer {
 
 struct FrameArchiveResult {
     std::string local_path;
+    std::string object_key;   // relative path under local_dir (for frame_url)
     std::string upload_state{"disabled"};
 };
 

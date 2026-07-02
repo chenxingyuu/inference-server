@@ -42,6 +42,7 @@ static InferResult makeResult(const std::string& stream_id = "cam_01") {
     r.frame_ts   = 1.0;
     r.model_id   = "yolov8";
     r.frame_local_path = "/data/frames/cam_01/1000_1.jpg";
+    r.frame_url = "cam_01/1000_1.jpg";
     Detection d;
     d.class_id   = 1;
     d.class_name = "car";
@@ -102,13 +103,17 @@ TEST(RedisPublisher, JsonPayloadIncludesFrameLocalPath) {
     std::lock_guard<std::mutex> lock(raw->mu);
     ASSERT_FALSE(raw->calls.empty());
     bool found_path = false;
+    bool found_url = false;
     for (const auto& [k, v] : raw->calls[0].fields) {
         if (k == "data") {
             found_path = (v.find("frame_local_path") != std::string::npos &&
                           v.find("/data/frames/cam_01/1000_1.jpg") != std::string::npos);
+            found_url = (v.find("frame_url") != std::string::npos &&
+                         v.find("cam_01/1000_1.jpg") != std::string::npos);
         }
     }
     EXPECT_TRUE(found_path);
+    EXPECT_TRUE(found_url);
 }
 
 TEST(RedisPublisher, XaddCarriesJsonPayload) {

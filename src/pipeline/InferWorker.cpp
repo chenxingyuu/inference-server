@@ -210,7 +210,7 @@ void InferWorker::workerLoop() {
                     }
 #endif
                     r.frame_local_path   = ar.local_path;
-                    r.frame_url.clear();
+                    r.frame_url          = ar.object_key;
                     LOG_DEBUG("InferWorker[{}]: archive stream={} path={}",
                               model_cfg_.id, r.stream_id,
                               ar.local_path.empty() ? "(skipped)" : ar.local_path);
