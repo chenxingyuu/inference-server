@@ -13,7 +13,8 @@ namespace fs = std::filesystem;
 namespace {
 
 bool writeJpegAtomically(const std::string& final_path, const cv::Mat& frame, int jpeg_quality) {
-    const std::string tmp_path = final_path + ".tmp";
+    const fs::path fp(final_path);
+    const std::string tmp_path = (fp.parent_path() / (".tmp_" + fp.filename().string())).string();
     std::error_code ec;
     fs::create_directories(fs::path(final_path).parent_path(), ec);
     if (ec) {

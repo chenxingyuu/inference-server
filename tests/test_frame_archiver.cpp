@@ -93,7 +93,8 @@ TEST(FrameArchiverTest, AtomicWriteLeavesNoTmpFile) {
     ASSERT_EQ(result.upload_state, "queued");
 
     const std::filesystem::path final_path(result.local_path);
-    const std::filesystem::path tmp_path = final_path.string() + ".tmp";
+    const std::filesystem::path tmp_path =
+        final_path.parent_path() / (".tmp_" + final_path.filename().string());
     ASSERT_TRUE(waitForFile(final_path, std::chrono::seconds(2)));
 
     EXPECT_FALSE(std::filesystem::exists(tmp_path)) << "orphan tmp file: " << tmp_path;
