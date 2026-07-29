@@ -10,6 +10,34 @@ namespace infer {
 
 namespace fs = std::filesystem;
 
+namespace {
+
+bool writeJpegAtomically(const std::string& final_path, const cv::Mat& frame, int jpeg_quality) {
+    const std::string tmp_path = final_path + ".tmp";
+    std::error_code ec;
+    fs::create_directories(fs::path(final_path).parent_path(), ec);
+    if (ec) {
+        LOG_WARN("FrameArchiver: failed to create directories for {}: {}", final_path, ec.message());
+        return false;
+    }
+
+    const std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, jpeg_quality};
+    if (!cv::imwrite(tmp_path, frame, params)) {
+        fs::remove(tmp_path, ec);
+        return false;
+    }
+
+    fs::rename(tmp_path, final_path, ec);
+    if (ec) {
+        LOG_WARN("FrameArchiver: rename {} -> {} failed: {}", tmp_path, final_path, ec.message());
+        fs::remove(tmp_path, ec);
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
 FrameArchiver::FrameArchiver(FrameArchiveConfig cfg)
     : cfg_(std::move(cfg)) {
     if (!cfg_.enabled) {
@@ -118,9 +146,7 @@ void FrameArchiver::workerLoop() {
 
         try {
             const auto write_start = std::chrono::steady_clock::now();
-            fs::create_directories(fs::path(task.local_path).parent_path());
-            std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, cfg_.jpeg_quality};
-            if (!cv::imwrite(task.local_path, task.frame, params)) {
+            if (!writeJpegAtomically(task.local_path, task.frame, cfg_.jpeg_quality)) {
                 Metrics::get().incFramesArchiveDropped();
                 LOG_WARN("FrameArchiver: failed to write local frame {}", task.local_path);
                 continue;
