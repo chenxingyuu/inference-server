@@ -22,7 +22,7 @@ Two sampling modes are available via `tasks[].sampling_mode`:
 
 | Component | Role |
 |-----------|------|
-| `FrameArchiver` | Hot-path async JPEG writer; multi-worker queue under `frame_archive.*`; writes to `{path}.tmp` then atomically `rename`s to the final path so readers never see a partial file |
+| `FrameArchiver` | Hot-path async JPEG writer; multi-worker queue under `frame_archive.*`; writes to `{path}.tmp` then atomically `rename`s to the final path so readers never see a partial file. On queue-full drop, clears `frame_url` / `frame_local_path` so publish does not advertise a missing object. |
 | `FrameLayout` | Shared path convention for writers and GC (`include/archive/FrameLayout.h`) |
 | `FrameRetentionGc` | Independent background thread in `main`; prunes expired minute buckets by directory name only (no per-file scan) |
 | `frame-nginx` | Optional docker-compose service; nginx `:8082` serves `infer-frames` volume read-only at `GET /frames/{frame_url}` |

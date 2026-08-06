@@ -124,6 +124,11 @@ FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* 
     task.object_key = object_key;
     task.frame = frame->clone();
     if (!enqueue(std::move(task))) {
+        // Do not advertise paths/URLs for frames that will never be written;
+        // downstream consumers would otherwise try to fetch a missing object.
+        out.local_path.clear();
+        out.object_key.clear();
+        out.frame_url.clear();
         out.upload_state = "failed";
     }
     return out;

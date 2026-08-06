@@ -100,4 +100,23 @@ TEST(FrameArchiverTest, AtomicWriteLeavesNoTmpFile) {
     EXPECT_FALSE(std::filesystem::exists(tmp_path)) << "orphan tmp file: " << tmp_path;
 }
 
+TEST(FrameArchiverTest, QueueFullClearsFrameUrlAndLocalPath) {
+    // worker_count=0: nothing drains the queue, so we can deterministically fill it.
+    FrameArchiveConfig cfg = makeCfg(makeTempDir("queue_full"));
+    cfg.queue_capacity = 2;
+    cfg.worker_count = 0;
+    cfg.public_base_url = "http://frame-nginx:8082/frames";
+    FrameArchiver archiver(cfg);
+
+    cv::Mat frame = cv::Mat::zeros(8, 8, CV_8UC3);
+    ASSERT_EQ(archiver.submit(makeMeta("cam_qfull", 1), &frame).upload_state, "queued");
+    ASSERT_EQ(archiver.submit(makeMeta("cam_qfull", 2), &frame).upload_state, "queued");
+
+    const auto dropped = archiver.submit(makeMeta("cam_qfull", 3), &frame);
+    EXPECT_EQ(dropped.upload_state, "failed");
+    EXPECT_TRUE(dropped.frame_url.empty()) << "must not advertise a URL for a frame that was not archived";
+    EXPECT_TRUE(dropped.local_path.empty());
+    EXPECT_TRUE(dropped.object_key.empty());
+}
+
 } // namespace infer

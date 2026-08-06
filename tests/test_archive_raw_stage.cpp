@@ -147,4 +147,40 @@ TEST(ArchiveRawStageTest, WithoutInferResultDoesNotSetPath) {
     EXPECT_FALSE(out.infer_result.has_value());
 }
 
+TEST(ArchiveRawStageTest, QueueFullDoesNotPublishFrameUrl) {
+    FrameArchiveConfig cfg;
+    cfg.enabled = true;
+    cfg.local_dir = makeTempDir("stage_qfull");
+    cfg.public_base_url = "http://frame-nginx:8082/frames";
+    cfg.save_interval = 1;
+    cfg.jpeg_quality = 90;
+    cfg.queue_capacity = 1;
+    cfg.worker_count = 0;
+
+    auto archiver = std::make_shared<FrameArchiver>(cfg);
+    ArchiveRawStage stage("archive_stage", archiver, true);
+
+    auto fill = std::make_shared<Frame>(makeFrame("cam_drop", 1));
+    fill->is_gpu = false;
+    fill->image = cv::Mat::zeros(8, 8, CV_8UC3);
+    EventEnvelope fill_in;
+    fill_in.frame = fill;
+    fill_in.infer_result = makeInferResult("cam_drop", 1);
+    stage.process(fill_in, [](EventEnvelope) {});
+
+    auto frame = std::make_shared<Frame>(makeFrame("cam_drop", 2));
+    frame->is_gpu = false;
+    frame->image = cv::Mat::zeros(8, 8, CV_8UC3);
+    EventEnvelope in;
+    in.frame = frame;
+    in.infer_result = makeInferResult("cam_drop", 2);
+
+    EventEnvelope out;
+    stage.process(in, [&](EventEnvelope e) { out = std::move(e); });
+
+    ASSERT_TRUE(out.infer_result.has_value());
+    EXPECT_TRUE(out.infer_result->frame_url.empty());
+    EXPECT_TRUE(out.infer_result->frame_local_path.empty());
+}
+
 } // namespace infer
