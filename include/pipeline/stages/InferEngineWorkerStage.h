@@ -43,6 +43,12 @@ public:
     // Test hook: InferWorkerGroup instance count after construction.
     int workerInstanceCount() const { return group_ ? group_->instanceCount() : 0; }
 
+    // Test hook: number of results still awaited from the worker group.
+    std::size_t inflightSize() const;
+
+    // Test hook: shorten the stale-inflight eviction timeout for deterministic tests.
+    void setInflightStaleTimeoutForTest(std::chrono::milliseconds ms);
+
 private:
     struct Relay final : IPublisher {
         InferEngineWorkerStage* owner{nullptr};
@@ -55,14 +61,23 @@ private:
     struct PendingEmit {
         EventEnvelope envelope;
         EmitFn        emit;
+        // Time the frame was handed to the worker group. Used to evict entries
+        // whose inference result never arrives (dropped batch / fault / exception).
+        std::chrono::steady_clock::time_point submitted_at{};
     };
 
     using PendingKey = std::pair<std::string, uint64_t>;
+
+    // Frames with no result after this long are treated as dropped and evicted,
+    // releasing the shared_ptr<Frame> they pin. Comfortably above worst-case
+    // (queue wait + inference) latency so in-flight frames are never evicted early.
+    static constexpr int64_t kInflightStaleMs = 5000;
 
     std::vector<PendingEmit>   extractBatch(int flush_count);
     void                       flushToWorkers(std::vector<PendingEmit> events);
     void                       flushLoop();
     std::size_t                pendingQueueSize();
+    void                       sweepStaleInflightLocked();  // caller holds inflight_mutex_
 
     void onInferResult(InferResult r);
 
@@ -81,8 +96,9 @@ private:
     std::deque<PendingEmit>   pending_events_;   // each entry owns its emit fn
     std::chrono::steady_clock::time_point batch_deadline_;
 
-    std::mutex                        inflight_mutex_;
+    mutable std::mutex                inflight_mutex_;
     std::map<PendingKey, PendingEmit> inflight_;
+    std::chrono::milliseconds         inflight_stale_{kInflightStaleMs};  // guarded by inflight_mutex_
 
     std::thread       flush_thread_;
     std::atomic<bool> flush_stop_{false};

@@ -46,7 +46,7 @@
 - `YOLOv5Decoder`：anchor-based，解析 `[bs, anchors, 5+nc]` 输出
 - `YOLOv8Decoder`：anchor-free，解析 `[bs, 4+nc, 8400]` 输出（transpose + NMS）
 - `YOLO11Decoder`：格式与 v8 相同，继承 `YOLOv8Decoder`
-- `YOLO26Decoder`：格式待定，暂返回空结果并打印 WARN
+- `YOLO26Decoder`：端到端（NMS-free）格式 `[batch, 300, 6]`，每行 `[x1,y1,x2,y2,conf,class_id]`，直接过滤 padding、不做 NMS
 
 **关键决策**：
 - 后处理与推理后端解耦，Backend 只负责填充 `float[]`，Decoder 负责语义解析
@@ -917,5 +917,5 @@ source.rtsp → infer.sahiScheduler → infer.engine → post.sahiMerge → trac
 - [ ] CascadeRouter GPU 路径：从 secondary ModelConfig 读取实际 input_size（当前硬编码 112×112）
 - [ ] Grafana 预置 Dashboard JSON（延迟热力图 + 丢帧率）
 - [ ] 单元测试（Decoder NMS 逻辑、ClassifierDecoder argmax、ResultMerger 超时逻辑）
-- [ ] YOLO26Decoder 格式确认并完成实现（当前返回空结果）
+- [x] YOLO26Decoder 格式确认并完成实现（端到端 `[batch,300,6]`，NMS-free）
 - [ ] deepsort 追踪器接入 ReID 模型

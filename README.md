@@ -139,10 +139,10 @@ echo '{"cmd":"stop_task","id":"task_cam_001"}' | socat - UNIX-CONNECT:./infer.so
 常见 stage：
 - `source.rtsp`：RTSP 输入（内部使用 `FFmpegDecoder`；Ascend 可选 `use_ascend_dvpp` 走 DVPP 硬解）
 - `source.file`：本地视频文件输入
-- `archive.raw`：原图归档（复用 `FrameArchiver`，支持 `use_hwdec=true` 的 GPU 帧，默认开启）。须放在 `infer.engine` 下游，将 `frame_local_path`（本机绝对路径）与 `frame_url`（相对 object key）写回 `InferResult` 后由 `sink.publish` 发出。
+- `archive.raw`：原图归档（复用 `FrameArchiver`，支持 `use_hwdec=true` 的 GPU 帧，默认开启）。须放在 `infer.engine` 下游，将 `frame_local_path`（本机绝对路径）与 `frame_url`（完整可访问 URL）写回 `InferResult` 后由 `sink.publish` 发出。
   - 可通过 `frame_archive.worker_count` 配置归档并发 worker 数（默认 `1`）。
   - 本地路径按 UTC 时间分桶：`{YYYYMMDD}/{HH}/{mm}/{stream_id}/{ts_ms}_{seq}.jpg`（见 `include/archive/FrameLayout.h`）。
-  - 跨主机下载：下游用 `frame_url` 拼 URL，`GET http://<host>:8082/frames/{frame_url}`（`frame-nginx` 静态服务，见 docker compose）。
+  - 完整 URL：配置 `frame_archive.public_base_url`（如 `http://frame-nginx:8082/frames`）后，`frame_url = {public_base_url}/{object_key}`，下游直接 `GET` 即可，无需拼前缀。未配置时 `frame_url` 回退为相对 object key（向后兼容，下游需自行拼 `http://<host>:8082/frames/{frame_url}`）。
   - 主进程独立后台组件 `FrameRetentionGc` 按分钟粒度 TTL 整目录删除过期桶（与 `frame_archive.enabled` 解耦；见下方 `retention` 配置）。
 - `infer.engine`：推理 stage（引用 `models[].id`）；DAG 路径下由 `InferWorkerGroup` 执行，内含 preprocess 与 YOLO decode，支持 `models[].instance_count` 与 `models[].device_ids`（每实例一个后端；`device_ids` 拼写须正确）。攒批策略与 `batch_size`、`max_queue_delay_us` 一致（与 `ModelManager` + `BatchScheduler` 的流池攒批路径不同）。
 - `infer.sahiScheduler`：SAHI 滑窗切块，将大分辨率帧切成重叠 tile 后送入下游 `infer.engine`，最后由 `infer.sahiMerge` 合并 NMS 结果。参数：`tile_width`、`tile_height`、`overlap_ratio`、`full_interval`（每 N 帧插入一次全图推理）、`max_tiles_per_frame`。
@@ -190,6 +190,7 @@ publishers:
 frame_archive:
   enabled: true
   local_dir: "/data/frames"   # docker compose 中与 infer-frames 卷挂载点一致
+  public_base_url: "http://frame-nginx:8082/frames"  # 设置后 frame_url 为完整可访问 URL；留空则回退相对 key
   save_interval: 1          # 每 N 帧写一张
   jpeg_quality: 90
   queue_capacity: 4096
@@ -201,8 +202,8 @@ frame_archive:
 ```
 
 - **写入**：`FrameArchiver` 异步队列 + 多 worker 写 JPEG，不阻塞推理热路径。
-- **发布**：`frame_url` 为相对 object key（如 `20260424/10/16/cam_01/1777025798000_7.jpg`），Kafka / Redis / gRPC 均携带；`frame_local_path` 保留本机绝对路径供同机调试。
-- **下载**：docker compose 中的 `frame-nginx`（`:8082`）以只读方式挂载 `infer-frames` 卷，内网直接 `GET /frames/{frame_url}` 拉 JPEG。
+- **发布**：配置 `public_base_url` 后，`frame_url` 为完整可访问 URL（如 `http://frame-nginx:8082/frames/20260424/10/16/cam_01/1777025798000_7.jpg`），Kafka / Redis / gRPC 均携带，下游直接 `GET`；未配置时回退为相对 object key。`frame_local_path` 保留本机绝对路径供同机调试。
+- **下载**：docker compose 中的 `frame-nginx`（`:8082`）以只读方式挂载 `infer-frames` 卷，内网直接 `GET frame_url`（完整 URL）或 `GET /frames/{object_key}` 拉 JPEG。
 - **回收**：`FrameRetentionGc` 只解析 `YYYYMMDD/HH/mm` 目录名，过期则 `remove_all` 整分钟桶，成本与文件总数无关。
 - **部署**：`local_dir` 建议挂独立卷（`infer-frames`）；生产环境务必开启 `retention.enabled`，否则磁盘会无限增长。
 

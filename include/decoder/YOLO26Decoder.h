@@ -4,9 +4,14 @@
 
 namespace infer {
 
-// YOLO26 decoder — reserved interface.
-// Output format is not yet finalized; this stub ensures the factory compiles.
-// Fill in decode() once the YOLO26 architecture is published.
+// YOLO26 is natively end-to-end (NMS-free). The exported model emits a fixed
+// output layout: [batch, num_dets, 6]  (row-major, num_dets = 300 by default).
+//   Each row: [x1, y1, x2, y2, confidence, class_id]
+//     - x1,y1,x2,y2 : absolute pixel corners (xyxy) in model-input resolution
+//     - confidence  : detection score; padding rows are zero-filled
+//     - class_id    : emitted as float, rounded to int
+// The head already de-duplicates predictions, so decode() runs no NMS; the
+// nms_thresh argument is accepted for interface parity but ignored.
 class YOLO26Decoder : public IYOLODecoder {
 public:
     explicit YOLO26Decoder(int num_classes = 80)

@@ -192,6 +192,7 @@ TEST(LoadConfig, ParsesFullYaml) {
     EXPECT_FALSE(cfg.frame_archive.allow_gpu_frames);
     EXPECT_EQ(cfg.frame_archive.worker_count, 3);
     EXPECT_EQ(cfg.frame_archive.local_dir, "/tmp/infer-frames");
+    EXPECT_EQ(cfg.frame_archive.public_base_url, "http://frame-nginx:8082/frames");
     EXPECT_EQ(cfg.frame_archive.save_interval, 2);
     EXPECT_EQ(cfg.frame_archive.jpeg_quality, 85);
     EXPECT_EQ(cfg.frame_archive.queue_capacity, 128);

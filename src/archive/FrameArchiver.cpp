@@ -10,6 +10,35 @@ namespace infer {
 
 namespace fs = std::filesystem;
 
+namespace {
+
+bool writeJpegAtomically(const std::string& final_path, const cv::Mat& frame, int jpeg_quality) {
+    const fs::path fp(final_path);
+    const std::string tmp_path = (fp.parent_path() / (".tmp_" + fp.filename().string())).string();
+    std::error_code ec;
+    fs::create_directories(fs::path(final_path).parent_path(), ec);
+    if (ec) {
+        LOG_WARN("FrameArchiver: failed to create directories for {}: {}", final_path, ec.message());
+        return false;
+    }
+
+    const std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, jpeg_quality};
+    if (!cv::imwrite(tmp_path, frame, params)) {
+        fs::remove(tmp_path, ec);
+        return false;
+    }
+
+    fs::rename(tmp_path, final_path, ec);
+    if (ec) {
+        LOG_WARN("FrameArchiver: rename {} -> {} failed: {}", tmp_path, final_path, ec.message());
+        fs::remove(tmp_path, ec);
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
 FrameArchiver::FrameArchiver(FrameArchiveConfig cfg)
     : cfg_(std::move(cfg)) {
     if (!cfg_.enabled) {
@@ -41,6 +70,15 @@ std::string FrameArchiver::buildLocalPath(const StreamMeta& meta) const {
     const std::string key = buildObjectKey(meta);
     fs::path p = fs::path(cfg_.local_dir) / key;
     return p.string();
+}
+
+std::string FrameArchiver::buildFrameUrl(const std::string& object_key) const {
+    if (cfg_.public_base_url.empty()) {
+        return object_key;  // backward compatible: relative object key
+    }
+    std::string base = cfg_.public_base_url;
+    while (!base.empty() && base.back() == '/') base.pop_back();
+    return base + "/" + object_key;
 }
 
 bool FrameArchiver::enqueue(ArchiveTask task) {
@@ -78,6 +116,7 @@ FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* 
     const std::string object_key = buildObjectKey(meta);
     out.local_path = fs::path(cfg_.local_dir).append(object_key).string();
     out.object_key = object_key;
+    out.frame_url = buildFrameUrl(object_key);
     out.upload_state = "queued";
 
     ArchiveTask task;
@@ -85,6 +124,11 @@ FrameArchiveResult FrameArchiver::submit(const StreamMeta& meta, const cv::Mat* 
     task.object_key = object_key;
     task.frame = frame->clone();
     if (!enqueue(std::move(task))) {
+        // Do not advertise paths/URLs for frames that will never be written;
+        // downstream consumers would otherwise try to fetch a missing object.
+        out.local_path.clear();
+        out.object_key.clear();
+        out.frame_url.clear();
         out.upload_state = "failed";
     }
     return out;
@@ -108,9 +152,7 @@ void FrameArchiver::workerLoop() {
 
         try {
             const auto write_start = std::chrono::steady_clock::now();
-            fs::create_directories(fs::path(task.local_path).parent_path());
-            std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, cfg_.jpeg_quality};
-            if (!cv::imwrite(task.local_path, task.frame, params)) {
+            if (!writeJpegAtomically(task.local_path, task.frame, cfg_.jpeg_quality)) {
                 Metrics::get().incFramesArchiveDropped();
                 LOG_WARN("FrameArchiver: failed to write local frame {}", task.local_path);
                 continue;

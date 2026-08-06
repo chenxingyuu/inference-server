@@ -16,8 +16,9 @@ namespace infer {
 
 struct FrameArchiveResult {
     std::string local_path;
-    std::string object_key;   // relative path under local_dir (for frame_url)
-    std::string upload_state{"disabled"};
+    std::string object_key;   // relative path under local_dir (internal layout/GC key)
+    std::string frame_url;    // full URL when public_base_url is set, else == object_key; empty if enqueue failed
+    std::string upload_state{"disabled"};  // queued|failed|disabled
 };
 
 class FrameArchiver {
@@ -42,6 +43,7 @@ private:
 
     std::string buildObjectKey(const StreamMeta& meta) const;
     std::string buildLocalPath(const StreamMeta& meta) const;
+    std::string buildFrameUrl(const std::string& object_key) const;
     bool enqueue(ArchiveTask task);
     void workerLoop();
 

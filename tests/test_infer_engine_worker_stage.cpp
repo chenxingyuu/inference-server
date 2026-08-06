@@ -11,6 +11,8 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace infer {
@@ -41,6 +43,22 @@ public:
 
 private:
     std::shared_ptr<std::vector<int>> devices_;
+};
+
+// Backend whose infer() always throws, faithfully reproducing an inference
+// exception in InferWorker (caught at InferWorker.cpp: the whole batch is
+// dropped and no result is published). Frames handed to this backend become
+// orphaned inflight entries with no result ever returning.
+class ThrowingBackend final : public IInferBackend {
+public:
+    void loadModel(const ModelConfig&) override {}
+    void infer(const Batch&, std::vector<float>&) override {
+        throw std::runtime_error("simulated inference failure");
+    }
+    void unloadModel() override {}
+    int        maxBatchSize() const override { return 16; }
+    DeviceType deviceType() const override { return DeviceType::CPU; }
+    bool       isLoaded() const override { return true; }
 };
 
 ModelConfig makeModel() {
@@ -217,6 +235,65 @@ TEST(InferEngineWorkerStage, StopBeforeStartDoesNotCrash) {
 
     InferEngineWorkerStage stage("infer_sbs", mc, backend_factory, decoder_factory);
     EXPECT_NO_FATAL_FAILURE(stage.stop()); // stop before start
+}
+
+// LEAK regression: a frame whose inference result never arrives (dropped batch /
+// inference exception) leaves a permanent entry in inflight_, each pinning a whole
+// shared_ptr<Frame>. Without a stale sweep, inflight_ grows without bound and RSS
+// climbs monotonically. The sweep must evict such orphans after the stale timeout.
+TEST(InferEngineWorkerStage, EvictsStaleInflightWhenResultNeverArrives) {
+    ModelConfig mc = makeModel();
+    mc.batch_size     = 1;
+    mc.instance_count = 1;
+    mc.device_ids     = {0};
+
+    auto backend_factory = [](const ModelConfig&) {
+        return std::unique_ptr<IInferBackend>(std::make_unique<ThrowingBackend>());
+    };
+    auto decoder_factory = [](const ModelConfig& c) { return createDecoder(c); };
+
+    InferEngineWorkerStage stage("infer_leak", mc, backend_factory, decoder_factory);
+    stage.setInflightStaleTimeoutForTest(std::chrono::milliseconds(100));
+    stage.start();
+
+    std::atomic<int> emit_count{0};
+
+    EventEnvelope ev;
+    ev.stream_id = "cam_a";
+    ev.frame_seq = 0;
+    ev.frame = std::make_shared<Frame>();
+    ev.frame->is_gpu = false;
+    ev.frame->image = cv::Mat::zeros(64, 64, CV_8UC3);
+    ev.frame->meta.stream_id = "cam_a";
+    ev.frame->meta.frame_seq = 0;
+    ev.frame->meta.capture_ts = 1.0;
+    ev.frame->meta.capture_mono_ns = 1000;
+
+    stage.process(ev, [&](const EventEnvelope&) {
+        emit_count.fetch_add(1, std::memory_order_relaxed);
+    });
+
+    // The throwing backend drops the batch, so an orphaned inflight entry appears
+    // and no result is ever emitted.
+    bool orphan_seen = false;
+    for (int i = 0; i < 50; ++i) {
+        if (stage.inflightSize() == 1) { orphan_seen = true; break; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_TRUE(orphan_seen) << "expected exactly one orphaned inflight entry";
+    EXPECT_EQ(emit_count.load(std::memory_order_relaxed), 0)
+        << "throwing backend must not emit a result";
+
+    // After the stale timeout, the periodic sweep must evict the orphan and
+    // release the frame it pins.
+    bool evicted = false;
+    for (int i = 0; i < 100; ++i) {  // up to ~1s
+        if (stage.inflightSize() == 0) { evicted = true; break; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(evicted) << "stale inflight entry was never evicted (memory leak)";
+
+    stage.stop();
 }
 
 } // namespace infer

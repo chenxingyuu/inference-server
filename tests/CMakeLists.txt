@@ -63,10 +63,21 @@ endfunction()
 # ── Test executables ───────────────────────────────────────────────────────
 add_infer_test(test_types)
 add_infer_test(test_config)
+add_executable(test_frame_archiver test_frame_archiver.cpp
+    ${CMAKE_SOURCE_DIR}/src/archive/FrameArchiver.cpp
+)
+target_link_libraries(test_frame_archiver PRIVATE
+    infer_testable
+    GTest::gtest_main
+)
+add_test(NAME test_frame_archiver COMMAND test_frame_archiver
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
+
 add_infer_test(test_frame_retention_gc)
 add_infer_test(test_gpu_device_allocator)
 add_infer_test(test_iou_nms)
 add_infer_test(test_yolov5_decoder)
+add_infer_test(test_yolo26_decoder)
 add_infer_test(test_result_merger)
 add_infer_test(test_tracker)
 add_infer_test(test_logging_defects)

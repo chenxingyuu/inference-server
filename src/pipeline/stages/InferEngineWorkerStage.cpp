@@ -109,6 +109,7 @@ void InferEngineWorkerStage::flushToWorkers(std::vector<PendingEmit> events) {
     bool have_first = false;
     {
         std::lock_guard<std::mutex> lk(inflight_mutex_);
+        const auto submit_now = std::chrono::steady_clock::now();
         for (auto& pe : events) {
             const auto& ev = pe.envelope;
             if (!ev.frame) continue;
@@ -116,6 +117,7 @@ void InferEngineWorkerStage::flushToWorkers(std::vector<PendingEmit> events) {
             stored.emit = pe.emit;            // per-event emit, not a shared last_emit_
             stored.envelope = ev;
             stored.envelope.infer_result.reset();
+            stored.submitted_at = submit_now;
             const PendingKey key{ev.stream_id, ev.frame->meta.frame_seq};
             inflight_[key] = std::move(stored);
         }
@@ -184,6 +186,39 @@ std::size_t InferEngineWorkerStage::pendingQueueSize() {
     return pending_events_.size();
 }
 
+std::size_t InferEngineWorkerStage::inflightSize() const {
+    std::lock_guard<std::mutex> lk(inflight_mutex_);
+    return inflight_.size();
+}
+
+void InferEngineWorkerStage::setInflightStaleTimeoutForTest(std::chrono::milliseconds ms) {
+    std::lock_guard<std::mutex> lk(inflight_mutex_);
+    inflight_stale_ = ms;
+}
+
+// Evict inflight entries whose inference result never arrived. A frame is added
+// to inflight_ before it is handed to the worker group; if that batch is dropped
+// (queue full, worker stopped, GPU/NPU fault, or an inference exception) no result
+// ever comes back and onInferResult() never erases the entry. Without this sweep
+// those entries — each pinning a shared_ptr<Frame> (decoded image / DVPP pool slot
+// / device memory) — accumulate forever, so RSS grows monotonically under load.
+// Caller must hold inflight_mutex_.
+void InferEngineWorkerStage::sweepStaleInflightLocked() {
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = inflight_.begin(); it != inflight_.end();) {
+        const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - it->second.submitted_at);
+        if (age > inflight_stale_) {
+            LOG_WARN("InferEngineWorkerStage[{}]: evict stale inflight stream={} seq={} "
+                     "age_ms={} (no inference result — likely dropped batch)",
+                     id_, it->first.first, it->first.second, age.count());
+            it = inflight_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void InferEngineWorkerStage::flushLoop() {
     const auto half_delay = std::chrono::microseconds(
         std::max(1000, model_cfg_.max_queue_delay_us / 2));
@@ -204,6 +239,14 @@ void InferEngineWorkerStage::flushLoop() {
         }
 
         if (!to_flush.empty()) flushToWorkers(std::move(to_flush));
+
+        // Reclaim inflight entries whose result never came back (dropped batch /
+        // fault / inference exception). Timer-driven — not tied to inbound traffic —
+        // so orphans are cleared even after a stream stops sending frames.
+        {
+            std::lock_guard<std::mutex> lk(inflight_mutex_);
+            sweepStaleInflightLocked();
+        }
     }
 }
 

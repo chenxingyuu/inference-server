@@ -92,6 +92,7 @@ frame_archive:
   allow_gpu_frames: false
   worker_count: 3
   local_dir: /tmp/infer-frames
+  public_base_url: http://frame-nginx:8082/frames
   save_interval: 2
   jpeg_quality: 85
   queue_capacity: 128

@@ -42,6 +42,9 @@ publishers:
 frame_archive:
   enabled: false
   local_dir: "/data/frames"
+  # 文件服务对外基址；设置后 frame_url 直接是可访问的完整 URL，下游无需再拼前缀。
+  # 留空则 frame_url 回退为相对 object key（向后兼容）。
+  public_base_url: "http://frame-nginx:8082/frames"
   save_interval: 1
   jpeg_quality: 90
   queue_capacity: 4096

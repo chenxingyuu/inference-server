@@ -31,11 +31,12 @@ services:
   # ── Frame archive static file server (nginx) ───────────────────────────────
   frame-nginx:
     image: nginx:1.27-alpine
+    user: "0:0"
     ports:
       - "8082:80"
     volumes:
       - infer-frames:/data/frames:ro
-      - ../config/frame-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../config/nginx-frame.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - infer-ascend
     restart: unless-stopped
