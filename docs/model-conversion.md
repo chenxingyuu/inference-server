@@ -89,8 +89,12 @@ docker compose logs -f infer-trt | grep -E "WARN|ERROR|setInputShape"
 | YOLO11n | yolo11n.pt | 8 |
 | YOLO11s | yolo11s.pt | 8 |
 | YOLO11m | yolo11m.pt | 4 |
-| YOLO26（占位）| — | — |
+| YOLO26n | yolo26n.pt | 8 |
+| YOLO26s | yolo26s.pt | 8 |
+| YOLO26m | yolo26m.pt | 4 |
 
 batch 越大显存占用越高，`optShapes` 建议设为实际平均吞吐量对应的 batch 大小。
 
-> **注意**：YOLO11 后处理格式与 YOLOv8 相同，导出与编译命令一致，将 `model=` 参数替换为对应 `.pt` 即可。YOLO26Decoder 当前为占位实现（返回空结果），格式确认后补全；转换流程与 v8/v11 相同。
+> **注意**：YOLO11 后处理格式与 YOLOv8 相同，导出与编译命令一致，将 `model=` 参数替换为对应 `.pt` 即可。
+>
+> YOLO26 为端到端（NMS-free）架构，输出格式与 v8/v11 不同：`[batch, 300, 6]`，每行 `[x1, y1, x2, y2, confidence, class_id]`（xyxy 绝对像素）。`YOLO26Decoder` 已实现，直接读取该输出、按 `conf_thresh` 过滤 padding 行、**不做 NMS**。导出无需 `nms=True` / `simplify=True`。
