@@ -37,7 +37,7 @@ docker run --rm \
   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
   -v ./models:/models \
   --entrypoint trtexec \
-  registry.cn-hangzhou.aliyuncs.com/daxx/inference-server-tensorrt:main \
+  registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:tensorrt \
     --onnx=/models/yolov8n.onnx \
     --minShapes=images:1x3x640x640 \
     --optShapes=images:8x3x640x640 \

@@ -1,17 +1,19 @@
-version: "3.9"
-
 services:
   # ── Inference service (TensorRT) ───────────────────────────────────────────
   infer-trt:
-    image: registry.cn-hangzhou.aliyuncs.com/daxx/inference-server-tensorrt:main
+    image: registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:tensorrt
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    gpus: all
     volumes:
       - ../models:/models:ro
       - ../config:/config:ro
       - infer-socket:/var/run/infer
       - infer-frames:/data/frames
+    depends_on:
+      kafka:
+        condition: service_healthy
     restart: unless-stopped
     logging:
       driver: json-file
@@ -58,85 +60,7 @@ services:
       - infer-server
     restart: unless-stopped
 
-  # ── ZooKeeper ─────────────────────────────────────────────────────────────
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    volumes:
-      - zookeeper-data:/var/lib/zookeeper/data
-      - zookeeper-logs:/var/lib/zookeeper/log
-    restart: unless-stopped
-
-  # ── Kafka ─────────────────────────────────────────────────────────────────
-  kafka:
-    image: confluentinc/cp-kafka:7.6.0
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-    healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-    volumes:
-      - kafka-data:/var/lib/kafka/data
-    restart: unless-stopped
-
-  # ── Prometheus ────────────────────────────────────────────────────────────
-  prometheus:
-    image: prom/prometheus:v2.51.0
-    ports:
-      - "9090:9090"
-    volumes:
-      - ../config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=15d"
-    depends_on:
-      - infer-server
-    restart: unless-stopped
-
-  # ── Grafana ────────────────────────────────────────────────────────────────
-  grafana:
-    image: grafana/grafana:10.4.0
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ../config/grafana/provisioning:/etc/grafana/provisioning:ro
-    depends_on:
-      - prometheus
-    restart: unless-stopped
-
-  # -- Redis ──────────────────────────────────────────────────────────────────
-  redis:
-    image: registry.cn-hangzhou.aliyuncs.com/daxx/redis:7-alpine
-    ports:
-      - "26379:6379"
-    restart: unless-stopped
-
 volumes:
-  zookeeper-data:
-  zookeeper-logs:
-  kafka-data:
-  prometheus-data:
-  grafana-data:
   infer-socket:
   infer-state:
   infer-frames:
