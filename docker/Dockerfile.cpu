@@ -62,10 +62,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libprotobuf32 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy binary and the ONNX Runtime shared library downloaded by FetchContent
+# Copy binary and FetchContent shared libs (ONNX Runtime + hiredis for Redis publisher)
 COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server
 COPY --from=builder /src/build/_deps/onnxruntime_download-src/lib/libonnxruntime.so* \
     /usr/local/lib/
+COPY --from=builder /src/build/_deps/hiredis-build/libhiredis.so* /usr/local/lib/
 RUN ldconfig
 
 VOLUME ["/models", "/config"]
