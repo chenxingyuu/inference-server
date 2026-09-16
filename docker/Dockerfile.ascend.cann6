@@ -6,9 +6,7 @@ FROM ${ASCEND_BASE_IMAGE} AS builder
 ARG APT_MIRROR=
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    if [ -n "${APT_MIRROR}" ]; then \
+RUN if [ -n "${APT_MIRROR}" ]; then \
     sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -26,8 +24,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libprotobuf-dev \
     protobuf-compiler \
     protobuf-compiler-grpc \
-    && pip3 install --no-cache-dir 'cmake>=3.24,<4' \
-    && rm -rf /var/lib/apt/lists/*
+    && pip3 install --no-cache-dir 'cmake>=3.24,<4'
 
 ENV PATH="/usr/local/bin:${PATH}"
 
@@ -53,9 +50,7 @@ ARG ASCEND_BASE_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
 FROM ${ASCEND_BASE_IMAGE}
 ARG APT_MIRROR=
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    if [ -n "${APT_MIRROR}" ]; then \
+RUN if [ -n "${APT_MIRROR}" ]; then \
     sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
