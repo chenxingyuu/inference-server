@@ -3,6 +3,8 @@
 #include "common/Logger.h"
 #include <algorithm>
 #include <chrono>
+#include <stdexcept>
+#include <unordered_map>
 
 namespace infer {
 
@@ -13,7 +15,8 @@ void InferEngineWorkerStage::Relay::publish(InferResult r) {
 InferEngineWorkerStage::InferEngineWorkerStage(std::string id,
                                                ModelConfig model_cfg,
                                                BackendFactory backend_factory,
-                                               DecoderFactory decoder_factory)
+                                               DecoderFactory decoder_factory,
+                                               std::vector<ModelConfig> secondary_models)
     : id_(std::move(id))
     , model_cfg_(std::move(model_cfg))
     , backend_factory_(std::move(backend_factory))
@@ -32,6 +35,53 @@ InferEngineWorkerStage::InferEngineWorkerStage(std::string id,
         nullptr,
         [](const std::string&) { return TrackerType::None; },
         [](const std::string&) { return ByteTrackConfig{}; });
+
+    setupCascade(std::move(secondary_models));
+}
+
+void InferEngineWorkerStage::setupCascade(std::vector<ModelConfig> secondary_models) {
+    if (model_cfg_.cascade.empty()) return;
+
+    std::unordered_map<std::string, ModelConfig> by_id;
+    by_id.reserve(secondary_models.size());
+    for (auto& m : secondary_models) {
+        by_id.emplace(m.id, std::move(m));
+    }
+
+    merger_ = std::make_unique<ResultMerger>(relay_);
+
+    std::unordered_map<std::string, InferWorkerGroup*> sec_map;
+    std::unordered_map<std::string, std::pair<int, int>> sec_hw;
+
+    for (const auto& cas : model_cfg_.cascade) {
+        auto it = by_id.find(cas.model_id);
+        if (it == by_id.end()) {
+            throw std::runtime_error(
+                "InferEngineWorkerStage: cascade secondary model not provided: " + cas.model_id);
+        }
+
+        auto attr_pub = std::make_unique<AttributePublisher>(*merger_, cas.attribute_key);
+        IPublisher& attr_pub_ref = *attr_pub;
+        attr_publishers_.push_back(std::move(attr_pub));
+
+        auto sec_group = std::make_unique<InferWorkerGroup>(
+            it->second,
+            attr_pub_ref,
+            backend_factory_,
+            decoder_factory_,
+            nullptr,
+            nullptr,
+            [](const std::string&) { return TrackerType::None; },
+            [](const std::string&) { return ByteTrackConfig{}; });
+        sec_map[cas.model_id] = sec_group.get();
+        sec_hw[cas.model_id] = {it->second.input_shape.height, it->second.input_shape.width};
+        secondary_groups_.push_back(std::move(sec_group));
+    }
+
+    if (!sec_map.empty()) {
+        router_ = std::make_unique<CascadeRouter>(
+            model_cfg_, std::move(sec_map), std::move(sec_hw), *merger_);
+    }
 }
 
 InferEngineWorkerStage::~InferEngineWorkerStage() { stop(); }
@@ -47,11 +97,19 @@ void InferEngineWorkerStage::start() {
     started_ = true;
     flush_stop_.store(false);
     draining_.store(false);
+
+    // Secondary workers must be RUNNING before primary can route crops.
+    for (auto& sg : secondary_groups_) sg->start();
+    if (router_ && merger_) {
+        group_->setCascadeRouter(router_.get(), merger_.get());
+    }
     group_->start();
-    LOG_INFO("InferEngineWorkerStage[{}]: model={} worker_instances={} max_queue_delay_us={}",
+    LOG_INFO("InferEngineWorkerStage[{}]: model={} worker_instances={} cascade_secondaries={} "
+             "max_queue_delay_us={}",
              id_,
              model_cfg_.id,
              group_ ? group_->instanceCount() : 0,
+             secondary_groups_.size(),
              model_cfg_.max_queue_delay_us);
     flush_thread_ = std::thread(&InferEngineWorkerStage::flushLoop, this);
 }
@@ -75,6 +133,10 @@ void InferEngineWorkerStage::stop() {
     }
 
     if (group_) group_->stop();
+
+    // Secondary workers call AttributePublisher → ResultMerger; stop them before
+    // cascade objects are destroyed (members destroyed after stop returns / in dtor).
+    for (auto& sg : secondary_groups_) sg->stop();
 
     {
         std::lock_guard<std::mutex> lk(inflight_mutex_);

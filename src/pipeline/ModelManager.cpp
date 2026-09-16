@@ -151,6 +151,7 @@ void ModelManager::startPipeline(ModelEntry& entry) {
         entry.merger = std::make_unique<ResultMerger>(publisher_);
 
         std::unordered_map<std::string, InferWorkerGroup*> sec_map;
+        std::unordered_map<std::string, std::pair<int, int>> sec_hw;
 
         for (const auto& cas : entry.cfg.cascade) {
             // Look up the secondary model config
@@ -178,12 +179,15 @@ void ModelManager::startPipeline(ModelEntry& entry) {
                 [](const std::string&) { return TrackerType::None; },
                 [](const std::string&) { return ByteTrackConfig{}; });
             sec_map[cas.model_id] = sec_group.get();
+            sec_hw[cas.model_id] = {
+                cfg_it->second.input_shape.height,
+                cfg_it->second.input_shape.width};
             entry.secondary_groups.push_back(std::move(sec_group));
         }
 
         if (!sec_map.empty()) {
             entry.router = std::make_unique<CascadeRouter>(
-                entry.cfg, std::move(sec_map), *entry.merger);
+                entry.cfg, std::move(sec_map), std::move(sec_hw), *entry.merger);
             entry.group->setCascadeRouter(entry.router.get(), entry.merger.get());
 
             // Start secondary workers before the primary

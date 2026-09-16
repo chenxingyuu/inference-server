@@ -14,12 +14,18 @@
 
 namespace infer {
 
+namespace {
+constexpr int kDefaultSecondaryHw = 112;
+} // namespace
+
 CascadeRouter::CascadeRouter(
         const ModelConfig&                                  primary_cfg,
         std::unordered_map<std::string, InferWorkerGroup*>  secondary_groups,
+        std::unordered_map<std::string, std::pair<int, int>> secondary_input_hw,
         ResultMerger&                                       merger)
     : primary_cfg_(primary_cfg)
     , secondary_groups_(std::move(secondary_groups))
+    , secondary_input_hw_(std::move(secondary_input_hw))
     , merger_(merger)
 {}
 
@@ -38,6 +44,16 @@ CascadeRouter::CropRect CascadeRouter::computeCrop(
     if (r.x1 <= r.x0) r.x1 = r.x0 + 1;
     if (r.y1 <= r.y0) r.y1 = r.y0 + 1;
     return r;
+}
+
+std::pair<int, int> CascadeRouter::secondaryInputHw(const std::string& model_id) const {
+    auto it = secondary_input_hw_.find(model_id);
+    if (it == secondary_input_hw_.end()) {
+        return {kDefaultSecondaryHw, kDefaultSecondaryHw};
+    }
+    const int h = it->second.first > 0 ? it->second.first : kDefaultSecondaryHw;
+    const int w = it->second.second > 0 ? it->second.second : kDefaultSecondaryHw;
+    return {h, w};
 }
 
 void CascadeRouter::route(const InferResult& result,
@@ -82,6 +98,7 @@ void CascadeRouter::route(const InferResult& result,
             continue;
         }
         InferWorkerGroup* secondary = group_it->second;
+        const auto [sec_h, sec_w] = secondaryInputHw(cas.model_id);
 
         for (int i = 0; i < static_cast<int>(result.detections.size()); ++i) {
             const auto& det = result.detections[i];
@@ -94,10 +111,8 @@ void CascadeRouter::route(const InferResult& result,
 
             if (original_frame_gpu) {
 #ifdef BUILD_TRT_BACKEND
-                // GPU path: crop + resize to secondary model input size.
-                // TODO: query secondary model config for actual input_size.
-                const int sec_h = 112, sec_w = 112;
-                const size_t crop_bytes = 3 * sec_h * sec_w * sizeof(float);
+                const size_t crop_bytes = 3 * static_cast<size_t>(sec_h) * static_cast<size_t>(sec_w)
+                                          * sizeof(float);
 
                 void* crop_device = nullptr;
                 cudaMalloc(&crop_device, crop_bytes);
@@ -131,15 +146,18 @@ void CascadeRouter::route(const InferResult& result,
                     result.frame_ts, result.frame_mono_ns, static_cast<uint64_t>(i), img_w, img_h});
                 mini_batch.is_gpu = true;
                 secondary->enqueue(std::move(mini_batch));
+#else
+                (void)secondary;
+                (void)sec_h;
+                (void)sec_w;
+                LOG_WARN("CascadeRouter: GPU crop path requires BUILD_TRT_BACKEND");
 #endif
             } else if (original_frame_cpu && !original_frame_cpu->empty()) {
-                // CPU path: crop with OpenCV, resize to secondary model input size.
-                // TODO: query secondary model config for actual input_size.
                 cv::Rect roi_rect(crop.x0, crop.y0,
                                   crop.x1 - crop.x0, crop.y1 - crop.y0);
                 cv::Mat roi_crop = (*original_frame_cpu)(roi_rect).clone();
                 cv::Mat roi_resized;
-                cv::resize(roi_crop, roi_resized, {112, 112});
+                cv::resize(roi_crop, roi_resized, {sec_w, sec_h});
 
                 StreamMeta sm;
                 sm.stream_id   = result.stream_id;

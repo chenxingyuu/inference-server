@@ -79,6 +79,86 @@ ModelConfig makeModel() {
     return mc;
 }
 
+// Emits one high-confidence class-0 box in YOLOv8 [4+nc, na] layout.
+class DetectingBackend final : public IInferBackend {
+public:
+    void loadModel(const ModelConfig&) override {}
+    void infer(const Batch& batch, std::vector<float>& output) override {
+        const int nc = 80;
+        const int na = 8400;
+        const int rows = 4 + nc;
+        output.assign(static_cast<std::size_t>(batch.size()) * rows * na, 0.f);
+        for (int b = 0; b < batch.size(); ++b) {
+            float* data = output.data() + static_cast<std::size_t>(b) * rows * na;
+            const int a = 0;
+            data[0 * na + a] = 320.f;
+            data[1 * na + a] = 320.f;
+            data[2 * na + a] = 100.f;
+            data[3 * na + a] = 100.f;
+            data[(4 + 0) * na + a] = 0.95f;
+        }
+    }
+    void unloadModel() override {}
+    int        maxBatchSize() const override { return 16; }
+    DeviceType deviceType() const override { return DeviceType::CPU; }
+    bool       isLoaded() const override { return true; }
+};
+
+class ClassifierBackend final : public IInferBackend {
+public:
+    explicit ClassifierBackend(int num_classes) : num_classes_(num_classes) {}
+    void loadModel(const ModelConfig&) override {}
+    void infer(const Batch& batch, std::vector<float>& output) override {
+        output.assign(static_cast<std::size_t>(batch.size()) * static_cast<std::size_t>(num_classes_),
+                      0.05f);
+        for (int b = 0; b < batch.size(); ++b) {
+            // class 1 wins
+            output[static_cast<std::size_t>(b) * num_classes_ + 1] = 0.99f;
+        }
+    }
+    void unloadModel() override {}
+    int        maxBatchSize() const override { return 16; }
+    DeviceType deviceType() const override { return DeviceType::CPU; }
+    bool       isLoaded() const override { return true; }
+
+private:
+    int num_classes_;
+};
+
+ModelConfig makeClassifierModel() {
+    ModelConfig mc;
+    mc.id = "classifier_01";
+    mc.model_type = ModelType::Classifier;
+    mc.backend = DeviceType::CPU;
+    mc.onnx_path = "models/placeholder.onnx";
+    mc.batch_size = 1;
+    mc.instance_count = 1;
+    mc.device_ids = {0};
+    mc.num_classes = 3;
+    mc.class_names = {"sedan", "suv", "truck"};
+    mc.conf_thresh = 0.4f;
+    mc.input_shape.batch = 1;
+    mc.input_shape.channels = 3;
+    mc.input_shape.height = 64;
+    mc.input_shape.width = 64;
+    mc.max_queue_delay_us = 5000;
+    return mc;
+}
+
+ModelConfig makeCascadePrimary() {
+    ModelConfig mc = makeModel();
+    mc.id = "detector_cascade";
+    mc.instance_count = 1;
+    mc.device_ids = {0};
+    CascadeConfig cas;
+    cas.model_id = "classifier_01";
+    cas.attribute_key = "vehicle_type";
+    cas.trigger_classes = {0};
+    cas.crop_expand = 0.1f;
+    mc.cascade.push_back(cas);
+    return mc;
+}
+
 } // namespace
 
 TEST(InferEngineWorkerStage, LoadsEachInstanceOnDistinctDeviceIds) {
@@ -294,6 +374,97 @@ TEST(InferEngineWorkerStage, EvictsStaleInflightWhenResultNeverArrives) {
     EXPECT_TRUE(evicted) << "stale inflight entry was never evicted (memory leak)";
 
     stage.stop();
+}
+
+TEST(InferEngineWorkerStage, CascadeMergesSecondaryAttributesIntoEmit) {
+    ModelConfig primary = makeCascadePrimary();
+    ModelConfig secondary = makeClassifierModel();
+
+    auto backend_factory = [](const ModelConfig& c) -> std::unique_ptr<IInferBackend> {
+        if (c.model_type == ModelType::Classifier) {
+            return std::make_unique<ClassifierBackend>(c.num_classes);
+        }
+        return std::make_unique<DetectingBackend>();
+    };
+    auto decoder_factory = [](const ModelConfig& c) { return createDecoder(c); };
+
+    InferEngineWorkerStage stage(
+        "infer_cascade", primary, backend_factory, decoder_factory, {secondary});
+    EXPECT_EQ(stage.secondaryGroupCount(), 1);
+    stage.start();
+
+    std::mutex mu;
+    std::condition_variable cv;
+    std::atomic<int> emit_count{0};
+    std::string attr_value;
+    bool has_det = false;
+
+    EventEnvelope ev;
+    ev.stream_id = "cam_a";
+    ev.frame_seq = 7;
+    ev.frame = std::make_shared<Frame>();
+    ev.frame->is_gpu = false;
+    ev.frame->image = cv::Mat::zeros(640, 640, CV_8UC3);
+    ev.frame->meta.stream_id = "cam_a";
+    ev.frame->meta.frame_seq = 7;
+    ev.frame->meta.capture_ts = 1.5;
+    ev.frame->meta.capture_mono_ns = 1000;
+
+    stage.process(ev, [&](const EventEnvelope& out) {
+        ASSERT_TRUE(out.infer_result.has_value());
+        has_det = !out.infer_result->detections.empty();
+        if (has_det) {
+            auto it = out.infer_result->detections[0].attributes.find("vehicle_type");
+            if (it != out.infer_result->detections[0].attributes.end()) {
+                attr_value = it->second;
+            }
+        }
+        emit_count.fetch_add(1, std::memory_order_relaxed);
+        cv.notify_all();
+    });
+
+    {
+        std::unique_lock<std::mutex> lk(mu);
+        ASSERT_TRUE(cv.wait_for(lk, std::chrono::seconds(3), [&] {
+            return emit_count.load(std::memory_order_relaxed) >= 1;
+        })) << "cascade emit timed out";
+    }
+
+    EXPECT_TRUE(has_det);
+    EXPECT_EQ(attr_value, "suv");
+
+    stage.stop();
+}
+
+TEST(InferEngineWorkerStage, CascadeDoubleStopDoesNotCrash) {
+    ModelConfig primary = makeCascadePrimary();
+    ModelConfig secondary = makeClassifierModel();
+
+    auto backend_factory = [](const ModelConfig& c) -> std::unique_ptr<IInferBackend> {
+        if (c.model_type == ModelType::Classifier) {
+            return std::make_unique<ClassifierBackend>(c.num_classes);
+        }
+        return std::make_unique<FakeBackend>(nullptr);
+    };
+    auto decoder_factory = [](const ModelConfig& c) { return createDecoder(c); };
+
+    InferEngineWorkerStage stage(
+        "infer_cascade_stop", primary, backend_factory, decoder_factory, {secondary});
+    stage.start();
+    stage.stop();
+    EXPECT_NO_FATAL_FAILURE(stage.stop());
+}
+
+TEST(InferEngineWorkerStage, RejectsMissingSecondaryModelAtConstruction) {
+    ModelConfig primary = makeCascadePrimary();
+    auto backend_factory = [](const ModelConfig&) {
+        return std::unique_ptr<IInferBackend>(std::make_unique<FakeBackend>(nullptr));
+    };
+    auto decoder_factory = [](const ModelConfig& c) { return createDecoder(c); };
+
+    EXPECT_THROW(
+        InferEngineWorkerStage("infer_bad", primary, backend_factory, decoder_factory, {}),
+        std::runtime_error);
 }
 
 } // namespace infer

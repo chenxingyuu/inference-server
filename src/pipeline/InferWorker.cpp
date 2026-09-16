@@ -238,6 +238,18 @@ void InferWorker::workerLoop() {
                 if (cascade_router_) {
                     // Primary model with cascade: route to secondary and let
                     // ResultMerger publish after secondary attributes arrive.
+#ifdef BUILD_ASCEND_BACKEND
+                    if (batch.is_ascend) {
+                        // Ascend HBM crop / D2H for cascade is not implemented yet.
+                        // Publish primary detections without secondary attributes.
+                        LOG_WARN("InferWorker[{}]: cascade configured but Ascend frame "
+                                 "crop unsupported — publishing without attributes "
+                                 "stream={} dets={}",
+                                 model_cfg_.id, r.stream_id, r.detections.size());
+                        publisher_.publish(std::move(r));
+                        continue;
+                    }
+#endif
                     const GpuBuffer*  gpu_frame = batch.is_gpu && i < static_cast<int>(batch.gpu_frames.size())
                                                   ? &batch.gpu_frames[i] : nullptr;
                     const cv::Mat*    cpu_frame = !batch.is_gpu && i < static_cast<int>(batch.frames.size())

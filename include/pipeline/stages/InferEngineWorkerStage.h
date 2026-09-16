@@ -1,9 +1,12 @@
 #pragma once
 
 #include "common/Config.h"
+#include "pipeline/CascadeRouter.h"
 #include "pipeline/Event.h"
 #include "pipeline/IStage.h"
 #include "pipeline/InferWorkerGroup.h"
+#include "pipeline/ResultMerger.h"
+#include "publisher/AttributePublisher.h"
 #include "publisher/IPublisher.h"
 #include <atomic>
 #include <chrono>
@@ -21,6 +24,8 @@ namespace infer {
 
 // DAG infer.engine stage: batches frames like InferEngineStage, then dispatches
 // Batches to InferWorkerGroup so models.instance_count and models.device_ids apply.
+// When models[].cascade is set, secondary classifier workers are owned here and
+// merged attributes are emitted through the same Relay → downstream edges.
 class InferEngineWorkerStage final : public IStage {
 public:
     using BackendFactory = InferWorkerGroup::BackendFactory;
@@ -29,7 +34,8 @@ public:
     InferEngineWorkerStage(std::string id,
                            ModelConfig model_cfg,
                            BackendFactory backend_factory,
-                           DecoderFactory decoder_factory);
+                           DecoderFactory decoder_factory,
+                           std::vector<ModelConfig> secondary_models = {});
 
     ~InferEngineWorkerStage() override;
 
@@ -42,6 +48,11 @@ public:
 
     // Test hook: InferWorkerGroup instance count after construction.
     int workerInstanceCount() const { return group_ ? group_->instanceCount() : 0; }
+
+    // Test hook: number of secondary cascade worker groups.
+    int secondaryGroupCount() const {
+        return static_cast<int>(secondary_groups_.size());
+    }
 
     // Test hook: number of results still awaited from the worker group.
     std::size_t inflightSize() const;
@@ -73,6 +84,7 @@ private:
     // (queue wait + inference) latency so in-flight frames are never evicted early.
     static constexpr int64_t kInflightStaleMs = 5000;
 
+    void                       setupCascade(std::vector<ModelConfig> secondary_models);
     std::vector<PendingEmit>   extractBatch(int flush_count);
     void                       flushToWorkers(std::vector<PendingEmit> events);
     void                       flushLoop();
@@ -91,6 +103,12 @@ private:
 
     Relay relay_{};
     std::unique_ptr<InferWorkerGroup> group_;
+
+    // Cascade ownership (empty when models[].cascade is unset).
+    std::unique_ptr<ResultMerger>                    merger_;
+    std::unique_ptr<CascadeRouter>                   router_;
+    std::vector<std::unique_ptr<AttributePublisher>> attr_publishers_;
+    std::vector<std::unique_ptr<InferWorkerGroup>>   secondary_groups_;
 
     std::mutex                pending_mutex_;
     std::deque<PendingEmit>   pending_events_;   // each entry owns its emit fn

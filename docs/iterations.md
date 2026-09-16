@@ -914,8 +914,24 @@ source.rtsp → infer.sahiScheduler → infer.engine → post.sahiMerge → trac
 ## 待办
 
 - [ ] Phase 4 真机 P99 延迟测试（目标 < 100ms @ 100路）
-- [ ] CascadeRouter GPU 路径：从 secondary ModelConfig 读取实际 input_size（当前硬编码 112×112）
+- [ ] Cascade Ascend 路径：HBM crop / D2H（当前 WARN 后跳过二级）
 - [ ] Grafana 预置 Dashboard JSON（延迟热力图 + 丢帧率）
 - [ ] 单元测试（Decoder NMS 逻辑、ClassifierDecoder argmax、ResultMerger 超时逻辑）
 - [x] YOLO26Decoder 格式确认并完成实现（端到端 `[batch,300,6]`，NMS-free）
+
+---
+
+## DAG 路径接入 Cascade
+
+**完成**：2026-09-16
+
+**目标**：`models[].cascade` 在当前主路径（`TaskManager` → DAG → `InferEngineWorkerStage`）生效，合并后的 `Detection.attributes` 仍经 Relay emit 进入下游 stage。
+
+**改动**：
+- **`InferEngineWorkerStage`**：持有 `ResultMerger` / `CascadeRouter` / secondary `InferWorkerGroup`；`start` 先启二级再挂 router；`stop` 先停一级再停二级
+- **`StageFactory`**：解析 cascade secondary `model_id`，缺失硬失败
+- **`CascadeRouter`**：crop resize 尺寸取自 secondary `input_shape`（不再硬编码 112）
+- **Ascend**：配置了 cascade 时 WARN 并发布无 attributes 的主检结果（crop 未实现）
+
+**测试**：`test_infer_engine_worker_stage` cascade 属性合并 / 缺 secondary 构造失败；`test_stage_factory` 未知 secondary 抛错
 - [ ] deepsort 追踪器接入 ReID 模型

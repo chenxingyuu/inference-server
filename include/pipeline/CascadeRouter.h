@@ -23,9 +23,10 @@ class InferWorkerGroup;
 // When no secondary results are pending (or on timeout), ResultMerger publishes.
 class CascadeRouter {
 public:
-    // secondary_groups: model_id → InferWorkerGroup for that secondary model
+    // secondary_input_hw: model_id → (height, width) for crop resize (from ModelConfig.input_shape).
     CascadeRouter(const ModelConfig&                                     primary_cfg,
                   std::unordered_map<std::string, InferWorkerGroup*>     secondary_groups,
+                  std::unordered_map<std::string, std::pair<int, int>>   secondary_input_hw,
                   ResultMerger&                                          merger);
 
     // Route one primary frame result.
@@ -43,8 +44,11 @@ private:
     CropRect computeCrop(const BBox& bbox, float expand,
                          int img_w, int img_h) const;
 
+    std::pair<int, int> secondaryInputHw(const std::string& model_id) const;
+
     ModelConfig                                          primary_cfg_;
     std::unordered_map<std::string, InferWorkerGroup*>   secondary_groups_;
+    std::unordered_map<std::string, std::pair<int, int>> secondary_input_hw_;
     ResultMerger&                                        merger_;
 };
 

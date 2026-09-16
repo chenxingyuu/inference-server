@@ -102,11 +102,24 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         if (model_id_it == cfg.with.end()) throw std::runtime_error("infer.engine requires with.model_id");
         const auto* model_cfg = ctx.app_config.findModel(model_id_it->second);
         if (!model_cfg) throw std::runtime_error("infer.engine model not found: " + model_id_it->second);
+
+        std::vector<ModelConfig> secondary_models;
+        secondary_models.reserve(model_cfg->cascade.size());
+        for (const auto& cas : model_cfg->cascade) {
+            const auto* sec = ctx.app_config.findModel(cas.model_id);
+            if (!sec) {
+                throw std::runtime_error(
+                    "infer.engine cascade secondary model not found: " + cas.model_id);
+            }
+            secondary_models.push_back(*sec);
+        }
+
         return std::make_unique<InferEngineWorkerStage>(
             cfg.id,
             *model_cfg,
             [](const ModelConfig& c) { return createBackend(c); },
-            [](const ModelConfig& c) { return createDecoder(c); });
+            [](const ModelConfig& c) { return createDecoder(c); },
+            std::move(secondary_models));
     }
     if (cfg.type == "track.bytetrack") {
         ByteTrackConfig bt;

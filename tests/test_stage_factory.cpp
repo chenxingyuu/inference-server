@@ -4,6 +4,7 @@
 #include "pipeline/stages/InferEngineWorkerStage.h"
 
 #include <stdexcept>
+#include <unordered_map>
 
 namespace infer {
 namespace {
@@ -24,8 +25,9 @@ StageFactory::Context makeContext() {
     source.degraded_threshold = 5;
     source.max_reconnect_attempts = 5;
     static DummyPublisher publisher;
+    static std::unordered_map<std::string, IPublisher*> pubs{{"dummy", &publisher}};
     return StageFactory::Context{
-        cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount,
+        cfg, source, pubs, nullptr, 5, SamplingMode::FrameCount,
         false, true, 2, 640, 640, nullptr};
 }
 
@@ -33,6 +35,7 @@ StageFactory::Context makeInferEngineContext() {
     static AppConfig cfg;
     static PipelineSourceConfig source;
     static DummyPublisher publisher;
+    static std::unordered_map<std::string, IPublisher*> pubs;
     static bool inited = false;
     if (!inited) {
         inited = true;
@@ -42,6 +45,7 @@ StageFactory::Context makeInferEngineContext() {
         source.max_reconnect_delay_ms = 5000;
         source.degraded_threshold = 5;
         source.max_reconnect_attempts = 5;
+        pubs = {{"dummy", &publisher}};
 
         ModelConfig m;
         m.id = "model_multi";
@@ -59,7 +63,45 @@ StageFactory::Context makeInferEngineContext() {
         cfg.models.push_back(m);
     }
     return StageFactory::Context{
-        cfg, source, publisher, nullptr, 5, SamplingMode::FrameCount,
+        cfg, source, pubs, nullptr, 5, SamplingMode::FrameCount,
+        false, false, 0, 0, 0, nullptr};
+}
+
+StageFactory::Context makeCascadeMissingSecondaryContext() {
+    static AppConfig cfg;
+    static PipelineSourceConfig source;
+    static DummyPublisher publisher;
+    static std::unordered_map<std::string, IPublisher*> pubs;
+    static bool inited = false;
+    if (!inited) {
+        inited = true;
+        source.id = "cam_01";
+        source.url = "rtsp://localhost/test";
+        source.reconnect_delay_ms = 1000;
+        source.max_reconnect_delay_ms = 5000;
+        source.degraded_threshold = 5;
+        source.max_reconnect_attempts = 5;
+        pubs = {{"dummy", &publisher}};
+
+        ModelConfig primary;
+        primary.id = "detector_cascade";
+        primary.version = YOLOVersion::v8;
+        primary.backend = DeviceType::CPU;
+        primary.onnx_path = "models/placeholder.onnx";
+        primary.batch_size = 1;
+        primary.instance_count = 1;
+        primary.device_ids = {0};
+        primary.num_classes = 80;
+        primary.input_shape = {1, 3, 640, 640};
+        CascadeConfig cas;
+        cas.model_id = "classifier_missing";
+        cas.attribute_key = "vehicle_type";
+        cas.trigger_classes = {0};
+        primary.cascade.push_back(cas);
+        cfg.models.push_back(primary);
+    }
+    return StageFactory::Context{
+        cfg, source, pubs, nullptr, 5, SamplingMode::FrameCount,
         false, false, 0, 0, 0, nullptr};
 }
 
@@ -249,6 +291,16 @@ TEST(StageFactory, InferEngineCreatesInferEngineWorkerStage) {
     auto* worker_stage = dynamic_cast<InferEngineWorkerStage*>(stage.get());
     ASSERT_NE(worker_stage, nullptr);
     EXPECT_EQ(worker_stage->workerInstanceCount(), 2);
+}
+
+TEST(StageFactory, InferEngineRejectsUnknownCascadeSecondary) {
+    StageConfig cfg;
+    cfg.id = "infer_cascade";
+    cfg.type = "infer.engine";
+    cfg.with["model_id"] = "detector_cascade";
+
+    auto ctx = makeCascadeMissingSecondaryContext();
+    EXPECT_THROW((void)StageFactory::create(cfg, ctx), std::runtime_error);
 }
 #endif
 
