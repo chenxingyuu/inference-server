@@ -110,6 +110,11 @@ private:
     std::chrono::steady_clock::time_point next_reconnect_at_{};
     /// Throttle per-frame DEBUG while waiting for reconnect (avoid log floods at video rate).
     std::chrono::steady_clock::time_point last_backoff_timing_debug_log_{};
+    /// True once a frame has actually been written (opening the pipe is not enough).
+    /// Worker-thread only. Gates the single-line "connected" / "down" transition logs.
+    bool stream_connected_{false};
+    /// Rate-limit the "still down" WARN so a persistently unreachable sink does not flood the log.
+    std::chrono::steady_clock::time_point last_persistent_down_warn_{};
 
     std::atomic<uint64_t> frames_written_{0};
     std::atomic<uint64_t> frames_dropped_{0};

@@ -95,6 +95,9 @@ void DrawAndStreamStage::start() {
     suppress_output_reopen_.store(false, std::memory_order_relaxed);
     reconnect_delay_ms_ = cfg_.reconnect_initial_ms;
     next_reconnect_at_ = std::chrono::steady_clock::now();
+    stream_connected_ = false;
+    last_persistent_down_warn_ = {};
+    consecutive_failures_.store(0, std::memory_order_relaxed);
     worker_ = std::thread(&DrawAndStreamStage::runWorker, this);
 }
 
@@ -295,7 +298,16 @@ void DrawAndStreamStage::runWorker() {
             steadyMsBetween(t3, t4),
             steadyMsBetween(t0, t4),
             latency_ms);
-        consecutive_failures_.store(0, std::memory_order_relaxed);
+        // A frame actually went out: the sink is genuinely reachable, so (and only
+        // now) reset the reconnect backoff. Log a single INFO on the healthy
+        // transition (first connect or recovery), never per frame.
+        const uint64_t prev_failures = consecutive_failures_.exchange(0, std::memory_order_relaxed);
+        reconnect_delay_ms_ = cfg_.reconnect_initial_ms;
+        if (!stream_connected_ || prev_failures > 0) {
+            stream_connected_ = true;
+            LOG_INFO("DrawAndStreamStage[{}]: stream connected url={} protocol={} size={}x{} fps={}",
+                     id_, cfg_.output_url, cfg_.protocol, output.cols, output.rows, cfg_.fps);
+        }
     }
     // writer_ is exclusively owned by this thread: close it here so stop() never
     // races with an in-progress write.
@@ -322,15 +334,18 @@ bool DrawAndStreamStage::ensureWriterOpened(const cv::Mat& frame, const char** o
     reconnect_attempts_.fetch_add(1, std::memory_order_relaxed);
     const int gop = (cfg_.gop > 0) ? cfg_.gop : std::max(1, static_cast<int>(std::lround(cfg_.fps)));
     if (writer_->open(cfg_.output_url, cfg_.protocol, cfg_.fps, gop, cfg_.bitrate_kbps, frame.cols, frame.rows)) {
-        LOG_INFO("DrawAndStreamStage[{}]: stream opened url={} protocol={} size={}x{} fps={}",
-                 id_, cfg_.output_url, cfg_.protocol, frame.cols, frame.rows, cfg_.fps);
-        reconnect_delay_ms_ = cfg_.reconnect_initial_ms;
-        consecutive_failures_.store(0, std::memory_order_relaxed);
+        // Opening the pipe only spawns the encoder/muxer; it does NOT confirm the
+        // sink is reachable (e.g. ffmpeg's popen succeeds before the RTMP connect).
+        // Backoff/failure counters are reset only once a frame is actually written,
+        // otherwise an unreachable sink resets its own backoff every cycle and
+        // hammers the endpoint at the initial interval.
+        LOG_DEBUG("DrawAndStreamStage[{}]: reconnect pipe opened url={} protocol={} size={}x{} fps={} (awaiting first write)",
+                  id_, cfg_.output_url, cfg_.protocol, frame.cols, frame.rows, cfg_.fps);
         last_backoff_timing_debug_log_ = {};
         return true;
     }
-    LOG_WARN("DrawAndStreamStage[{}]: stream open failed url={} protocol={} (attempt={})",
-             id_, cfg_.output_url, cfg_.protocol, reconnect_attempts_.load(std::memory_order_relaxed));
+    LOG_DEBUG("DrawAndStreamStage[{}]: stream open failed url={} protocol={} (attempt={})",
+              id_, cfg_.output_url, cfg_.protocol, reconnect_attempts_.load(std::memory_order_relaxed));
     if (out_skip_reason) *out_skip_reason = "open_failed";
     if (out_reconnect_wait_ms) *out_reconnect_wait_ms = 0;
     onStreamFailure("open");
@@ -338,18 +353,33 @@ bool DrawAndStreamStage::ensureWriterOpened(const cv::Mat& frame, const char** o
 }
 
 void DrawAndStreamStage::onStreamFailure(const char* phase) {
+    using namespace std::chrono;
     writer_->close();
     if (suppress_output_reopen_.load(std::memory_order_relaxed)) return;
     const auto failures = consecutive_failures_.fetch_add(1, std::memory_order_relaxed) + 1;
     const int  backoff_ms = reconnect_delay_ms_;
-    next_reconnect_at_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(backoff_ms);
+    const auto now = steady_clock::now();
+    next_reconnect_at_ = now + milliseconds(backoff_ms);
     reconnect_delay_ms_ = std::min(reconnect_delay_ms_ * 2, std::max(cfg_.reconnect_max_ms, cfg_.reconnect_initial_ms));
-    LOG_WARN("DrawAndStreamStage[{}]: stream {} failed, failures={}, scheduled_backoff_ms={}, next_backoff_ms={}",
-             id_,
-             phase,
-             failures,
-             backoff_ms,
-             reconnect_delay_ms_);
+
+    // Log convergence: a persistently unreachable sink retries forever (by design,
+    // so it recovers automatically when the sink comes back), but must not flood.
+    // WARN once when the stream first goes down, then a heartbeat WARN at most once
+    // per kPersistentDownWarnInterval; the intervening retries stay at DEBUG.
+    static constexpr auto kPersistentDownWarnInterval = seconds(30);
+    if (failures == 1) {
+        stream_connected_ = false;
+        last_persistent_down_warn_ = now;
+        LOG_WARN("DrawAndStreamStage[{}]: stream {} failed, entering reconnect backoff url={} backoff_ms={}",
+                 id_, phase, cfg_.output_url, backoff_ms);
+    } else if (now - last_persistent_down_warn_ >= kPersistentDownWarnInterval) {
+        last_persistent_down_warn_ = now;
+        LOG_WARN("DrawAndStreamStage[{}]: stream still down after {} attempts url={} backoff_ms={}",
+                 id_, failures, cfg_.output_url, backoff_ms);
+    } else {
+        LOG_DEBUG("DrawAndStreamStage[{}]: stream {} failed, failures={}, backoff_ms={}, next_backoff_ms={}",
+                  id_, phase, failures, backoff_ms, reconnect_delay_ms_);
+    }
 }
 
 bool DrawAndStreamStage::OpenCvStreamWriter::open(
@@ -402,13 +432,11 @@ bool DrawAndStreamStage::OpenCvStreamWriter::write(const cv::Mat& frame) {
 
 void DrawAndStreamStage::OpenCvStreamWriter::close() {
     if (pipe_ != nullptr) {
-        const int rc = pclose(pipe_);
+        // A non-zero ffmpeg exit here is the normal signal for an unreachable sink;
+        // the owning DrawAndStreamStage logs that with rate-limited context via
+        // onStreamFailure(), so we deliberately do not emit per-cycle stderr noise.
+        pclose(pipe_);
         pipe_ = nullptr;
-        if (rc != 0) {
-            // Log via stderr since we have no id_ in this inner class.
-            // Callers (DrawAndStreamStage) will log context around failures.
-            std::fprintf(stderr, "[DrawAndStreamStage] ffmpeg exited with status %d\n", rc);
-        }
     }
 }
 
