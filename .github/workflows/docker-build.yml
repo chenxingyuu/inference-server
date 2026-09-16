@@ -36,12 +36,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/inference-server-tensorrt
+          images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/inference-server
           tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=,format=short
+            type=raw,value=tensorrt
+            type=sha,prefix=tensorrt-,format=short
+            type=semver,pattern=tensorrt-{{version}}
+            type=semver,pattern=tensorrt-{{major}}.{{minor}}
 
       - name: Build and push (TensorRT)
         uses: docker/build-push-action@v5

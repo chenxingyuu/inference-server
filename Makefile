@@ -20,6 +20,9 @@ GODIR := $(dir $(GO))
 
 INFER_BIN := ./$(BUILD_DIR)/infer_server
 
+DOCKER_REGISTRY ?= registry.cn-hangzhou.aliyuncs.com/daxx
+DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
+
 help:
 	@echo "Common targets:"
 	@echo "  make build              # default: CPU build"
@@ -114,13 +117,23 @@ dev-web:
 	cd $(WEB_DIR) && $(PNPM) install && $(PNPM) run dev
 
 docker-build-infer-server:
-	DOCKER_BUILDKIT=1 docker build -t infer-server:latest -f docker/Dockerfile.infer-server .
-	docker tag infer-server:latest registry.cn-hangzhou.aliyuncs.com/daxx/infer-server:latest
-	docker push registry.cn-hangzhou.aliyuncs.com/daxx/infer-server:latest
+	docker buildx build \
+	  --platform=$(DOCKER_PLATFORMS) \
+	  -t $(DOCKER_REGISTRY)/infer-server:latest \
+	  -f docker/Dockerfile.infer-server \
+	  --provenance=false \
+	  --sbom=false \
+	  --push \
+	  .
 docker-build-infer-web:
-	DOCKER_BUILDKIT=1 docker build -t infer-web:latest -f docker/Dockerfile.infer-web .
-	docker tag infer-web:latest registry.cn-hangzhou.aliyuncs.com/daxx/infer-web:latest
-	docker push registry.cn-hangzhou.aliyuncs.com/daxx/infer-web:latest
+	docker buildx build \
+	  --platform=$(DOCKER_PLATFORMS) \
+	  -t $(DOCKER_REGISTRY)/infer-web:latest \
+	  -f docker/Dockerfile.infer-web \
+	  --provenance=false \
+	  --sbom=false \
+	  --push \
+	  .
 docker-build-cpu:
 	DOCKER_BUILDKIT=1 docker build -t inference-server:cpu -f docker/Dockerfile.cpu .
 	docker tag inference-server:cpu registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:cpu
