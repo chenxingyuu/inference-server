@@ -5,9 +5,7 @@
 	build-web dev-web \
 	run run-cpu run-gpu run-npu \
 	test validate clean \
-	docker-build-cpu docker-build-gpu docker-build-npu docker-build-infer-server docker-build-infer-web \
-	up up-cpu up-gpu up-npu \
-	down down-cpu down-gpu down-npu
+	docker-build-cpu docker-build-gpu docker-build-npu docker-build-infer-server docker-build-infer-web
 
 PNPM ?= $(shell which pnpm 2>/dev/null || echo pnpm)
 WEB_DIR := tools/infer-web
@@ -35,8 +33,6 @@ help:
 	@echo "  make test               # run ctest"
 	@echo "  make validate           # run scripts/validate-repo.sh"
 	@echo "  make clean              # remove build dir (recommended before backend switch)"
-	@echo "  make up|up-cpu|up-gpu|up-npu"
-	@echo "  make down|down-cpu|down-gpu|down-npu"
 	@echo "  make docker-build-cpu|docker-build-gpu|docker-build-npu|docker-build-infer-server"
 
 configure-cpu:
@@ -131,6 +127,7 @@ docker-build-cpu:
 	docker push registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:cpu
 docker-build-gpu:
 	DOCKER_BUILDKIT=1 docker build \
+	  --platform=linux/amd64 \
 	  -t inference-server:tensorrt \
 	  -f docker/Dockerfile.tensorrt \
 	  --build-arg TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
@@ -146,24 +143,3 @@ docker-build-npu:
 	  .
 	docker tag inference-server:ascend-cann6 registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend-cann6
 	docker push registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend-cann6
-up: up-cpu
-
-up-cpu:
-	docker compose -f docker/docker-compose.cpu.yml up -d
-
-up-gpu:
-	docker compose -f docker/docker-compose.nvidia.yml up -d
-
-up-npu:
-	docker compose -f docker/docker-compose.ascend.yml up -d
-
-down-cpu:
-	docker compose -f docker/docker-compose.cpu.yml down
-
-down: down-cpu
-
-down-gpu:
-	docker compose -f docker/docker-compose.nvidia.yml down
-
-down-npu:
-	docker compose -f docker/docker-compose.ascend.yml down

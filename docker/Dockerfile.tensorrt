@@ -11,9 +11,7 @@ FROM ${TRT_DEVEL_IMAGE} AS builder
 ARG APT_MIRROR=
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    if [ -n "${APT_MIRROR}" ]; then \
+RUN if [ -n "${APT_MIRROR}" ]; then \
     sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -54,9 +52,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
 FROM ${TRT_RUNTIME_IMAGE}
 ARG APT_MIRROR=
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    if [ -n "${APT_MIRROR}" ]; then \
+RUN if [ -n "${APT_MIRROR}" ]; then \
     sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
