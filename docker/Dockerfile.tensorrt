@@ -1,12 +1,13 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-# Builder uses the official TensorRT image which bundles TRT headers + libs.
-# Base images can be overridden at build time:
+# Builder uses the official TensorRT image (headers + full CUDA toolkit).
+# Runtime uses a slim CUDA base and only copies TRT/cuDNN shared libs needed
+# to run serialized .engine files.
 #   docker build \
 #     --build-arg TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
-#     --build-arg TRT_RUNTIME_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
+#     --build-arg TRT_RUNTIME_IMAGE=nvidia/cuda:12.3.2-runtime-ubuntu22.04 \
 #     -f docker/Dockerfile.tensorrt .
 ARG TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3
-ARG TRT_RUNTIME_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3
+ARG TRT_RUNTIME_IMAGE=nvidia/cuda:12.3.2-runtime-ubuntu22.04
 FROM ${TRT_DEVEL_IMAGE} AS builder
 ARG APT_MIRROR=
 
@@ -48,9 +49,43 @@ RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
     -DBUILD_GRPC_PUBLISHER=ON \
     && cmake --build build --parallel $(nproc)
 
+# Export TensorRT / cuDNN / related runtime .so files (not present on slim CUDA base).
+# Prefer packaging by soname from the linked binary, then add common plugin libs.
+RUN mkdir -p /export/trt-libs && \
+    ldd /src/build/infer_server | awk '/=>/ && $3 ~ /^\// {print $3}' | sort -u \
+      | while read -r lib; do \
+          case "$lib" in \
+            *libnvinfer*|*libnvonnxparser*|*libnvparsers*|*libnvinfer_plugin*|*libcudnn*|*libmyelin*) \
+              cp -aL "$lib" /export/trt-libs/ ;; \
+          esac; \
+        done && \
+    for pattern in \
+        '/usr/lib/x86_64-linux-gnu/libnvinfer*.so*' \
+        '/usr/lib/x86_64-linux-gnu/libnvinfer_plugin*.so*' \
+        '/usr/lib/x86_64-linux-gnu/libnvonnxparser*.so*' \
+        '/usr/lib/x86_64-linux-gnu/libnvparsers*.so*' \
+        '/usr/lib/x86_64-linux-gnu/libcudnn*.so*' \
+        '/usr/local/tensorrt/lib/libnvinfer*.so*' \
+        '/usr/local/tensorrt/lib/libnvinfer_plugin*.so*' \
+        '/opt/tensorrt/lib/libnvinfer*.so*' \
+        '/opt/tensorrt/lib/libnvinfer_plugin*.so*'; do \
+      for f in $pattern; do \
+        [ -e "$f" ] || continue; \
+        cp -aL "$f" /export/trt-libs/ 2>/dev/null || true; \
+      done; \
+    done && \
+    ls -la /export/trt-libs && \
+    test -n "$(ls -A /export/trt-libs)"
+
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
+ARG TRT_RUNTIME_IMAGE=nvidia/cuda:12.3.2-runtime-ubuntu22.04
 FROM ${TRT_RUNTIME_IMAGE}
 ARG APT_MIRROR=
+
+ENV DEBIAN_FRONTEND=noninteractive
+# Match NGC TensorRT containers: expose GPU compute + video decode to the process.
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
 
 RUN if [ -n "${APT_MIRROR}" ]; then \
     sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
@@ -66,10 +101,11 @@ RUN if [ -n "${APT_MIRROR}" ]; then \
     libprotobuf23 \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=builder /export/trt-libs/ /usr/local/lib/
 COPY --from=builder /src/build/infer_server /usr/local/bin/infer_server
 # hiredis is FetchContent-built when BUILD_REDIS_PUBLISHER=ON; not in apt runtime packages
 COPY --from=builder /src/build/_deps/hiredis-build/libhiredis.so* /usr/local/lib/
-RUN ldconfig
+RUN echo '/usr/local/lib' > /etc/ld.so.conf.d/infer-local.conf && ldconfig
 
 VOLUME ["/models", "/config"]
 ENTRYPOINT ["/usr/local/bin/infer_server", "/config/config.yaml"]
