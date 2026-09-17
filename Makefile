@@ -144,7 +144,7 @@ docker-build-gpu:
 	  -t inference-server:tensorrt \
 	  -f docker/Dockerfile.tensorrt \
 	  --build-arg TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
-	  --build-arg TRT_RUNTIME_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
+	  --build-arg TRT_RUNTIME_IMAGE=nvidia/cuda:12.3.2-runtime-ubuntu22.04 \
 	  .
 	docker tag inference-server:tensorrt registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:tensorrt
 	docker push registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:tensorrt
@@ -152,7 +152,8 @@ docker-build-npu:
 	DOCKER_BUILDKIT=1 docker build \
 	  -t inference-server:ascend-cann6 \
 	  -f docker/Dockerfile.ascend.cann6 \
-	  --build-arg ASCEND_BASE_IMAGE=registry.cn-hangzhou.aliyuncs.com/daxx/cann:6.0.1-310p-ubuntu20.04-py3.9 \
+	  --build-arg ASCEND_DEVEL_IMAGE=registry.cn-hangzhou.aliyuncs.com/daxx/cann:6.0.1-310p-ubuntu20.04-py3.9 \
+	  --build-arg ASCEND_RUNTIME_IMAGE=registry.cn-hangzhou.aliyuncs.com/daxx/cann:6.0.1-310p-ubuntu20.04-py3.9-runtime \
 	  .
 	docker tag inference-server:ascend-cann6 registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend-cann6
 	docker push registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend-cann6
