@@ -247,6 +247,8 @@ if(BUILD_GRPC_PUBLISHER)
 endif()
 
 # ── Redis publisher ───────────────────────────────────────────────────────────
+# Prefer vendored trees under third_party/ so Docker/CI builds do not need GitHub.
+# Fallback: FetchContent git clone when vendor dirs are absent (local/dev).
 # When FetchContent is used, always bundle hiredis too. If only redis++ is missing but
 # system hiredis is found, skipping FetchContent hiredis makes redis++ compile against
 # Homebrew hiredis headers while redis++ enables -Werror (Clang flexible-array-member).
@@ -254,12 +256,32 @@ if(BUILD_REDIS_PUBLISHER)
     find_package(redis++ QUIET)
     if(NOT redis++_FOUND)
         include(FetchContent)
-        FetchContent_Declare(hiredis
-            GIT_REPOSITORY https://github.com/redis/hiredis.git
-            GIT_TAG        v1.3.0
-            GIT_SHALLOW    TRUE
-            OVERRIDE_FIND_PACKAGE
-        )
+        set(_INFER_HIREDIS_VENDOR "${CMAKE_SOURCE_DIR}/third_party/hiredis")
+        set(_INFER_REDISPP_VENDOR "${CMAKE_SOURCE_DIR}/third_party/redis-plus-plus")
+        if(EXISTS "${_INFER_HIREDIS_VENDOR}/CMakeLists.txt"
+           AND EXISTS "${_INFER_REDISPP_VENDOR}/CMakeLists.txt")
+            message(STATUS "Redis deps: using vendored third_party/hiredis + redis-plus-plus")
+            FetchContent_Declare(hiredis
+                SOURCE_DIR "${_INFER_HIREDIS_VENDOR}"
+                OVERRIDE_FIND_PACKAGE
+            )
+            FetchContent_Declare(redis_plus_plus
+                SOURCE_DIR "${_INFER_REDISPP_VENDOR}"
+            )
+        else()
+            message(STATUS "Redis deps: FetchContent from GitHub (vendor trees not found)")
+            FetchContent_Declare(hiredis
+                GIT_REPOSITORY https://github.com/redis/hiredis.git
+                GIT_TAG        v1.3.0
+                GIT_SHALLOW    TRUE
+                OVERRIDE_FIND_PACKAGE
+            )
+            FetchContent_Declare(redis_plus_plus
+                GIT_REPOSITORY https://github.com/sewenew/redis-plus-plus.git
+                GIT_TAG        1.3.15
+                GIT_SHALLOW    TRUE
+            )
+        endif()
         set(DISABLE_TESTS ON CACHE BOOL "" FORCE)
         set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(hiredis)
@@ -283,11 +305,6 @@ if(BUILD_REDIS_PUBLISHER)
         endif()
         set(hiredis_INCLUDE_DIRS "${INFER_FETCHED_HIREDIS_INCLUDE}" CACHE INTERNAL "" FORCE)
 
-        FetchContent_Declare(redis_plus_plus
-            GIT_REPOSITORY https://github.com/sewenew/redis-plus-plus.git
-            GIT_TAG        1.3.15
-            GIT_SHALLOW    TRUE
-        )
         set(REDIS_PLUS_PLUS_BUILD_TEST   OFF CACHE BOOL "" FORCE)
         set(REDIS_PLUS_PLUS_BUILD_STATIC ON  CACHE BOOL "" FORCE)
         set(REDIS_PLUS_PLUS_BUILD_SHARED OFF CACHE BOOL "" FORCE)
