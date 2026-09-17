@@ -144,7 +144,7 @@ docker-build-gpu:
 	  -t inference-server:tensorrt \
 	  -f docker/Dockerfile.tensorrt \
 	  --build-arg TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
-	  --build-arg TRT_RUNTIME_IMAGE=nvidia/cuda:12.3.2-runtime-ubuntu22.04 \
+	  --build-arg TRT_RUNTIME_IMAGE=nvcr.io/nvidia/cuda:12.3.2-runtime-ubuntu22.04 \
 	  .
 	docker tag inference-server:tensorrt registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:tensorrt
 	docker push registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:tensorrt
