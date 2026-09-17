@@ -152,7 +152,8 @@ docker-build-npu:
 	DOCKER_BUILDKIT=1 docker build \
 	  -t inference-server:ascend-cann6 \
 	  -f docker/Dockerfile.ascend.cann6 \
-	  --build-arg ASCEND_BASE_IMAGE=registry.cn-hangzhou.aliyuncs.com/daxx/cann:6.0.1-310p-ubuntu20.04-py3.9 \
+	  --build-arg ASCEND_DEVEL_IMAGE=registry.cn-hangzhou.aliyuncs.com/daxx/cann:6.0.1-310p-ubuntu20.04-py3.9 \
+	  --build-arg ASCEND_RUNTIME_IMAGE=registry.cn-hangzhou.aliyuncs.com/daxx/cann:6.0.1-310p-ubuntu20.04-py3.9-runtime \
 	  .
 	docker tag inference-server:ascend-cann6 registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend-cann6
 	docker push registry.cn-hangzhou.aliyuncs.com/daxx/inference-server:ascend-cann6

@@ -8,7 +8,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.ascend.cann6
       args:
-        ASCEND_BASE_IMAGE: ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+        ASCEND_DEVEL_IMAGE: ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+        ASCEND_RUNTIME_IMAGE: ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9-runtime
     ports:
       - "50051:50051"
       - "8080:8080"
@@ -27,8 +28,8 @@ services:
       - infer-frames:/data/frames
     environment:
       - ASCEND_DEVICE_ID=0
-      - ASCEND_HOME=/usr/local/Ascend/ascend-toolkit/latest
-      - LD_LIBRARY_PATH=/usr/local/Ascend/ascend-toolkit/latest/lib64:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:/usr/local/lib:/usr/lib
+      - ASCEND_HOME=/usr/local/Ascend/nnrt/latest
+      - LD_LIBRARY_PATH=/usr/local/Ascend/nnrt/latest/lib64:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:/usr/local/lib:/usr/lib
       - ASCEND_GLOBAL_LOG_LEVEL=2
     depends_on:
       kafka:

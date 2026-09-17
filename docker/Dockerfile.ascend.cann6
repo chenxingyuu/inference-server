@@ -1,8 +1,13 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
 # Atlas 300I Pro + CANN 6.x (Ubuntu 20.04)
-# Override at build time: docker build --build-arg ASCEND_BASE_IMAGE=... -f docker/Dockerfile.ascend.cann6 .
-ARG ASCEND_BASE_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
-FROM ${ASCEND_BASE_IMAGE} AS builder
+# Builder needs the full toolkit image (headers + g++). Runtime can use nnrt-only.
+#   docker build \
+#     --build-arg ASCEND_DEVEL_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9 \
+#     --build-arg ASCEND_RUNTIME_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9-runtime \
+#     -f docker/Dockerfile.ascend.cann6 .
+ARG ASCEND_DEVEL_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+ARG ASCEND_RUNTIME_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+FROM ${ASCEND_DEVEL_IMAGE} AS builder
 ARG APT_MIRROR=
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -10,6 +15,7 @@ RUN if [ -n "${APT_MIRROR}" ]; then \
     sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     python3-pip ninja-build pkg-config git \
     ccache \
     libssl-dev \
@@ -46,8 +52,8 @@ RUN --mount=type=cache,target=/root/.cache/ccache,sharing=locked \
     && cmake --build build --parallel $(nproc)
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-ARG ASCEND_BASE_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
-FROM ${ASCEND_BASE_IMAGE}
+ARG ASCEND_RUNTIME_IMAGE=ascendai/cann:6.0.1-310p-ubuntu20.04-py3.9
+FROM ${ASCEND_RUNTIME_IMAGE}
 ARG APT_MIRROR=
 
 RUN if [ -n "${APT_MIRROR}" ]; then \
