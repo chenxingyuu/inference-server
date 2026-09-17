@@ -4,10 +4,12 @@
 # to run serialized .engine files.
 #   docker build \
 #     --build-arg TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3 \
-#     --build-arg TRT_RUNTIME_IMAGE=nvidia/cuda:12.3.2-runtime-ubuntu22.04 \
+#     --build-arg TRT_RUNTIME_IMAGE=nvcr.io/nvidia/cuda:12.3.2-runtime-ubuntu22.04 \
 #     -f docker/Dockerfile.tensorrt .
+# Prefer nvcr.io for CUDA runtime: Docker Hub / Aliyun mirrors often lack this tag
+# or return insufficient_scope when docker.io/nvidia/cuda is redirected.
 ARG TRT_DEVEL_IMAGE=nvcr.io/nvidia/tensorrt:24.02-py3
-ARG TRT_RUNTIME_IMAGE=nvidia/cuda:12.3.2-runtime-ubuntu22.04
+ARG TRT_RUNTIME_IMAGE=nvcr.io/nvidia/cuda:12.3.2-runtime-ubuntu22.04
 FROM ${TRT_DEVEL_IMAGE} AS builder
 ARG APT_MIRROR=
 
@@ -78,7 +80,7 @@ RUN mkdir -p /export/trt-libs && \
     test -n "$(ls -A /export/trt-libs)"
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-ARG TRT_RUNTIME_IMAGE=nvidia/cuda:12.3.2-runtime-ubuntu22.04
+ARG TRT_RUNTIME_IMAGE=nvcr.io/nvidia/cuda:12.3.2-runtime-ubuntu22.04
 FROM ${TRT_RUNTIME_IMAGE}
 ARG APT_MIRROR=
 
