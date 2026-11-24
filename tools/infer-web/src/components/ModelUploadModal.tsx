@@ -40,6 +40,8 @@ function describeError(error: unknown, t: ReturnType<typeof useT>['t']) {
       case 'already_exists': return t('models.upload_conflict')
       case 'publish_busy': return t('models.publish_busy')
       case 'engine_unavailable': return t('models.engine_unavailable')
+      case 'publication_auth_required': return t('models.publication_auth_required')
+      case 'unauthorized': return t('models.publication_unauthorized')
       case 'upload_expired': return t('models.upload_expired')
     }
   }

@@ -266,7 +266,7 @@ func inspectUpload(dir string) (uploadDraft, ArchiveAnalysisResponse, error) {
 	}
 	if draft.Backend == "ascend" {
 		if config.WeightFile != "" && len(config.OMPaths) == 0 {
-			config.OMPaths = map[int]string{1: config.WeightFile}
+			config.OMPaths = map[int]string{max(1, config.BatchSize): config.WeightFile}
 		}
 		if len(config.OMPaths) > 0 {
 			seen := make(map[string]bool)
@@ -284,7 +284,9 @@ func inspectUpload(dir string) (uploadDraft, ArchiveAnalysisResponse, error) {
 		} else {
 			for name := range weightsByName {
 				batch := 1
-				if match := omBatchPattern.FindStringSubmatch(strings.ToLower(filepath.Base(name))); len(match) == 2 {
+				if len(weightsByName) == 1 && config.BatchSize > 0 {
+					batch = config.BatchSize
+				} else if match := omBatchPattern.FindStringSubmatch(strings.ToLower(filepath.Base(name))); len(match) == 2 {
 					batch, _ = strconv.Atoi(match[1])
 				}
 				if batch < 1 || draft.OMPaths[batch] != "" {
@@ -371,6 +373,22 @@ func writeUploadError(c *gin.Context, status int, code, message, token string) {
 		body["token"] = token
 	}
 	c.JSON(status, body)
+}
+
+func registerModelUploadRoutes(router gin.IRoutes) {
+	authenticate := authMiddleware()
+	requireKey := func(c *gin.Context) {
+		if apiKey == "" {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, ErrorResponse{
+				Status: "error", Code: "publication_auth_required",
+				Message: "Configure INFER_API_KEY on the management server to enable model publication",
+			})
+			return
+		}
+		authenticate(c)
+	}
+	router.POST("/models/upload/analyze", requireKey, handleAnalyzeArchive)
+	router.POST("/models/upload", requireKey, handleUploadModel)
 }
 
 func parseUploadRequest(c *gin.Context) bool {
@@ -506,6 +524,7 @@ func stageUpload(c *gin.Context, file *multipart.FileHeader, archive bool) (Arch
 //	@Failure	400	{object}	ErrorResponse
 //	@Failure	401	{object}	ErrorResponse
 //	@Failure	413	{object}	ErrorResponse
+//	@Failure	503	{object}	ErrorResponse "Model publication requires INFER_API_KEY"
 //	@Router		/models/upload/analyze [post]
 func handleAnalyzeArchive(c *gin.Context) {
 	if !parseUploadRequest(c) {
@@ -745,7 +764,7 @@ func publishUpload(c *gin.Context, id, token string) {
 		}
 		status := http.StatusBadRequest
 		switch code {
-		case "already_exists", "already_published", "publish_busy":
+		case "already_exists", "already_published", "publish_busy", "startup_config_invalid":
 			status = http.StatusConflict
 		case "upload_expired":
 			status = http.StatusGone
@@ -794,7 +813,7 @@ func publishUpload(c *gin.Context, id, token string) {
 //	@Failure	409	{object}	ErrorResponse
 //	@Failure	410	{object}	ErrorResponse
 //	@Failure	413	{object}	ErrorResponse
-//	@Failure	503	{object}	ErrorResponse
+//	@Failure	503	{object}	ErrorResponse "Engine unavailable or publication requires INFER_API_KEY"
 //	@Router		/models/upload [post]
 func handleUploadModel(c *gin.Context) {
 	if !parseUploadRequest(c) {

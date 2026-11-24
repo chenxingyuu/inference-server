@@ -16,6 +16,8 @@ The validation script fails if any required harness files are missing:
 
 When code files change, docs must be updated in the same change set unless an explicit skip reason is provided.
 
+The gate checks the branch diff, staged changes, and unstaged changes to tracked files.
+
 ### Triggered Code Paths
 
 `CODE_PATHS_REGEX` default:

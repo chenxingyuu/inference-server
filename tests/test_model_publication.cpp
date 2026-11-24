@@ -23,6 +23,7 @@ protected:
         const char* dir = mkdtemp(pattern.data());
         ASSERT_NE(dir, nullptr);
         root_ = fs::canonical(dir);
+        writeConfig();
     }
 
     void TearDown() override {
@@ -30,11 +31,21 @@ protected:
     }
 
     std::unique_ptr<TaskManager> manager(TaskManager::ModelProbe probe) const {
-        AppConfig cfg;
-        cfg.server.model_repository = root_.string();
-        return std::make_unique<TaskManager>(std::move(cfg), (root_ / "server.yaml").string(),
+        return std::make_unique<TaskManager>(loadConfig(configPath()), configPath(),
                                              std::unordered_map<std::string, IPublisher*>{},
                                              nullptr, std::move(probe));
+    }
+
+    std::string configPath() const { return (root_ / "server.yaml").string(); }
+
+    void writeConfig(bool root_classifier = false) const {
+        std::ofstream config(configPath());
+        config << "server:\n  model_repository: \"" << root_.string() << "\"\n"
+               << "publishers:\n  - id: test\n    type: kafka\n";
+        if (root_classifier) {
+            config << "models:\n  - id: classifier\n    backend: cpu\n"
+                   << "    model_type: classifier\n    input_size: [96, 128]\n";
+        }
     }
 
     fs::path stage(const std::string& id, const std::string& token = kToken, bool cascade = false) {
@@ -92,8 +103,43 @@ TEST_F(ModelPublicationTest, MissingCascadeDependencyLeavesRepositoryUnchanged) 
     ModelConfig classifier;
     classifier.id = "classifier";
     ASSERT_TRUE(tm->loadModel(classifier));
+    const auto result = tm->publishModel("vehicle", kToken, kAttempt);
+    EXPECT_EQ(result.code, "missing_dependency");
+    EXPECT_NE(result.message.find("startup config or model repository"), std::string::npos);
+    EXPECT_EQ(checks, 0);
+    EXPECT_FALSE(fs::exists(root_ / "vehicle"));
+    EXPECT_TRUE(fs::exists(candidate));
+}
+
+TEST_F(ModelPublicationTest, CascadeDependencyFromRootConfigSurvivesRestart) {
+    writeConfig(true);
+    stage("vehicle", kToken, true);
+    int checks = 0;
+    auto tm = manager([&](const auto&) { ++checks; });
+
     EXPECT_TRUE(tm->publishModel("vehicle", kToken, kAttempt).code.empty());
     EXPECT_EQ(checks, 1);
+    EXPECT_EQ(manager({})->listModels().size(), 2u);
+}
+
+TEST_F(ModelPublicationTest, CascadeDependencyFromRepositorySurvivesRestart) {
+    stage("vehicle", kToken, true);
+    auto tm = manager([](const auto&) {});
+    fs::rename(stage("classifier"), root_ / "classifier");
+    ASSERT_TRUE(tm->loadFromRepository("classifier"));
+
+    EXPECT_TRUE(tm->publishModel("vehicle", kToken, kAttempt).code.empty());
+    EXPECT_EQ(manager({})->listModels().size(), 2u);
+}
+
+TEST_F(ModelPublicationTest, CascadeDependencyRemovedFromStartupConfigDuringProbeBlocksCommit) {
+    writeConfig(true);
+    const auto candidate = stage("vehicle", kToken, true);
+    auto tm = manager([&](const auto&) { writeConfig(); });
+
+    EXPECT_EQ(tm->publishModel("vehicle", kToken, kAttempt).code, "missing_dependency");
+    EXPECT_TRUE(fs::exists(candidate));
+    EXPECT_FALSE(fs::exists(root_ / "vehicle"));
 }
 
 TEST_F(ModelPublicationTest, ConcurrentUploadsCannotOverwriteSameModel) {

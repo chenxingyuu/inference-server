@@ -56,6 +56,7 @@ services:
       - INFER_SOCKET=/var/run/infer/infer.sock
       - INFER_STATE_FILE=/var/lib/infer-server/state.json
       - MODEL_REPOSITORY=/models
+      - INFER_API_KEY=${INFER_API_KEY:-}
     volumes:
       - ../models:/models
       - infer-socket:/var/run/infer:ro

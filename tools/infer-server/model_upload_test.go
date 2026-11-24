@@ -18,16 +18,58 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+const testModelUploadKey = "test-model-upload-key"
+
 func modelUploadRouter(t *testing.T) (*gin.Engine, string) {
 	t.Helper()
 	repo := t.TempDir()
-	oldPath, oldCall := modelRepositoryPath, callFn
+	oldPath, oldCall, oldKey := modelRepositoryPath, callFn, apiKey
 	modelRepositoryPath = repo
-	t.Cleanup(func() { modelRepositoryPath, callFn = oldPath, oldCall })
+	apiKey = testModelUploadKey
+	t.Cleanup(func() { modelRepositoryPath, callFn, apiKey = oldPath, oldCall, oldKey })
 	router := gin.New()
-	router.POST("/models/upload", handleUploadModel)
-	router.POST("/models/upload/analyze", handleAnalyzeArchive)
+	registerModelUploadRoutes(router)
 	return router, repo
+}
+
+type unreadUploadBody struct{ t *testing.T }
+
+func (b unreadUploadBody) Read([]byte) (int, error) {
+	b.t.Error("unauthorized upload must be rejected before reading the body")
+	return 0, errors.New("unexpected upload body read")
+}
+
+func TestUploadRoutesRejectRequestsBeforeReadingTheBody(t *testing.T) {
+	router, repo := modelUploadRouter(t)
+	callFn = func(map[string]any) (map[string]any, error) {
+		t.Error("unauthorized upload must not reach the engine")
+		return nil, errors.New("unexpected engine call")
+	}
+
+	for _, scenario := range []struct {
+		name, key, authorization string
+		status                   int
+		code                     string
+	}{
+		{"not configured", "", "Bearer " + testModelUploadKey, http.StatusServiceUnavailable, "publication_auth_required"},
+		{"missing credentials", testModelUploadKey, "", http.StatusUnauthorized, "unauthorized"},
+		{"wrong credentials", testModelUploadKey, "Bearer invalid", http.StatusUnauthorized, "unauthorized"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			apiKey = scenario.key
+			for _, path := range []string{"/models/upload/analyze", "/models/upload"} {
+				request := httptest.NewRequest(http.MethodPost, path, unreadUploadBody{t})
+				request.Header.Set("Content-Type", "multipart/form-data; boundary=upload")
+				request.Header.Set("Authorization", scenario.authorization)
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, request)
+				requireUploadStatus(t, response, scenario.status, scenario.code)
+			}
+			if _, err := os.Stat(filepath.Join(repo, ".uploads")); !os.IsNotExist(err) {
+				t.Fatalf("rejected uploads must not create a draft directory: %v", err)
+			}
+		})
+	}
 }
 
 func uploadMultipart(t *testing.T, router http.Handler, path string, fields map[string]string,
@@ -52,6 +94,7 @@ func uploadMultipart(t *testing.T, router http.Handler, path string, fields map[
 	}
 	request := httptest.NewRequest(http.MethodPost, path, &body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Authorization", "Bearer "+testModelUploadKey)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response
@@ -85,6 +128,7 @@ func postPublish(t *testing.T, router http.Handler, id, token string, fields url
 	fields.Set("token", token)
 	request := httptest.NewRequest(http.MethodPost, "/models/upload", strings.NewReader(fields.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer "+testModelUploadKey)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response
@@ -289,4 +333,55 @@ func TestAscendArchiveKeepsExplicitBatchMapping(t *testing.T) {
 		return map[string]any{"status": "ok", "id": "ascend"}, nil
 	}
 	requireUploadStatus(t, postPublish(t, router, "ascend", preview.Token, nil), http.StatusCreated, "")
+}
+
+func TestAscendSingleWeightKeepsCompiledBatch(t *testing.T) {
+	for _, scenario := range []struct {
+		name, archiveConfig, expectedWeight string
+		compiledBatch, scheduledBatch       int
+	}{
+		{"weight_file", "batch_size: 4\nweight_file: detector.om\n", "detector.om", 4, 2},
+		{"sole archive weight", "batch_size: 4\n", "detector.om", 4, 4},
+		{"bare weight", "", "model_b1.om", 1, 1},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			router, repo := modelUploadRouter(t)
+			path := "/models/upload/analyze"
+			var response *httptest.ResponseRecorder
+			if scenario.archiveConfig == "" {
+				response = uploadMultipart(t, router, path, nil, "file", "detector_b4.om", []byte("weights"))
+			} else {
+				body := uploadArchive(t, map[string]string{
+					"config.yaml":   "backend: ascend\ninput_size: [640, 640]\n" + scenario.archiveConfig,
+					"1/detector.om": "weights",
+				})
+				response = uploadMultipart(t, router, path, nil, "archive", "weights.zip", body)
+			}
+			preview := getUploadPreview(t, response)
+			if preview.BatchSize != scenario.compiledBatch {
+				t.Fatalf("wrong preview batch: %+v", preview)
+			}
+			callFn = func(command map[string]any) (map[string]any, error) {
+				path := filepath.Join(repo, ".uploads", preview.Token, command["attempt"].(string), "ascend", "config.yaml")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var config modelUploadConfig
+				if err := yaml.Unmarshal(data, &config); err != nil {
+					t.Fatal(err)
+				}
+				if len(config.OMPaths) != 1 || config.OMPaths[scenario.compiledBatch] != scenario.expectedWeight ||
+					config.BatchSize != scenario.scheduledBatch {
+					t.Fatalf("wrong compiled or scheduled batch: %s", data)
+				}
+				return map[string]any{"status": "ok", "id": "ascend"}, nil
+			}
+			var overrides url.Values
+			if scenario.scheduledBatch == 2 {
+				overrides = url.Values{"batch_size": {"2"}}
+			}
+			requireUploadStatus(t, postPublish(t, router, "ascend", preview.Token, overrides), http.StatusCreated, "")
+		})
+	}
 }

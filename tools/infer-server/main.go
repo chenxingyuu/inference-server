@@ -628,7 +628,7 @@ func callDelete(c *gin.Context, cmd string, onSuccess func(id string)) {
 
 func main() {
 	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "WARNING: INFER_API_KEY not set; management endpoints are unprotected")
+		fmt.Fprintln(os.Stderr, "WARNING: INFER_API_KEY not set; model uploads are disabled and other management endpoints are unprotected")
 	}
 
 	var err error
@@ -652,6 +652,7 @@ func main() {
 	r.GET("/healthz", handleHealthz)
 	r.GET("/metrics", handleMetrics)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	registerModelUploadRoutes(r)
 
 	// Protected management endpoints.
 	api := r.Group("/")
@@ -673,8 +674,6 @@ func main() {
 	api.DELETE("/models/:id", handleUnloadModel)
 	api.GET("/models/repository", handleListRepository)
 	api.POST("/models/repository/:id/load", handleLoadFromRepository)
-	api.POST("/models/upload/analyze", handleAnalyzeArchive)
-	api.POST("/models/upload", handleUploadModel)
 
 	api.GET("/tasks", handleListTasks)
 	api.POST("/tasks", handleAddTask)

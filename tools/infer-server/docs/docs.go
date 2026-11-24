@@ -428,7 +428,7 @@ const docTemplate = `{
                         }
                     },
                     "503": {
-                        "description": "Service Unavailable",
+                        "description": "Engine unavailable or publication requires INFER_API_KEY",
                         "schema": {
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
@@ -506,6 +506,12 @@ const docTemplate = `{
                     },
                     "413": {
                         "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Model publication requires INFER_API_KEY",
                         "schema": {
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }

@@ -54,13 +54,16 @@ else
   diff_range="HEAD~1...HEAD"
 fi
 
-changed_files="$(git diff --name-only "${diff_range}" || true)"
-if [[ -z "${changed_files}" ]]; then
-  changed_files="$(git diff --name-only || true)"
-fi
+changed_files="$(
+  {
+    git diff --name-only "${diff_range}"
+    git diff --cached --name-only
+    git diff --name-only
+  } | LC_ALL=C sort -u
+)"
 
 echo
-echo "== Changed files (${diff_range}) =="
+echo "== Changed files (${diff_range}, index and working tree) =="
 if [[ -n "${changed_files}" ]]; then
   echo "${changed_files}"
 else

@@ -649,7 +649,7 @@ ModelPublishResult TaskManager::publishModel(const std::string& id, const std::s
             return {"invalid_model", e.what()};
         }
 
-        auto checkDependencies = [&]() -> ModelPublishResult {
+        auto checkRegisteredDependencies = [&]() -> ModelPublishResult {
             for (const auto& item : model.cascade) {
                 if (!cfg_.findModel(item.model_id)) {
                     return {"missing_dependency", "register cascade model first: " + item.model_id};
@@ -659,9 +659,28 @@ ModelPublishResult TaskManager::publishModel(const std::string& id, const std::s
         };
         {
             std::lock_guard lock(mu_);
-            auto result = checkDependencies();
+            auto result = checkRegisteredDependencies();
             if (!result.code.empty()) return result;
         }
+
+        auto checkStartupDependencies = [&]() -> ModelPublishResult {
+            if (model.cascade.empty()) return {};
+            try {
+                const auto startup = loadConfig(config_path_);
+                for (const auto& item : model.cascade) {
+                    if (!startup.findModel(item.model_id)) {
+                        return {"missing_dependency", "add cascade model to the startup config or model repository: " +
+                                                      item.model_id};
+                    }
+                }
+            } catch (const std::exception& e) {
+                return {"startup_config_invalid", "cannot resolve cascade models from startup config: " +
+                                                  std::string(e.what())};
+            }
+            return {};
+        };
+        auto result = checkStartupDependencies();
+        if (!result.code.empty()) return result;
 
         try {
             model_probe_(candidate);
@@ -669,10 +688,13 @@ ModelPublishResult TaskManager::publishModel(const std::string& id, const std::s
             return {"weight_check_failed", e.what()};
         }
 
-        std::lock_guard lock(mu_);
-        auto result = checkId();
+        result = checkStartupDependencies();
         if (!result.code.empty()) return result;
-        result = checkDependencies();
+
+        std::lock_guard lock(mu_);
+        result = checkId();
+        if (!result.code.empty()) return result;
+        result = checkRegisteredDependencies();
         if (!result.code.empty()) return result;
 
         cfg_.models.reserve(cfg_.models.size() + 1);

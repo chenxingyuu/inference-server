@@ -65,7 +65,7 @@ Operational detail: `docs/ascend-guide.md` §12–§14.
 - Duplicate `id` between root `models:` and repository models is a **hard error**. `cascade[].model_id` references must resolve after this merge (`validateCascadeModelRefs`).
 - **Hot-swap caveat**: DAG stages snapshot `ModelConfig` at graph build time (`StageFactory` → `InferEngineWorkerStage`); changing files on disk does not update an already-built graph without a process restart or explicit rebuild of executors.
 
-- Web publication stages one model under the shared repository's hidden `.uploads` directory. `publish_model` uses a bounded child process to load the weights with the enabled backend. After checking the candidate and its cascade references, `TaskManager` atomically renames the directory into the repository and registers it. Retrying the token and model ID reconciles a lost response. Repository scans skip drafts, and existing task graphs are unaffected.
+- Web publication requires a configured management API key and authenticates uploads before reading the request body. It stages one model under the shared repository's hidden `.uploads` directory. `publish_model` uses a bounded child process to load the weights with the enabled backend. Cascade dependencies must be registered and resolvable from the startup config and repository merge. After validation, `TaskManager` atomically renames the directory into the repository and registers it. Retrying the token and model ID reconciles a lost response.
 
 ## Publishers
 
