@@ -63,7 +63,7 @@ TEST(TaskManagerPlaceholder, SinkStreamOutputUrlSupportsTaskAndSourcePlaceholder
     auto archiver = std::make_shared<FrameArchiver>(FrameArchiveConfig{});
     const std::string config_path = makeTempConfigPath("ok");
 
-    TaskManager manager(std::move(cfg), config_path, publisher, archiver);
+    TaskManager manager(std::move(cfg), config_path, {{"default", &publisher}}, archiver);
     EXPECT_NO_THROW(manager.loadAll());
     std::remove((config_path + ".state.json").c_str());
 }
@@ -74,7 +74,7 @@ TEST(TaskManagerPlaceholder, SinkStreamOutputUrlUnknownPlaceholderThrows) {
     auto archiver = std::make_shared<FrameArchiver>(FrameArchiveConfig{});
     const std::string config_path = makeTempConfigPath("bad");
 
-    TaskManager manager(std::move(cfg), config_path, publisher, archiver);
+    TaskManager manager(std::move(cfg), config_path, {{"default", &publisher}}, archiver);
     EXPECT_THROW(manager.loadAll(), std::runtime_error);
     std::remove((config_path + ".state.json").c_str());
 }
@@ -85,7 +85,7 @@ TEST(TaskManagerPlaceholder, SinkStreamOutputUrlUnterminatedPlaceholderThrows) {
     auto archiver = std::make_shared<FrameArchiver>(FrameArchiveConfig{});
     const std::string config_path = makeTempConfigPath("unterminated");
 
-    TaskManager manager(std::move(cfg), config_path, publisher, archiver);
+    TaskManager manager(std::move(cfg), config_path, {{"default", &publisher}}, archiver);
     EXPECT_THROW(manager.loadAll(), std::runtime_error);
     std::remove((config_path + ".state.json").c_str());
 }
@@ -96,7 +96,7 @@ TEST(TaskManagerPlaceholder, SinkStreamOutputUrlWithoutPlaceholdersStillWorks) {
     auto archiver = std::make_shared<FrameArchiver>(FrameArchiveConfig{});
     const std::string config_path = makeTempConfigPath("compat");
 
-    TaskManager manager(std::move(cfg), config_path, publisher, archiver);
+    TaskManager manager(std::move(cfg), config_path, {{"default", &publisher}}, archiver);
     EXPECT_NO_THROW(manager.loadAll());
     std::remove((config_path + ".state.json").c_str());
 }

@@ -12,6 +12,7 @@
 #include "publisher/GrpcPublisher.h"
 #endif
 #include "server/UnixSocketServer.h"
+#include "server/ModelProbe.h"
 #include "archive/FrameArchiver.h"
 #include "archive/FrameRetentionGc.h"
 #include <csignal>
@@ -80,6 +81,10 @@ void logConfiguredPipelinesAndTasks(const infer::AppConfig& cfg) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    if (argc == 3 && std::string(argv[1]) == "--probe-model") {
+        infer::initLogger("warning");
+        return infer::runModelProbe(argv[2]);
+    }
     const std::string config_path = (argc > 1) ? argv[1] : "/config/config.yaml";
 
     // ── Init logging ──────────────────────────────────────────────────────────
@@ -96,7 +101,9 @@ int main(int argc, char* argv[]) {
     }
 
     // cfg will be moved into TaskManager. Snapshot fields needed afterwards.
-    const auto mgmt_socket_path = cfg.server.socket_path;
+    const char* socket_override = std::getenv("INFER_SOCKET");
+    const auto mgmt_socket_path = socket_override && *socket_override
+                                   ? std::string(socket_override) : cfg.server.socket_path;
     const auto task_count       = cfg.tasks.size();
 
     // Re-apply log level from config now that it is parsed.
@@ -134,7 +141,10 @@ int main(int argc, char* argv[]) {
     infer::FrameRetentionGc frame_gc(cfg.frame_archive);
     frame_gc.start();
     infer::TaskManager task_manager(
-        std::move(cfg), config_path, std::move(publisher_registry), frame_archiver);
+        std::move(cfg), config_path, std::move(publisher_registry), frame_archiver,
+        [executable = std::string(argv[0])](const auto& dir) {
+            infer::probeModelInChild(executable, dir);
+        });
     task_manager.loadAll();
     task_manager.startAll();
 

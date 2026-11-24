@@ -404,7 +404,7 @@ target_compile_definitions(infer_core PUBLIC
 )
 
 # ── Executable ────────────────────────────────────────────────────────────────
-add_executable(infer_server src/main.cpp)
+add_executable(infer_server src/main.cpp src/server/ModelProbe.cpp)
 target_link_libraries(infer_server PRIVATE infer_core)
 
 # AscendCL pulls additional toolkit libs (e.g. libascend_hal.so) through DT_NEEDED.

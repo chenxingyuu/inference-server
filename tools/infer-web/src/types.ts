@@ -143,6 +143,9 @@ export interface ArchiveAnalysis {
   nms_thresh: number
   num_classes: number
   instance_count: number
+  input_size?: [number, number]
+  device_id: number
+  device_ids?: number[]
   has_config: boolean
   files_found: string[]
 }

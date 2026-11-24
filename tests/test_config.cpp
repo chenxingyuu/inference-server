@@ -205,6 +205,7 @@ TEST(LoadConfig, LogLevelDefaultsToInfo) {
     const std::string path = "data/test_log_level_default.yaml";
     {
         std::ofstream out(path);
+        out << "publishers:\n  - id: test_publisher\n    type: kafka\n";
         out << "sources:\n";
         out << "  - id: cam_1\n";
         out << "    url: rtsp://localhost/test\n";
@@ -737,6 +738,7 @@ TEST(LoadConfig, FrameArchiveWorkerCountDefaultsToOne) {
     const std::string path = "data/test_frame_archive_worker_default.yaml";
     {
         std::ofstream out(path);
+        out << "publishers:\n  - id: test_publisher\n    type: kafka\n";
         out << "sources:\n";
         out << "  - id: cam_1\n";
         out << "    url: rtsp://localhost/test\n";
@@ -840,6 +842,7 @@ TEST(LoadConfig, FrameArchiveRetentionInvalidMaxAgeThrows) {
 // ── device_ids validation ─────────────────────────────────────────────────
 
 static void writeMinimalYamlHeader(std::ostream& out) {
+    out << "publishers:\n  - id: test_publisher\n    type: kafka\n";
     out << "sources:\n";
     out << "  - id: cam_1\n";
     out << "    url: rtsp://localhost/test\n";

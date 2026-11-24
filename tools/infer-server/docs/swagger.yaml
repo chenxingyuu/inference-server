@@ -8,12 +8,24 @@ definitions:
         type: integer
       conf_thresh:
         type: number
+      device_id:
+        type: integer
+      device_ids:
+        items:
+          type: integer
+        type: array
+      expires_at:
+        type: string
       files_found:
         items:
           type: string
         type: array
       has_config:
         type: boolean
+      input_size:
+        items:
+          type: integer
+        type: array
       instance_count:
         type: integer
       model_type:
@@ -554,43 +566,62 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: |-
-        Accepts multipart/form-data. Server generates config.yaml from form fields.
-        For Ascend: supply batch_1 file (required) and batch_4/batch_8/batch_16 (optional).
-        Alternatively, supply a token from POST /models/upload/analyze to deploy a previously analyzed archive.
-        For TRT: supply engine file. For CPU: supply onnx file.
+      - application/x-www-form-urlencoded
       parameters:
-      - description: Model ID (^[A-Za-z0-9_-]+$)
+      - description: Model ID (letters, numbers, _ and -)
         in: formData
         name: id
         required: true
         type: string
-      - description: Backend
-        enum:
-        - cpu
-        - trt
-        - ascend
+      - description: Token returned by upload/analyze
+        in: formData
+        name: token
+        type: string
+      - description: Backend for a direct upload
         in: formData
         name: backend
-        required: true
         type: string
+      - description: ONNX weight for a direct upload
+        in: formData
+        name: onnx
+        type: file
+      - description: TensorRT weight for a direct upload
+        in: formData
+        name: engine
+        type: file
+      - description: Ascend Batch 1 weight for a direct upload
+        in: formData
+        name: batch_1
+        type: file
+      - description: Optional Ascend Batch 4 weight for a direct upload
+        in: formData
+        name: batch_4
+        type: file
+      - description: Optional Ascend Batch 8 weight for a direct upload
+        in: formData
+        name: batch_8
+        type: file
+      - description: Optional Ascend Batch 16 weight for a direct upload
+        in: formData
+        name: batch_16
+        type: file
       - description: YOLO version
-        enum:
-        - v5
-        - v8
-        - v11
-        - v26
         in: formData
         name: yolo_version
         type: string
       - description: Model type
-        enum:
-        - detector
-        - classifier
         in: formData
         name: model_type
         type: string
-      - description: Max batch size
+      - description: Model input height
+        in: formData
+        name: input_height
+        type: integer
+      - description: Model input width
+        in: formData
+        name: input_width
+        type: integer
+      - description: Batch size
         in: formData
         name: batch_size
         type: integer
@@ -610,30 +641,14 @@ paths:
         in: formData
         name: instance_count
         type: integer
-      - description: TRT .engine file
+      - description: Default device ID
         in: formData
-        name: engine
-        type: file
-      - description: ONNX .onnx file
+        name: device_id
+        type: integer
+      - description: Comma-separated device IDs
         in: formData
-        name: onnx
-        type: file
-      - description: Ascend .om for batch=1 (required for Ascend)
-        in: formData
-        name: batch_1
-        type: file
-      - description: Ascend .om for batch=4
-        in: formData
-        name: batch_4
-        type: file
-      - description: Ascend .om for batch=8
-        in: formData
-        name: batch_8
-        type: file
-      - description: Ascend .om for batch=16
-        in: formData
-        name: batch_16
-        type: file
+        name: device_ids
+        type: string
       produces:
       - application/json
       responses:
@@ -650,34 +665,50 @@ paths:
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
         "409":
-          description: model ID already exists in repository
+          description: Conflict
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
-        "500":
-          description: Internal Server Error
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
-          description: engine unreachable
+          description: Service Unavailable
           schema:
-            type: string
+            $ref: '#/definitions/infer-server.ErrorResponse'
       security:
       - ApiKeyAuth: []
-      summary: Upload model weights and auto-load
+      summary: Validate model weights and publish to the repository
       tags:
       - models
   /models/upload/analyze:
     post:
       consumes:
       - multipart/form-data
-      description: |-
-        Extracts the archive, detects backend and model files, parses config.yaml if present.
-        Returns a token valid for 10 minutes. Submit the token to POST /models/upload to deploy.
       parameters:
-      - description: Archive file (.zip or .tar.gz)
+      - description: Model archive (.zip, .tar.gz or .tgz)
         in: formData
         name: archive
-        required: true
+        type: file
+      - description: Model weight (.onnx, .engine or .om)
+        in: formData
+        name: file
+        type: file
+      - description: Optional Ascend Batch 4 weight
+        in: formData
+        name: batch_4
+        type: file
+      - description: Optional Ascend Batch 8 weight
+        in: formData
+        name: batch_8
+        type: file
+      - description: Optional Ascend Batch 16 weight
+        in: formData
+        name: batch_16
         type: file
       produces:
       - application/json
@@ -694,9 +725,13 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
       security:
       - ApiKeyAuth: []
-      summary: Analyze a model archive (.zip or .tar.gz)
+      summary: Analyze uploaded weights or a single-model archive
       tags:
       - models
   /pipelines:

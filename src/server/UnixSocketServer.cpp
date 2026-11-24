@@ -212,6 +212,22 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         return json({{"status", "ok"}, {"data", arr}}).dump();
     }
 
+    if (cmd == "publish_model") {
+        for (const auto* field : {"id", "token", "attempt"}) {
+            if (!req.contains(field) || !req[field].is_string()) {
+                return json({{"status", "error"}, {"code", "invalid_upload"},
+                             {"message", std::string("missing or invalid field: ") + field}}).dump();
+            }
+        }
+        const auto id = req["id"].get<std::string>();
+        const auto result = task_manager_.publishModel(id, req["token"].get<std::string>(),
+                                                       req["attempt"].get<std::string>());
+        if (!result.code.empty()) {
+            return json({{"status", "error"}, {"code", result.code}, {"message", result.message}}).dump();
+        }
+        return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
     if (cmd == "load_from_repository") {
         const auto id = req.value("id", std::string{});
         if (id.empty())

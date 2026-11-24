@@ -22,13 +22,21 @@ static AppConfig loadFromString(const std::string& yaml) {
         std::ofstream out(path);
         out << yaml;
     }
-    auto cfg = loadConfig(path);
-    std::remove(path.c_str());
-    return cfg;
+    try {
+        auto cfg = loadConfig(path);
+        std::remove(path.c_str());
+        return cfg;
+    } catch (...) {
+        std::remove(path.c_str());
+        throw;
+    }
 }
 
 // Minimal valid YAML: one source, one pipeline with source+sink nodes, one task.
 static const char* kMinimalYaml = R"(
+publishers:
+  - id: test_publisher
+    type: kafka
 sources:
   - id: cam_01
     url: rtsp://localhost/test

@@ -1,5 +1,7 @@
 #include "pipeline/TaskManager.h"
 #include "pipeline/StageFactory.h"
+#include <fstream>
+#include <regex>
 #include "stream/GpuDeviceAllocator.h"
 #include "stream/StreamHealthRegistry.h"
 #include "common/Logger.h"
@@ -89,11 +91,12 @@ void interpolatePipelineForTask(PipelineConfig& runtime_cfg, const TaskConfig& t
 TaskManager::TaskManager(AppConfig cfg,
                          std::string config_path,
                          std::unordered_map<std::string, IPublisher*> publishers,
-                         std::shared_ptr<FrameArchiver> frame_archiver)
+                         std::shared_ptr<FrameArchiver> frame_archiver, ModelProbe model_probe)
     : cfg_(std::move(cfg))
     , config_path_(std::move(config_path))
     , publishers_(std::move(publishers))
     , frame_archiver_(std::move(frame_archiver))
+    , model_probe_(std::move(model_probe))
 {
     runtime_state_ = loadRuntimeState(runtimeStatePath(config_path_));
     applyRuntimeState(cfg_, runtime_state_);
@@ -565,6 +568,131 @@ bool TaskManager::loadFromRepository(const std::string& id) {
                                  [&](const auto& m){ return m.id == id; });
     if (it == repo.end()) return false;
     return loadModel(*it);
+}
+
+ModelPublishResult TaskManager::publishModel(const std::string& id, const std::string& token,
+                                            const std::string& attempt) {
+    namespace fs = std::filesystem;
+    static const std::regex id_pattern("^[A-Za-z0-9_-]+$");
+    static const std::regex token_pattern("^[0-9a-f]{32}$");
+    if (!std::regex_match(id, id_pattern) || !std::regex_match(token, token_pattern) ||
+        (!attempt.empty() && !std::regex_match(attempt, token_pattern))) {
+        return {"invalid_upload", "invalid model ID or upload token"};
+    }
+    if (cfg_.server.model_repository.empty() || !model_probe_) {
+        return {"publish_unavailable", "model publication is unavailable"};
+    }
+    std::unique_lock publication_lock(publication_mu_, std::try_to_lock);
+    if (!publication_lock.owns_lock()) {
+        return {"publish_busy", "another model is being checked, retry shortly"};
+    }
+
+    try {
+        const auto root = fs::canonical(cfg_.server.model_repository);
+        const auto target = root / id;
+        const auto draft = root / ".uploads" / token;
+        const auto receipt = draft / ".published-id";
+        auto readLine = [](const fs::path& path) {
+            std::ifstream input(path);
+            std::string value;
+            std::getline(input, value);
+            return value;
+        };
+        if (readLine(target / ".publication-token") == token) return {};
+        const auto previous_id = readLine(receipt);
+        if (!previous_id.empty() && previous_id != id &&
+            std::regex_match(previous_id, id_pattern) &&
+            readLine(root / previous_id / ".publication-token") == token) {
+            return {"already_published", "this upload was already published as " + previous_id};
+        }
+
+        auto checkId = [&]() -> ModelPublishResult {
+            const auto& removed = runtime_state_.removed_model_ids;
+            if (fs::symlink_status(target).type() != fs::file_type::not_found ||
+                cfg_.findModel(id) || std::find(removed.begin(), removed.end(), id) != removed.end()) {
+                return {"already_exists", "model ID already exists: " + id};
+            }
+            return {};
+        };
+        {
+            std::lock_guard lock(mu_);
+            auto result = checkId();
+            if (!result.code.empty()) return result;
+        }
+        if (attempt.empty()) return {"upload_expired", "upload expired, select the model files again"};
+        const auto candidate = draft / attempt / id;
+        if (!fs::is_directory(candidate) || fs::canonical(candidate) != candidate) {
+            return {"upload_missing", "engine cannot read the upload. Check the shared model repository"};
+        }
+
+        ModelConfig model;
+        try {
+            model = loadRepositoryModel(candidate);
+            auto moveWeightPath = [&](std::string& weight) {
+                if (weight.empty()) return;
+                const auto path = fs::canonical(weight);
+                const auto rel = path.lexically_relative(candidate);
+                if (rel.empty() || *rel.begin() != "1" || !fs::is_regular_file(path) ||
+                    fs::path(weight) != path) {
+                    throw std::runtime_error("weight must be a regular file inside the uploaded version");
+                }
+                weight = (target / rel).string();
+            };
+            moveWeightPath(model.engine_path);
+            moveWeightPath(model.onnx_path);
+            for (auto& [_, weight] : model.om_paths) moveWeightPath(weight);
+            if (model.input_shape.height < 1 || model.input_shape.width < 1 ||
+                model.instance_count < 1 || model.batch_size < 1 || model.num_classes < 1) {
+                throw std::runtime_error("input dimensions, batch size, classes and instance count must be positive");
+            }
+        } catch (const std::exception& e) {
+            return {"invalid_model", e.what()};
+        }
+
+        auto checkDependencies = [&]() -> ModelPublishResult {
+            for (const auto& item : model.cascade) {
+                if (!cfg_.findModel(item.model_id)) {
+                    return {"missing_dependency", "register cascade model first: " + item.model_id};
+                }
+            }
+            return {};
+        };
+        {
+            std::lock_guard lock(mu_);
+            auto result = checkDependencies();
+            if (!result.code.empty()) return result;
+        }
+
+        try {
+            model_probe_(candidate);
+        } catch (const std::exception& e) {
+            return {"weight_check_failed", e.what()};
+        }
+
+        std::lock_guard lock(mu_);
+        auto result = checkId();
+        if (!result.code.empty()) return result;
+        result = checkDependencies();
+        if (!result.code.empty()) return result;
+
+        cfg_.models.reserve(cfg_.models.size() + 1);
+        auto writeLine = [](const fs::path& path, const std::string& value) {
+            std::ofstream out;
+            out.exceptions(std::ios::failbit | std::ios::badbit);
+            out.open(path);
+            out << value << '\n';
+            out.close();
+        };
+        writeLine(candidate / ".publication-token", token);
+        writeLine(receipt, id);
+        fs::rename(candidate, target);
+        // The repository is the durable source for new publications. A restart
+        // after the rename discovers the same checked model at its final path.
+        cfg_.models.push_back(std::move(model));
+        return {};
+    } catch (const std::exception& e) {
+        return {"publish_io_error", e.what()};
+    }
 }
 
 } // namespace infer

@@ -207,6 +207,10 @@ target_link_libraries(test_unix_socket_server PRIVATE
 add_test(NAME test_unix_socket_server COMMAND test_unix_socket_server
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
+add_executable(test_model_publication test_model_publication.cpp)
+target_link_libraries(test_model_publication PRIVATE infer_core GTest::gtest_main)
+add_test(NAME test_model_publication COMMAND test_model_publication)
+
 add_executable(test_task_manager_placeholder test_task_manager_placeholder.cpp)
 target_link_libraries(test_task_manager_placeholder PRIVATE
     infer_core

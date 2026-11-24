@@ -64,6 +64,11 @@ struct RepositoryModelInfo {
     bool        loaded{false};
 };
 
+struct ModelPublishResult {
+    std::string code;
+    std::string message;
+};
+
 class ITaskManager {
 public:
     enum class State { Stopped, Running };
@@ -101,6 +106,9 @@ public:
     virtual std::vector<RepositoryModelInfo> listRepositoryModels() const = 0;
     // Scan repository, find `id`, and load it. Returns false if not found or already loaded.
     virtual bool loadFromRepository(const std::string& id) = 0;
+    virtual ModelPublishResult publishModel(const std::string&, const std::string&, const std::string&) {
+        return {"publish_unavailable", "model publication is unavailable"};
+    }
 };
 
 } // namespace infer

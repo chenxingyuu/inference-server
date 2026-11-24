@@ -14,8 +14,11 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.cpu
+    environment:
+      - INFER_MODEL_REPOSITORY=/models
+      - INFER_SOCKET=/var/run/infer/infer.sock
     volumes:
-      - ../models:/models:ro
+      - ../models:/models
       - ../config:/config:ro
       - infer-socket:/var/run/infer
       - infer-frames:/data/frames
@@ -52,7 +55,9 @@ services:
     environment:
       - INFER_SOCKET=/var/run/infer/infer.sock
       - INFER_STATE_FILE=/var/lib/infer-server/state.json
+      - MODEL_REPOSITORY=/models
     volumes:
+      - ../models:/models
       - infer-socket:/var/run/infer:ro
       - infer-state:/var/lib/infer-server
     depends_on:

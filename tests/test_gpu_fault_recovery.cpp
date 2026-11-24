@@ -29,7 +29,7 @@ public:
 class MockDecoder : public IYOLODecoder {
 public:
     MOCK_METHOD((std::vector<std::vector<Detection>>), decode,
-                (const float*, int, const InferShape&, float, float), (override));
+                (const float*, int, const InferShape&, float, float, size_t), (override));
     MOCK_METHOD(YOLOVersion, version, (), (const, override));
 };
 
@@ -208,7 +208,7 @@ TEST(InferWorkerRecovery, OomRequeuesAndIncrementsMetric) {
         })
         .WillRepeatedly(Return());
 
-    EXPECT_CALL(*raw_decoder, decode(_, _, _, _, _))
+    EXPECT_CALL(*raw_decoder, decode(_, _, _, _, _, _))
         .WillRepeatedly(Return(std::vector<std::vector<Detection>>{{}}));
 
     InferWorker worker(cfg,
@@ -253,7 +253,7 @@ TEST(InferWorkerRecovery, EngineFaultTriggersReloadAndReturnsToRunning) {
         .WillOnce(Throw(GpuFaultException(GpuFaultType::ENGINE_FAULT, "trt crash")))
         .WillRepeatedly(Return());
 
-    EXPECT_CALL(*raw_decoder, decode(_, _, _, _, _))
+    EXPECT_CALL(*raw_decoder, decode(_, _, _, _, _, _))
         .WillRepeatedly(Return(std::vector<std::vector<Detection>>{{}}));
 
     InferWorker worker(cfg,
@@ -296,7 +296,7 @@ TEST(InferWorkerRecovery, AllLoadRetriesFailLeadsToStopped) {
     EXPECT_CALL(*raw_backend, unloadModel()).Times(AnyNumber());
     EXPECT_CALL(*raw_backend, infer(_, _))
         .WillOnce(Throw(GpuFaultException(GpuFaultType::ENGINE_FAULT, "crash")));
-    EXPECT_CALL(*raw_decoder, decode(_, _, _, _, _))
+    EXPECT_CALL(*raw_decoder, decode(_, _, _, _, _, _))
         .WillRepeatedly(Return(std::vector<std::vector<Detection>>{{}}));
 
     InferWorker worker(cfg,

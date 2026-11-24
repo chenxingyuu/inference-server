@@ -6,6 +6,7 @@
 #include "pipeline/ITaskManager.h"
 #include "publisher/IPublisher.h"
 #include "archive/FrameArchiver.h"
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -16,6 +17,7 @@ namespace infer {
 class TaskManager : public ITaskManager {
 public:
     using State = ITaskManager::State;
+    using ModelProbe = std::function<void(const std::filesystem::path&)>;
 
     // config_path is stored for runtime-state persistence (sidecar JSON).
     // publishers is a non-owning registry: callers must ensure all pointed-to
@@ -23,7 +25,7 @@ public:
     TaskManager(AppConfig cfg,
                 std::string config_path,
                 std::unordered_map<std::string, IPublisher*> publishers,
-                std::shared_ptr<FrameArchiver> frame_archiver);
+                std::shared_ptr<FrameArchiver> frame_archiver, ModelProbe model_probe = {});
 
     void loadAll();
     void startAll();
@@ -49,6 +51,9 @@ public:
     std::vector<RepositoryModelInfo> listRepositoryModels() const override;
     bool loadFromRepository(const std::string& id)   override;
 
+    ModelPublishResult publishModel(const std::string& id, const std::string& token,
+                                    const std::string& attempt) override;
+
 private:
     struct Entry {
         std::shared_ptr<GraphExecutor> executor;
@@ -68,6 +73,8 @@ private:
 
     std::unordered_map<std::string, IPublisher*> publishers_;
     std::shared_ptr<FrameArchiver> frame_archiver_;
+    ModelProbe model_probe_;
+    std::mutex publication_mu_;
     mutable std::mutex mu_;
     std::unordered_map<std::string, Entry> entries_;
 };

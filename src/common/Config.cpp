@@ -403,86 +403,90 @@ std::vector<ModelConfig> scanModelRepository(const std::string& root) {
 
     std::vector<ModelConfig> out;
     out.reserve(model_dirs.size());
-    for (const std::filesystem::path& model_dir : model_dirs) {
-        const std::string model_id = model_dir.filename().string();
-        YAML::Node mn;
-        try {
-            mn = YAML::LoadFile((model_dir / "config.yaml").generic_string());
-        } catch (const YAML::Exception& e) {
-            throw std::runtime_error("model_repository model " + model_id + ": " + std::string(e.what()));
-        }
-        if (!mn.IsMap()) {
-            throw std::runtime_error("model_repository model " + model_id + ": config.yaml must be a mapping");
-        }
-        if (mn["id"]) {
-            const std::string yaml_id = mn["id"].as<std::string>();
-            if (!yaml_id.empty() && yaml_id != model_id) {
-                throw std::runtime_error("model_repository model " + model_id + ": id in config.yaml must match directory name (got id=" + yaml_id + ")");
-            }
-        }
-        if (!mn["id"] || !mn["id"].IsDefined() || mn["id"].as<std::string>("").empty()) {
-            mn["id"] = YAML::Node(model_id);
-        }
-
-        int         active_version = -1;
-        std::string weight_file;
-        if (mn["active_version"]) active_version = mn["active_version"].as<int>();
-        if (mn["weight_file"]) weight_file = mn["weight_file"].as<std::string>("");
-
-        std::vector<unsigned long> versions;
-        for (const auto& ent : std::filesystem::directory_iterator(model_dir)) {
-            if (!ent.is_directory()) continue;
-            const std::string vname = ent.path().filename().string();
-            if (vname.empty() || vname.front() == '.') continue;
-            bool all_digit = !vname.empty();
-            for (char c : vname) {
-                if (!std::isdigit(static_cast<unsigned char>(c))) {
-                    all_digit = false;
-                    break;
-                }
-            }
-            if (!all_digit) continue;
-            try {
-                const unsigned long v = std::stoul(vname);
-                if (v == 0) continue;
-                versions.push_back(v);
-            } catch (const std::exception&) {
-                continue;
-            }
-        }
-        if (versions.empty()) {
-            throw std::runtime_error("model_repository model " + model_id + ": no numeric version subdirectories");
-        }
-        std::sort(versions.begin(), versions.end());
-        versions.erase(std::unique(versions.begin(), versions.end()), versions.end());
-
-        unsigned long chosen = 0;
-        if (active_version >= 0) {
-            const auto want = static_cast<unsigned long>(active_version);
-            if (std::find(versions.begin(), versions.end(), want) == versions.end()) {
-                throw std::runtime_error("model_repository model " + model_id + ": active_version " + std::to_string(active_version)
-                                         + " not found among version directories");
-            }
-            chosen = want;
-        } else {
-            chosen = *std::max_element(versions.begin(), versions.end());
-        }
-
-        const std::filesystem::path version_dir = model_dir / std::to_string(chosen);
-        if (!std::filesystem::is_directory(version_dir)) {
-            throw std::runtime_error("model_repository model " + model_id + ": missing version directory " + std::to_string(chosen));
-        }
-
-        ModelConfig m = parseModelConfigNode(mn);
-        if (m.id != model_id) {
-            throw std::runtime_error("model_repository model " + model_id + ": internal id mismatch");
-        }
-        resolveRelativeWeightPaths(m, version_dir);
-        autoDetectWeights(m, version_dir, weight_file);
-        validateRepoModelWeights(m);
-        out.push_back(std::move(m));
+    for (const auto& model_dir : model_dirs) {
+        out.push_back(loadRepositoryModel(model_dir));
     }
     return out;
+}
+
+ModelConfig loadRepositoryModel(const std::filesystem::path& model_dir) {
+    const std::string model_id = model_dir.filename().string();
+    YAML::Node mn;
+    try {
+        mn = YAML::LoadFile((model_dir / "config.yaml").generic_string());
+    } catch (const YAML::Exception& e) {
+        throw std::runtime_error("model_repository model " + model_id + ": " + std::string(e.what()));
+    }
+    if (!mn.IsMap()) {
+        throw std::runtime_error("model_repository model " + model_id + ": config.yaml must be a mapping");
+    }
+    if (mn["id"]) {
+        const std::string yaml_id = mn["id"].as<std::string>();
+        if (!yaml_id.empty() && yaml_id != model_id) {
+            throw std::runtime_error("model_repository model " + model_id + ": id in config.yaml must match directory name (got id=" + yaml_id + ")");
+        }
+    }
+    if (!mn["id"] || !mn["id"].IsDefined() || mn["id"].as<std::string>("").empty()) {
+        mn["id"] = YAML::Node(model_id);
+    }
+
+    int         active_version = -1;
+    std::string weight_file;
+    if (mn["active_version"]) active_version = mn["active_version"].as<int>();
+    if (mn["weight_file"]) weight_file = mn["weight_file"].as<std::string>("");
+
+    std::vector<unsigned long> versions;
+    for (const auto& ent : std::filesystem::directory_iterator(model_dir)) {
+        if (!ent.is_directory()) continue;
+        const std::string vname = ent.path().filename().string();
+        if (vname.empty() || vname.front() == '.') continue;
+        bool all_digit = !vname.empty();
+        for (char c : vname) {
+            if (!std::isdigit(static_cast<unsigned char>(c))) {
+                all_digit = false;
+                break;
+            }
+        }
+        if (!all_digit) continue;
+        try {
+            const unsigned long v = std::stoul(vname);
+            if (v == 0) continue;
+            versions.push_back(v);
+        } catch (const std::exception&) {
+            continue;
+        }
+    }
+    if (versions.empty()) {
+        throw std::runtime_error("model_repository model " + model_id + ": no numeric version subdirectories");
+    }
+    std::sort(versions.begin(), versions.end());
+    versions.erase(std::unique(versions.begin(), versions.end()), versions.end());
+
+    unsigned long chosen = 0;
+    if (active_version >= 0) {
+        const auto want = static_cast<unsigned long>(active_version);
+        if (std::find(versions.begin(), versions.end(), want) == versions.end()) {
+            throw std::runtime_error("model_repository model " + model_id + ": active_version " + std::to_string(active_version)
+                                     + " not found among version directories");
+        }
+        chosen = want;
+    } else {
+        chosen = *std::max_element(versions.begin(), versions.end());
+    }
+
+    const std::filesystem::path version_dir = model_dir / std::to_string(chosen);
+    if (!std::filesystem::is_directory(version_dir)) {
+        throw std::runtime_error("model_repository model " + model_id + ": missing version directory " + std::to_string(chosen));
+    }
+
+    ModelConfig m = parseModelConfigNode(mn);
+    if (m.id != model_id) {
+        throw std::runtime_error("model_repository model " + model_id + ": internal id mismatch");
+    }
+    resolveRelativeWeightPaths(m, version_dir);
+    autoDetectWeights(m, version_dir, weight_file);
+    validateRepoModelWeights(m);
+    return m;
 }
 
 YOLOVersion parseYOLOVersion(const std::string& s) {

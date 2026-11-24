@@ -51,6 +51,16 @@ RTSP(source.rtsp | source.file，内含 FFmpeg/DVPP 解码)
 
 **限制**：合并发生在进程启动、`TaskManager::loadAll()` 构建 DAG **之前**；DAG 内的 `InferEngineWorkerStage` 在创建时 **拷贝** `ModelConfig`，因此仅改磁盘上的仓库 **不会** 自动更新已运行任务中的权重；需重启进程或重建任务图（与 Triton 在线切版本不同，除非后续做动态注册表）。
 
+### Web 发布模型
+
+在 **模型管理 → 上传模型** 中选择 `.onnx`、`.engine`、`.om` 或单模型 `.zip` / `.tar.gz` / `.tgz`。Ascend 裸文件使用主 `.om` 作为 Batch 1，可在高级设置补充 Batch 4、8、16。压缩包可以包含一份 `config.yaml` 和一组权重，文件可平铺，或使用上面的单版本仓库布局。已有配置会预填参数，发布保留类别名称、输入尺寸与级联设置。级联二级模型须先登记。
+
+核对参数后点击 **校验并发布**。引擎在独立进程里逐个设备试加载权重，成功后将模型登记到仓库的 `<model_id>/1/`。待发布文件保留 30 分钟，引擎不可用或校验失败时可以在同一页面重试。已有模型 ID 不接受覆盖。发布成功后可直接打开流水线编辑器，在 `infer.engine` 中选用新模型。实际推理结果通过启动任务验证。
+
+自行部署时，Go 的 `MODEL_REPOSITORY` 和 C++ 的 `INFER_MODEL_REPOSITORY` 应指向同一可写卷，两个进程的 `INFER_SOCKET` 指向共享 Socket。仓库的 `/models/.uploads` 用于暂存，并由 Go 清理。CPU、NVIDIA 和 Ascend Web Compose 已包含这些设置，部署时使用与本次代码匹配的引擎、管理服务和 Web 镜像。自定义反向代理需允许最多 2 GiB 上传体积和至少 120 秒的发布响应等待。
+
+HTTP 客户端可先向 `POST /models/upload/analyze` 发送 multipart 的 `file` 或 `archive`，再将响应中的 `token`、`id` 和修改过的参数提交给 `POST /models/upload`。引擎未确认发布时，用同一 token 和 ID 重试。旧版直接上传的 multipart 请求继续支持。
+
 ## 依赖
 
 | 依赖 | 版本要求 | 说明 |

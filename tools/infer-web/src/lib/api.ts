@@ -89,55 +89,42 @@ export const api = {
     listRepository: () => req<RepositoryModel[]>('/models/repository'),
     loadFromRepository: (id: string) =>
       req<OkResponse>(`/models/repository/${id}/load`, { method: 'POST' }),
-    upload: (
-      formData: FormData,
-      onProgress: (pct: number, loaded: number, total: number) => void,
-      signal?: AbortSignal,
-    ): Promise<OkResponse> =>
-      new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        xhr.open('POST', buildApiUrl('/models/upload'))
-        const key = auth.get()
-        if (key) xhr.setRequestHeader('Authorization', `Bearer ${key}`)
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total)
-        }
-        xhr.onload = () => {
-          const body = (() => { try { return JSON.parse(xhr.responseText) } catch { return {} } })()
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(body as OkResponse)
-          } else {
-            reject(new ApiError(xhr.status, body.message ?? xhr.statusText, body.code))
-          }
-        }
-        xhr.onerror = () => reject(new Error('Network error'))
-        if (signal) signal.addEventListener('abort', () => xhr.abort())
-        xhr.send(formData)
+    publish: (body: URLSearchParams) =>
+      req<OkResponse>('/models/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
       }),
-
     analyze: (
       formData: FormData,
-      onProgress: (pct: number, loaded: number, total: number) => void,
-      signal?: AbortSignal,
+      onProgress: (pct: number) => void,
+      signal: AbortSignal,
     ): Promise<ArchiveAnalysis> =>
       new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest()
+        function abort() { xhr.abort() }
         xhr.open('POST', buildApiUrl('/models/upload/analyze'))
         const key = auth.get()
         if (key) xhr.setRequestHeader('Authorization', `Bearer ${key}`)
         xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total)
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
         }
         xhr.onload = () => {
-          const body = (() => { try { return JSON.parse(xhr.responseText) } catch { return {} } })()
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(body as ArchiveAnalysis)
-          } else {
-            reject(new ApiError(xhr.status, body.message ?? xhr.statusText, body.code))
+          try {
+            const body = JSON.parse(xhr.responseText)
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(body as ArchiveAnalysis)
+            } else {
+              reject(new ApiError(xhr.status, body.message ?? xhr.statusText, body.code))
+            }
+          } catch {
+            reject(new ApiError(xhr.status, xhr.statusText))
           }
         }
         xhr.onerror = () => reject(new Error('Network error'))
-        if (signal) signal.addEventListener('abort', () => xhr.abort())
+        xhr.onabort = () => reject(new DOMException('Upload canceled', 'AbortError'))
+        xhr.onloadend = () => signal.removeEventListener('abort', abort)
+        signal.addEventListener('abort', abort, { once: true })
         xhr.send(formData)
       }),
   },

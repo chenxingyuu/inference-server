@@ -256,9 +256,9 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Accepts multipart/form-data. Server generates config.yaml from form fields.\nFor Ascend: supply batch_1 file (required) and batch_4/batch_8/batch_16 (optional).\nAlternatively, supply a token from POST /models/upload/analyze to deploy a previously analyzed archive.\nFor TRT: supply engine file. For CPU: supply onnx file.",
                 "consumes": [
-                    "multipart/form-data"
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
                 ],
                 "produces": [
                     "application/json"
@@ -266,44 +266,70 @@ const docTemplate = `{
                 "tags": [
                     "models"
                 ],
-                "summary": "Upload model weights and auto-load",
+                "summary": "Validate model weights and publish to the repository",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Model ID (^[A-Za-z0-9_-]+$)",
+                        "description": "Model ID (letters, numbers, _ and -)",
                         "name": "id",
                         "in": "formData",
                         "required": true
                     },
                     {
-                        "enum": [
-                            "cpu",
-                            "trt",
-                            "ascend"
-                        ],
                         "type": "string",
-                        "description": "Backend",
-                        "name": "backend",
-                        "in": "formData",
-                        "required": true
+                        "description": "Token returned by upload/analyze",
+                        "name": "token",
+                        "in": "formData"
                     },
                     {
-                        "enum": [
-                            "v5",
-                            "v8",
-                            "v11",
-                            "v26"
-                        ],
+                        "type": "string",
+                        "description": "Backend for a direct upload",
+                        "name": "backend",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "ONNX weight for a direct upload",
+                        "name": "onnx",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "TensorRT weight for a direct upload",
+                        "name": "engine",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Ascend Batch 1 weight for a direct upload",
+                        "name": "batch_1",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Optional Ascend Batch 4 weight for a direct upload",
+                        "name": "batch_4",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Optional Ascend Batch 8 weight for a direct upload",
+                        "name": "batch_8",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Optional Ascend Batch 16 weight for a direct upload",
+                        "name": "batch_16",
+                        "in": "formData"
+                    },
+                    {
                         "type": "string",
                         "description": "YOLO version",
                         "name": "yolo_version",
                         "in": "formData"
                     },
                     {
-                        "enum": [
-                            "detector",
-                            "classifier"
-                        ],
                         "type": "string",
                         "description": "Model type",
                         "name": "model_type",
@@ -311,7 +337,19 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Max batch size",
+                        "description": "Model input height",
+                        "name": "input_height",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Model input width",
+                        "name": "input_width",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Batch size",
                         "name": "batch_size",
                         "in": "formData"
                     },
@@ -340,39 +378,15 @@ const docTemplate = `{
                         "in": "formData"
                     },
                     {
-                        "type": "file",
-                        "description": "TRT .engine file",
-                        "name": "engine",
+                        "type": "integer",
+                        "description": "Default device ID",
+                        "name": "device_id",
                         "in": "formData"
                     },
                     {
-                        "type": "file",
-                        "description": "ONNX .onnx file",
-                        "name": "onnx",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "file",
-                        "description": "Ascend .om for batch=1 (required for Ascend)",
-                        "name": "batch_1",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "file",
-                        "description": "Ascend .om for batch=4",
-                        "name": "batch_4",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "file",
-                        "description": "Ascend .om for batch=8",
-                        "name": "batch_8",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "file",
-                        "description": "Ascend .om for batch=16",
-                        "name": "batch_16",
+                        "type": "string",
+                        "description": "Comma-separated device IDs",
+                        "name": "device_ids",
                         "in": "formData"
                     }
                 ],
@@ -396,21 +410,27 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "model ID already exists in repository",
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "410": {
+                        "description": "Gone",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
                         "schema": {
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     },
                     "503": {
-                        "description": "engine unreachable",
+                        "description": "Service Unavailable",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     }
                 }
@@ -423,7 +443,6 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Extracts the archive, detects backend and model files, parses config.yaml if present.\nReturns a token valid for 10 minutes. Submit the token to POST /models/upload to deploy.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -433,14 +452,37 @@ const docTemplate = `{
                 "tags": [
                     "models"
                 ],
-                "summary": "Analyze a model archive (.zip or .tar.gz)",
+                "summary": "Analyze uploaded weights or a single-model archive",
                 "parameters": [
                     {
                         "type": "file",
-                        "description": "Archive file (.zip or .tar.gz)",
+                        "description": "Model archive (.zip, .tar.gz or .tgz)",
                         "name": "archive",
-                        "in": "formData",
-                        "required": true
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Model weight (.onnx, .engine or .om)",
+                        "name": "file",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Optional Ascend Batch 4 weight",
+                        "name": "batch_4",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Optional Ascend Batch 8 weight",
+                        "name": "batch_8",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Optional Ascend Batch 16 weight",
+                        "name": "batch_16",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -458,6 +500,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
                         "schema": {
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
@@ -1183,6 +1231,18 @@ const docTemplate = `{
                 "conf_thresh": {
                     "type": "number"
                 },
+                "device_id": {
+                    "type": "integer"
+                },
+                "device_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "expires_at": {
+                    "type": "string"
+                },
                 "files_found": {
                     "type": "array",
                     "items": {
@@ -1191,6 +1251,12 @@ const docTemplate = `{
                 },
                 "has_config": {
                     "type": "boolean"
+                },
+                "input_size": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 },
                 "instance_count": {
                     "type": "integer"

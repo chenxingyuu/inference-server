@@ -1,5 +1,7 @@
 #pragma once
 
+#include <filesystem>
+
 #include <string>
 #include <vector>
 #include <map>
@@ -218,6 +220,7 @@ struct AppConfig {
 
 // Scan `<root>/<model_id>/config.yaml` and numeric `<root>/<model_id>/<version>/` dirs; merge at load time only.
 // Optional per-model YAML keys: active_version (int), weight_file (string, file inside selected version dir).
+ModelConfig loadRepositoryModel(const std::filesystem::path& model_dir);
 std::vector<ModelConfig> scanModelRepository(const std::string& root);
 
 // Parse config.yaml → AppConfig. Throws std::runtime_error on invalid config.
