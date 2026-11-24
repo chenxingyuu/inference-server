@@ -184,7 +184,7 @@ export function ModelsPage() {
             <p className="text-xs text-ink-muted mt-0.5">{t('models.repo_subtitle')}</p>
           </div>
         </div>
-        <div className="card overflow-hidden">
+        <div className="card overflow-x-auto">
           <table className="data-table">
             <thead>
               <tr>
@@ -213,23 +213,44 @@ export function ModelsPage() {
                     <td><Tag>{m.backend}</Tag></td>
                     <td><Tag>{m.version}</Tag></td>
                     <td><StatusBadge loaded={m.loaded} /></td>
-                    <td className="text-right pr-2" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => void exportModel(m.id)}
-                        disabled={exportingID !== null}
-                        className="text-xs text-primary hover:underline disabled:opacity-50"
-                      >
-                        {exportingID === m.id ? t('models.repo_exporting') : t('models.repo_export')}
-                      </button>
-                      {!m.loaded && (
+                    <td className="w-px" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-3 whitespace-nowrap">
+                        {!m.loaded && (
+                          <button
+                            onClick={() => loadFromRepo.mutate(m.id)}
+                            disabled={loadFromRepo.isPending}
+                            className="text-xs text-accent hover:underline disabled:opacity-50"
+                          >
+                            {loadFromRepo.isPending ? t('models.repo_loading') : t('models.repo_load')}
+                          </button>
+                        )}
                         <button
-                          onClick={() => loadFromRepo.mutate(m.id)}
-                          disabled={loadFromRepo.isPending}
-                          className="ml-3 text-xs text-primary hover:underline disabled:opacity-50"
+                          type="button"
+                          onClick={() => void exportModel(m.id)}
+                          disabled={exportingID !== null}
+                          aria-busy={exportingID === m.id}
+                          className="btn-ghost px-2 py-1 text-xs enabled:hover:bg-bg-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent aria-busy:disabled:cursor-wait aria-busy:disabled:opacity-100 disabled:active:scale-100"
                         >
-                          {loadFromRepo.isPending ? t('models.repo_loading') : t('models.repo_load')}
+                          {exportingID === m.id ? (
+                            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin">
+                              <circle cx="8" cy="8" r="5.5" opacity=".25" />
+                              <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" />
+                            </svg>
+                          ) : (
+                            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
+                              <path d="M8 2v8m-3-3 3 3 3-3M2.5 11v2.5h11V11" />
+                            </svg>
+                          )}
+                          <span className="grid text-center">
+                            <span className={exportingID === m.id ? 'invisible col-start-1 row-start-1' : 'col-start-1 row-start-1'}>
+                              {t('models.repo_export')}
+                            </span>
+                            {exportingID === m.id && (
+                              <span className="col-start-1 row-start-1">{t('models.repo_exporting')}</span>
+                            )}
+                          </span>
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                   {expandedRepo === m.id && (
