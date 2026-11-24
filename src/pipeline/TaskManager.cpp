@@ -667,10 +667,12 @@ ModelPublishResult TaskManager::publishModel(const std::string& id, const std::s
             if (!result.code.empty()) return result;
         }
 
-        auto checkStartupDependencies = [&]() -> ModelPublishResult {
-            if (model.cascade.empty()) return {};
+        auto checkStartupConfig = [&]() -> ModelPublishResult {
             try {
                 const auto startup = loadConfig(config_path_);
+                if (startup.findModel(id)) {
+                    return {"already_exists", "model ID already exists: " + id};
+                }
                 for (const auto& item : model.cascade) {
                     if (!startup.findModel(item.model_id)) {
                         return {"missing_dependency", "add cascade model to the startup config or model repository: " +
@@ -678,12 +680,12 @@ ModelPublishResult TaskManager::publishModel(const std::string& id, const std::s
                     }
                 }
             } catch (const std::exception& e) {
-                return {"startup_config_invalid", "cannot resolve cascade models from startup config: " +
+                return {"startup_config_invalid", "cannot validate publication against startup config: " +
                                                   std::string(e.what())};
             }
             return {};
         };
-        auto result = checkStartupDependencies();
+        auto result = checkStartupConfig();
         if (!result.code.empty()) return result;
 
         try {
@@ -692,7 +694,7 @@ ModelPublishResult TaskManager::publishModel(const std::string& id, const std::s
             return {"weight_check_failed", e.what()};
         }
 
-        result = checkStartupDependencies();
+        result = checkStartupConfig();
         if (!result.code.empty()) return result;
 
         std::lock_guard lock(mu_);

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,13 +17,19 @@ const (
 	maxArchiveEntries = 4096
 )
 
+var errArchiveExtractionLimit = errors.New("archive exceeds the extraction limit")
+
 func extractModelArchive(path, name, dir string) error {
-	remaining := int64(maxExtractBytes)
+	return extractModelArchiveWithLimit(path, name, dir, maxExtractBytes)
+}
+
+func extractModelArchiveWithLimit(path, name, dir string, limit int64) error {
+	remaining := limit
 	entries := 0
 	write := func(name string, directory bool, size int64, open func() (io.ReadCloser, error)) error {
 		entries++
 		if entries > maxArchiveEntries || size < 0 || size > remaining {
-			return fmt.Errorf("archive exceeds the extraction limit")
+			return errArchiveExtractionLimit
 		}
 		relative := filepath.Clean(filepath.FromSlash(name))
 		if relative == "." && directory {
@@ -74,8 +81,8 @@ func extractModelArchive(path, name, dir string) error {
 			if !entry.Mode().IsRegular() && !entry.Mode().IsDir() {
 				return fmt.Errorf("unsupported archive entry %q", entry.Name)
 			}
-			if entry.UncompressedSize64 > uint64(maxExtractBytes) {
-				return fmt.Errorf("archive exceeds the extraction limit")
+			if entry.UncompressedSize64 > uint64(limit) {
+				return errArchiveExtractionLimit
 			}
 			if err := write(entry.Name, entry.Mode().IsDir(), int64(entry.UncompressedSize64), entry.Open); err != nil {
 				return err
@@ -96,9 +103,14 @@ func extractModelArchive(path, name, dir string) error {
 		return err
 	}
 	defer gz.Close()
-	t := tar.NewReader(gz)
+	// tar.Next also consumes padding, metadata and unread data from skipped entries.
+	decoded := &io.LimitedReader{R: gz, N: limit + 1}
+	t := tar.NewReader(decoded)
 	for {
 		header, err := t.Next()
+		if decoded.N == 0 {
+			return errArchiveExtractionLimit
+		}
 		if err == io.EOF {
 			return nil
 		}
@@ -110,6 +122,9 @@ func extractModelArchive(path, name, dir string) error {
 		}
 		err = write(header.Name, header.Typeflag == tar.TypeDir, header.Size,
 			func() (io.ReadCloser, error) { return io.NopCloser(t), nil })
+		if decoded.N == 0 {
+			return errArchiveExtractionLimit
+		}
 		if err != nil {
 			return err
 		}

@@ -335,6 +335,22 @@ func TestAscendArchiveKeepsExplicitBatchMapping(t *testing.T) {
 	requireUploadStatus(t, postPublish(t, router, "ascend", preview.Token, nil), http.StatusCreated, "")
 }
 
+func TestONNXUploadStillRejectsUnreferencedWeights(t *testing.T) {
+	for _, extra := range []string{"extra.onnx", "extra.engine"} {
+		t.Run(extra, func(t *testing.T) {
+			router, _ := modelUploadRouter(t)
+			data := uploadArchive(t, map[string]string{
+				"config.yaml":   "backend: cpu\nonnx_path: net.onnx\n",
+				"1/net.onnx":    fixtureONNXExternalData("data.engine"),
+				"1/data.engine": "external data",
+				"1/" + extra:    "unreferenced weight",
+			})
+			response := uploadMultipart(t, router, "/models/upload/analyze", nil, "archive", "model.zip", data)
+			requireUploadStatus(t, response, http.StatusBadRequest, "invalid_model_files")
+		})
+	}
+}
+
 func TestAscendSingleWeightKeepsCompiledBatch(t *testing.T) {
 	for _, scenario := range []struct {
 		name, archiveConfig, expectedWeight string

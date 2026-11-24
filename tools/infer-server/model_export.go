@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -126,7 +127,7 @@ func handleExportModel(c *gin.Context) {
 		case errors.Is(err, errExportTooLarge):
 			fail(http.StatusRequestEntityTooLarge, "export_too_large", errExportTooLarge.Error())
 		case errors.Is(err, errExportFiles):
-			fail(http.StatusUnprocessableEntity, "model_not_exportable", errExportFiles.Error())
+			fail(http.StatusUnprocessableEntity, "model_not_exportable", err.Error())
 		default:
 			log.Printf("export model %s: %v", id, err)
 			fail(http.StatusInternalServerError, "export_io_error", "could not build the model archive")
@@ -213,65 +214,73 @@ type exportFile struct {
 
 func collectExportFiles(ctx context.Context, version *os.Root, weights []string, configSize int) ([]exportFile, error) {
 	var files []exportFile
+	seen := make(map[string]bool)
 	remaining := int64(maxExportArchiveBytes) - int64(configSize)
-	add := func(name string, size int64) error {
-		if len(files) >= maxArchiveEntries-1 || size > remaining {
+	add := func(name string) error {
+		if seen[name] {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		info, err := statExportFile(version, name)
+		if err != nil {
+			return err
+		}
+		if len(files) >= maxArchiveEntries-1 || info.Size() > remaining {
 			return errExportTooLarge
 		}
-		files = append(files, exportFile{name, size})
-		remaining -= size
+		files = append(files, exportFile{name, info.Size()})
+		seen[name] = true
+		remaining -= info.Size()
 		return nil
 	}
 	for _, name := range weights {
-		prefix := ""
-		for _, part := range strings.Split(path.Dir(name), "/") {
-			if part == "." {
-				break
-			}
-			prefix = path.Join(prefix, part)
-			info, err := version.Lstat(filepath.FromSlash(prefix))
-			if err != nil || !info.IsDir() {
-				return nil, errExportFiles
-			}
-		}
-		info, err := version.Lstat(filepath.FromSlash(name))
-		if err != nil || !info.Mode().IsRegular() {
-			return nil, errExportFiles
-		}
-		if err := add(name, info.Size()); err != nil {
+		if err := add(name); err != nil {
 			return nil, err
 		}
 	}
 	if weightBackend(weights[0]) != "cpu" {
 		return files, nil
 	}
-	// ONNX external data uses paths relative to the model and can have any extension.
-	err := fs.WalkDir(version.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
+	model, err := version.Open(filepath.FromSlash(weights[0]))
+	if err != nil {
+		return nil, fmt.Errorf("%w: cannot read ONNX model %q", errExportFiles, weights[0])
+	}
+	defer model.Close()
+	locations, err := onnxExternalLocations(ctx, model, files[0].size)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errExportFiles, err)
+	}
+	for _, location := range locations {
+		name, err := onnxExternalPath(weights[0], location)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("%w: %v", errExportFiles, err)
 		}
-		if err := ctx.Err(); err != nil {
-			return err
+		if err := add(name); err != nil {
+			return nil, err
 		}
-		if name == "." {
-			return nil
+	}
+	return files, nil
+}
+
+func statExportFile(version *os.Root, name string) (fs.FileInfo, error) {
+	prefix := ""
+	for _, part := range strings.Split(path.Dir(name), "/") {
+		if part == "." {
+			break
 		}
-		if !validExportPath(name) {
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
+		prefix = path.Join(prefix, part)
+		info, err := version.Lstat(filepath.FromSlash(prefix))
+		if err != nil || !info.IsDir() {
+			return nil, fmt.Errorf("%w: %q must use regular directories", errExportFiles, name)
 		}
-		if !entry.Type().IsRegular() || weightBackend(name) != "" {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		return add(name, info.Size())
-	})
-	return files, err
+	}
+	info, err := version.Lstat(filepath.FromSlash(name))
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q must be a regular file", errExportFiles, name)
+	}
+	return info, nil
 }
 
 type exportArchiveWriter struct {

@@ -64,11 +64,12 @@ func TestExportRoundTripsThroughModelUpload(t *testing.T) {
 	for _, scenario := range []struct {
 		backend, archiveBackend, config string
 		weights                         []string
-		aux                             string
+		aux                             []string
 	}{
-		{"cpu", "cpu", "onnx_path: model/net.onnx\n", []string{"model/net.onnx"}, "model/data/weights.bin"},
-		{"tensorrt", "trt", "engine_path: net.engine\n", []string{"net.engine"}, ""},
-		{"ascend", "ascend", "om_paths: {1: small.om, 4: large.om}\n", []string{"small.om", "large.om"}, ""},
+		{"cpu", "cpu", "onnx_path: model/net.onnx\n", []string{"model/net.onnx"},
+			[]string{"model/data/weights.bin", "model/data/weights.engine", "model/data/weights.om", "model/data/weights.onnx"}},
+		{"tensorrt", "trt", "engine_path: net.engine\n", []string{"net.engine"}, nil},
+		{"ascend", "ascend", "om_paths: {1: small.om, 4: large.om}\n", []string{"small.om", "large.om"}, nil},
 	} {
 		t.Run(scenario.backend, func(t *testing.T) {
 			router, repo := modelUploadRouter(t)
@@ -81,14 +82,21 @@ func TestExportRoundTripsThroughModelUpload(t *testing.T) {
 			files := map[string]string{
 				"config.yaml": original, ".publication-token": "private",
 				"3/.hidden": "private", "3/unused.onnx": "unselected", "4/different.onnx": "other version",
+				"3/unrelated.txt": "not an ONNX dependency",
 			}
 			expected := make(map[string]string)
-			for _, name := range append(append([]string{}, scenario.weights...), scenario.aux) {
-				if name == "" {
-					continue
-				}
+			for _, name := range append(append([]string{}, scenario.weights...), scenario.aux...) {
 				files["3/"+name] = "data for " + name
 				expected["1/"+name] = files["3/"+name]
+			}
+			if scenario.backend == "cpu" {
+				var locations []string
+				for _, file := range scenario.aux {
+					locations = append(locations, strings.TrimPrefix(file, "model/"))
+				}
+				model := fixtureONNXExternalData(locations...)
+				files["3/model/net.onnx"] = model
+				expected["1/model/net.onnx"] = model
 			}
 			writeExportFixture(t, base, files)
 
@@ -247,4 +255,39 @@ func TestExportRejectsUnavailableOrUnsafeSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireUploadStatus(t, exportRequest(router, exportSourceID, bearer), http.StatusRequestEntityTooLarge, "export_too_large")
+}
+
+func TestONNXExportRejectsUnimportableExternalData(t *testing.T) {
+	for _, scenario := range []struct{ label, location, message string }{
+		{"hidden", ".hidden/weights.bin", "cannot be imported"},
+		{"missing", "missing.bin", "must be a regular file"},
+		{"outside version", "../weights.bin", "must stay within the model directory"},
+		{"symlink", "linked.bin", "must be a regular file"},
+	} {
+		t.Run(scenario.label, func(t *testing.T) {
+			router, repo := modelUploadRouter(t)
+			registerModelExportRoute(router)
+			version := filepath.Join(repo, exportSourceID, "1")
+			writeExportFixture(t, version, map[string]string{
+				"net.onnx": fixtureONNXExternalData(scenario.location), ".hidden/weights.bin": "external data",
+				"weights.bin": "external data",
+			})
+			if err := os.Symlink("weights.bin", filepath.Join(version, "linked.bin")); err != nil {
+				t.Fatal(err)
+			}
+			desc := modelExportDescription{
+				Version: "1", ConfigYAML: "backend: cpu\n", OverridesYAML: "onnx_path: net.onnx\n",
+				WeightPaths: []string{"net.onnx"},
+			}
+			callFn = func(map[string]any) (map[string]any, error) {
+				return map[string]any{"status": "ok", "data": desc}, nil
+			}
+
+			response := exportRequest(router, exportSourceID, "Bearer "+testModelUploadKey)
+			requireUploadStatus(t, response, http.StatusUnprocessableEntity, "model_not_exportable")
+			if !strings.Contains(response.Body.String(), scenario.message) || response.Header().Get("Content-Disposition") != "" {
+				t.Fatalf("expected a dependency error, got %s", response.Body)
+			}
+		})
+	}
 }

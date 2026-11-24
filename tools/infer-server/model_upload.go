@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -169,7 +170,75 @@ func archivePath(base, file string) (string, bool) {
 	return rel, err == nil && filepath.IsLocal(rel) && rel != "."
 }
 
-func inspectUpload(dir string) (uploadDraft, ArchiveAnalysisResponse, error) {
+func uploadWeightVersion(relative string) (version, name string) {
+	component, name, hasDir := strings.Cut(relative, string(os.PathSeparator))
+	n, _ := strconv.Atoi(component)
+	if !hasDir || n < 1 {
+		return "", relative
+	}
+	return component, name
+}
+
+func withoutONNXSidecars(ctx context.Context, dir, configDir string, config modelUploadConfig, weights []string) ([]string, error) {
+	if len(weights) < 2 || (config.Backend != "" && !compatibleBackend(backendName(config.Backend), "cpu")) {
+		return weights, nil
+	}
+	configured := config.OnnxPath
+	if configured == "" {
+		configured = config.WeightFile
+	}
+	if weightBackend(configured) != "cpu" {
+		return weights, nil
+	}
+	var primary string
+	for _, weight := range weights {
+		relative, ok := archivePath(configDir, weight)
+		if !ok {
+			continue
+		}
+		_, name := uploadWeightVersion(relative)
+		if name == filepath.Clean(configured) {
+			if primary != "" {
+				return weights, nil
+			}
+			primary = weight
+		}
+	}
+	if primary == "" {
+		return weights, nil
+	}
+
+	file, err := os.Open(filepath.Join(dir, primary))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	locations, err := onnxExternalLocations(ctx, file, info.Size())
+	if err != nil {
+		return nil, fmt.Errorf("cannot identify ONNX external data for %q: %w", primary, err)
+	}
+	sidecars := make(map[string]bool, len(locations))
+	for _, location := range locations {
+		name, err := onnxExternalPath(filepath.ToSlash(primary), location)
+		if err != nil {
+			return nil, err
+		}
+		sidecars[filepath.FromSlash(name)] = true
+	}
+	filtered := weights[:0]
+	for _, weight := range weights {
+		if !sidecars[weight] {
+			filtered = append(filtered, weight)
+		}
+	}
+	return filtered, nil
+}
+
+func inspectUpload(ctx context.Context, dir string) (uploadDraft, ArchiveAnalysisResponse, error) {
 	draft := uploadDraft{Files: make(map[string]string), OMPaths: make(map[int]string), ExpiresAt: time.Now().Add(uploadTTL)}
 	var preview ArchiveAnalysisResponse
 	var configName string
@@ -189,11 +258,7 @@ func inspectUpload(dir string) (uploadDraft, ArchiveAnalysisResponse, error) {
 			}
 			configName = rel
 		}
-		if backend := weightBackend(entry.Name()); backend != "" {
-			if draft.Backend != "" && draft.Backend != backend {
-				return fmt.Errorf("files for different backends cannot be published together")
-			}
-			draft.Backend = backend
+		if weightBackend(entry.Name()) != "" {
 			weights = append(weights, rel)
 		}
 		return nil
@@ -220,6 +285,19 @@ func inspectUpload(dir string) (uploadDraft, ArchiveAnalysisResponse, error) {
 		if err = yaml.Unmarshal(draft.Config, &config); err != nil {
 			return draft, preview, fmt.Errorf("invalid config.yaml: %w", err)
 		}
+		weights, err = withoutONNXSidecars(ctx, dir, filepath.Dir(configName), config, weights)
+		if err != nil {
+			return draft, preview, err
+		}
+	}
+	for _, weight := range weights {
+		backend := weightBackend(weight)
+		if draft.Backend != "" && draft.Backend != backend {
+			return draft, preview, fmt.Errorf("files for different backends cannot be published together")
+		}
+		draft.Backend = backend
+	}
+	if configName != "" {
 		if config.Backend != "" {
 			selected := backendName(config.Backend)
 			if !compatibleBackend(selected, draft.Backend) {
@@ -235,9 +313,8 @@ func inspectUpload(dir string) (uploadDraft, ArchiveAnalysisResponse, error) {
 			if !ok {
 				return draft, preview, fmt.Errorf("weights must be in the config.yaml directory or a subdirectory")
 			}
-			component, _, hasDir := strings.Cut(rel, string(os.PathSeparator))
-			n, _ := strconv.Atoi(component)
-			if !hasDir || n < 1 {
+			component, _ := uploadWeightVersion(rel)
+			if component == "" {
 				unversioned = true
 				continue
 			}
@@ -461,7 +538,7 @@ func saveUploadFiles(c *gin.Context, token, dir string, source *multipart.FileHe
 			return preview, err
 		}
 	}
-	draft, preview, err := inspectUpload(files)
+	draft, preview, err := inspectUpload(c.Request.Context(), files)
 	if err != nil {
 		return preview, err
 	}

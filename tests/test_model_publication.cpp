@@ -142,6 +142,34 @@ TEST_F(ModelPublicationTest, CascadeDependencyRemovedFromStartupConfigDuringProb
     EXPECT_FALSE(fs::exists(root_ / "vehicle"));
 }
 
+TEST_F(ModelPublicationTest, IDAddedToStartupConfigBlocksPublicationBeforeProbe) {
+    const auto candidate = stage("classifier");
+    auto tm = manager([](const auto&) { ADD_FAILURE() << "conflicting upload reached the probe"; });
+    writeConfig(true);
+
+    EXPECT_EQ(tm->publishModel("classifier", kToken, kAttempt).code, "already_exists");
+    EXPECT_TRUE(fs::exists(candidate));
+    EXPECT_FALSE(fs::exists(root_ / "classifier"));
+    EXPECT_TRUE(tm->listModels().empty());
+    EXPECT_NO_THROW(loadConfig(configPath()));
+}
+
+TEST_F(ModelPublicationTest, IDAddedToStartupConfigDuringProbeBlocksCommit) {
+    const auto candidate = stage("classifier");
+    int checks = 0;
+    auto tm = manager([&](const auto&) {
+        ++checks;
+        writeConfig(true);
+    });
+
+    EXPECT_EQ(tm->publishModel("classifier", kToken, kAttempt).code, "already_exists");
+    EXPECT_EQ(checks, 1);
+    EXPECT_TRUE(fs::exists(candidate));
+    EXPECT_FALSE(fs::exists(root_ / "classifier"));
+    EXPECT_TRUE(tm->listModels().empty());
+    EXPECT_NO_THROW(loadConfig(configPath()));
+}
+
 TEST_F(ModelPublicationTest, ConcurrentUploadsCannotOverwriteSameModel) {
     stage("vehicle");
     stage("vehicle", kOtherToken);
