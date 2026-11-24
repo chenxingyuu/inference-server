@@ -212,6 +212,20 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         return json({{"status", "ok"}, {"data", arr}}).dump();
     }
 
+    if (cmd == "describe_model_export") {
+        if (!req.contains("id") || !req["id"].is_string()) {
+            return json({{"status", "error"}, {"code", "invalid_model_id"}, {"message", "invalid model ID"}}).dump();
+        }
+        const auto model = task_manager_.describeModelExport(req["id"].get<std::string>());
+        if (!model.code.empty()) {
+            return json({{"status", "error"}, {"code", model.code}, {"message", model.message}}).dump();
+        }
+        return json({{"status", "ok"}, {"data", {
+            {"version", model.version}, {"config_yaml", model.config_yaml},
+            {"overrides_yaml", model.overrides_yaml}, {"weight_paths", model.weight_paths}
+        }}}).dump();
+    }
+
     if (cmd == "publish_model") {
         for (const auto* field : {"id", "token", "attempt"}) {
             if (!req.contains(field) || !req[field].is_string()) {

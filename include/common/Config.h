@@ -223,6 +223,17 @@ struct AppConfig {
 ModelConfig loadRepositoryModel(const std::filesystem::path& model_dir);
 std::vector<ModelConfig> scanModelRepository(const std::string& root);
 
+struct RepositoryModelExport {
+    std::string code;
+    std::string message;
+    std::string version;
+    std::string config_yaml;
+    std::string overrides_yaml;
+    std::vector<std::string> weight_paths;
+};
+
+RepositoryModelExport describeRepositoryModelExport(const std::string& root, const std::string& id);
+
 // Parse config.yaml → AppConfig. Throws std::runtime_error on invalid config.
 AppConfig loadConfig(const std::string& yaml_path);
 

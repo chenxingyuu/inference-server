@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	uploadTTL      = 30 * time.Minute
-	maxUploadBytes = 2 << 30
+	uploadTTL           = 30 * time.Minute
+	maxUploadBytes      = 2 << 30
+	maxModelConfigBytes = 1 << 20
 )
 
 var (
@@ -209,7 +210,7 @@ func inspectUpload(dir string) (uploadDraft, ArchiveAnalysisResponse, error) {
 	if configName != "" {
 		configPath := filepath.Join(dir, configName)
 		info, err := os.Stat(configPath)
-		if err != nil || info.Size() > 1<<20 {
+		if err != nil || info.Size() > maxModelConfigBytes {
 			return draft, preview, fmt.Errorf("cannot read model config.yaml or it exceeds 1 MiB")
 		}
 		draft.Config, err = os.ReadFile(configPath)

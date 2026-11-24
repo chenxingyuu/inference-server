@@ -1,8 +1,10 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import toast from 'react-hot-toast'
 import { useModels, useUnloadModel, useRepositoryModels, useLoadFromRepository } from '../hooks/queries'
 import { ModelUploadModal } from '../components/ModelUploadModal'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
 import { useT } from '../lib/i18n'
+import { api } from '../lib/api'
 
 function Tag({ children }: { children: string }) {
   return (
@@ -56,7 +58,27 @@ export function ModelsPage() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [expandedLoaded, setExpandedLoaded] = useState<string | null>(null)
   const [expandedRepo, setExpandedRepo] = useState<string | null>(null)
+  const [exportingID, setExportingID] = useState<string | null>(null)
   const repoById = useMemo(() => new Map(repoModels.map((m) => [m.id, m])), [repoModels])
+
+  async function exportModel(id: string) {
+    setExportingID(id)
+    try {
+      const { filename, archive } = await api.models.exportFromRepository(id)
+      const url = URL.createObjectURL(archive)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.append(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      toast.error(error instanceof Error && error.message ? error.message : t('models.repo_export_failed'))
+    } finally {
+      setExportingID(null)
+    }
+  }
 
   return (
     <div>
@@ -192,11 +214,18 @@ export function ModelsPage() {
                     <td><Tag>{m.version}</Tag></td>
                     <td><StatusBadge loaded={m.loaded} /></td>
                     <td className="text-right pr-2" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => void exportModel(m.id)}
+                        disabled={exportingID !== null}
+                        className="text-xs text-primary hover:underline disabled:opacity-50"
+                      >
+                        {exportingID === m.id ? t('models.repo_exporting') : t('models.repo_export')}
+                      </button>
                       {!m.loaded && (
                         <button
                           onClick={() => loadFromRepo.mutate(m.id)}
                           disabled={loadFromRepo.isPending}
-                          className="text-xs text-primary hover:underline disabled:opacity-50"
+                          className="ml-3 text-xs text-primary hover:underline disabled:opacity-50"
                         >
                           {loadFromRepo.isPending ? t('models.repo_loading') : t('models.repo_load')}
                         </button>

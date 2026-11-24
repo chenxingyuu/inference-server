@@ -51,6 +51,7 @@ func corsMiddleware() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		c.Header("Access-Control-Expose-Headers", "Content-Disposition")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
@@ -83,6 +84,10 @@ var callFn = func(cmd map[string]any) (map[string]any, error) {
 	defer conn.Close()
 	if cmd["cmd"] == "publish_model" {
 		if err := conn.SetDeadline(time.Now().Add(105 * time.Second)); err != nil {
+			return nil, err
+		}
+	} else if cmd["cmd"] == "describe_model_export" {
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			return nil, err
 		}
 	}
@@ -653,6 +658,7 @@ func main() {
 	r.GET("/metrics", handleMetrics)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	registerModelUploadRoutes(r)
+	registerModelExportRoute(r)
 
 	// Protected management endpoints.
 	api := r.Group("/")

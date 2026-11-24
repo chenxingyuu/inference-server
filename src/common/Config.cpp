@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 
 namespace infer {
 
@@ -409,11 +411,29 @@ std::vector<ModelConfig> scanModelRepository(const std::string& root) {
     return out;
 }
 
-ModelConfig loadRepositoryModel(const std::filesystem::path& model_dir) {
+namespace {
+
+struct RepositoryModelSource {
+    YAML::Node config;
+    fs::path version_dir;
+    std::string config_yaml;
+};
+
+ModelConfig resolveRepositoryModel(const fs::path& model_dir, RepositoryModelSource* source = nullptr) {
     const std::string model_id = model_dir.filename().string();
     YAML::Node mn;
     try {
-        mn = YAML::LoadFile((model_dir / "config.yaml").generic_string());
+        const auto config_path = model_dir / "config.yaml";
+        if (source) {
+            std::ifstream input(config_path);
+            if (!input) throw std::runtime_error("cannot open model config");
+            std::ostringstream buffer;
+            buffer << input.rdbuf();
+            source->config_yaml = buffer.str();
+            mn = YAML::Load(source->config_yaml);
+        } else {
+            mn = YAML::LoadFile(config_path.generic_string());
+        }
     } catch (const YAML::Exception& e) {
         throw std::runtime_error("model_repository model " + model_id + ": " + std::string(e.what()));
     }
@@ -478,6 +498,9 @@ ModelConfig loadRepositoryModel(const std::filesystem::path& model_dir) {
     if (!std::filesystem::is_directory(version_dir)) {
         throw std::runtime_error("model_repository model " + model_id + ": missing version directory " + std::to_string(chosen));
     }
+    if (source && !fs::is_directory(fs::symlink_status(version_dir))) {
+        throw std::runtime_error("selected version directory must not be a symlink");
+    }
 
     ModelConfig m = parseModelConfigNode(mn);
     if (m.id != model_id) {
@@ -486,7 +509,95 @@ ModelConfig loadRepositoryModel(const std::filesystem::path& model_dir) {
     resolveRelativeWeightPaths(m, version_dir);
     autoDetectWeights(m, version_dir, weight_file);
     validateRepoModelWeights(m);
+    if (source) {
+        source->config = mn;
+        source->version_dir = version_dir;
+    }
     return m;
+}
+
+} // namespace
+
+ModelConfig loadRepositoryModel(const fs::path& model_dir) {
+    return resolveRepositoryModel(model_dir);
+}
+
+RepositoryModelExport describeRepositoryModelExport(const std::string& root, const std::string& id) {
+    RepositoryModelExport result;
+    auto fail = [](const char* code, const char* message) {
+        return RepositoryModelExport{code, message, {}, {}, {}, {}};
+    };
+    if (!std::regex_match(id, modelIdPattern())) return fail("invalid_model_id", "invalid model ID");
+    if (root.empty()) return fail("no_repository", "model repository is not configured on the engine");
+    try {
+        const auto model_dir = fs::canonical(root) / id;
+        const auto config_path = model_dir / "config.yaml";
+        const auto model_status = fs::symlink_status(model_dir);
+        if (!fs::exists(model_status)) return fail("model_not_found", "model is not in the repository");
+        if (!fs::is_directory(model_status)) {
+            return fail("model_not_exportable", "model directory must be a regular repository directory");
+        }
+        const auto config_status = fs::symlink_status(config_path);
+        if (!fs::exists(config_status)) return fail("model_not_found", "model is not in the repository");
+        if (!fs::is_regular_file(config_status) || fs::file_size(config_path) > (1u << 20)) {
+            return fail("model_not_exportable", "model config.yaml must be a regular file no larger than 1 MiB");
+        }
+
+        RepositoryModelSource source;
+        const auto model = resolveRepositoryModel(model_dir, &source);
+        YAML::Node overrides;
+        auto addWeight = [&](const std::string& path, const char* extension) {
+            const auto relative = fs::path(path).lexically_normal().lexically_relative(source.version_dir);
+            auto ext = relative.extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            if (relative.empty() || relative.is_absolute() || *relative.begin() == ".." || ext != extension) {
+                throw std::runtime_error("invalid weight path for export");
+            }
+            const auto name = relative.generic_string();
+            if (std::find(result.weight_paths.begin(), result.weight_paths.end(), name) != result.weight_paths.end()) {
+                throw std::runtime_error("duplicate weight path for export");
+            }
+            result.weight_paths.push_back(name);
+            return name;
+        };
+
+        if (model.backend == DeviceType::CUDA) {
+            overrides["engine_path"] = addWeight(model.engine_path, ".engine");
+        } else if (model.backend == DeviceType::Ascend) {
+            YAML::Node paths(YAML::NodeType::Map);
+            for (const auto& [batch, path] : model.om_paths) {
+                if (batch < 1) throw std::runtime_error("invalid batch size for export");
+                paths[batch] = addWeight(path, ".om");
+            }
+            overrides["om_paths"] = paths;
+        } else {
+            overrides["onnx_path"] = addWeight(model.onnx_path, ".onnx");
+        }
+
+        result.version = source.version_dir.filename().string();
+        overrides["active_version"] = 1;
+        overrides["backend"] = deviceTypeToStr(model.backend);
+        overrides["model_type"] = model.model_type == ModelType::Classifier ? "classifier" : "detector";
+        overrides["input_size"] = std::vector<int>{model.input_shape.height, model.input_shape.width};
+        const auto& config = source.config;
+        auto missing = [&](const char* key) {
+            const auto value = config[key];
+            return !value || value.IsNull();
+        };
+        if (missing("version")) overrides["version"] = "yolov8";
+        if (missing("batch_size")) overrides["batch_size"] = model.batch_size;
+        if (missing("conf_thresh")) overrides["conf_thresh"] = model.conf_thresh;
+        if (missing("nms_thresh")) overrides["nms_thresh"] = model.nms_thresh;
+        if (missing("num_classes")) overrides["num_classes"] = model.num_classes;
+        if (missing("instance_count")) overrides["instance_count"] = model.instance_count;
+
+        result.config_yaml = std::move(source.config_yaml);
+        result.overrides_yaml = YAML::Dump(overrides);
+        return result;
+    } catch (const std::exception&) {
+        return fail("model_not_exportable", "could not resolve exportable weights and config from the active version");
+    }
 }
 
 YOLOVersion parseYOLOVersion(const std::string& s) {

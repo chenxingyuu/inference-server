@@ -63,6 +63,18 @@ RTSP(source.rtsp | source.file，内含 FFmpeg/DVPP 解码)
 
 HTTP 客户端可先向 `POST /models/upload/analyze` 发送 multipart 的 `file` 或 `archive`，再将响应中的 `token`、`id` 和修改过的参数提交给 `POST /models/upload`。两个接口都要求携带 `Authorization: Bearer <INFER_API_KEY>`。引擎未确认发布时，用同一 token 和 ID 重试。旧版直接上传的 multipart 请求继续支持。
 
+### 导出仓库模型
+
+在 **模型管理 → 模型仓库** 点击模型行的 **导出模型**。下载的 `<model_id>-v<活动版本>.zip` 包含当前版本使用的权重和可重新导入的 `config.yaml`。Ascend 包含配置引用的各 Batch 权重，ONNX 包含同版本目录内的辅助文件。上传时直接选择 ZIP，核对预填参数后发布。同一仓库中可将 ID 改为 `原ID-smoke`，再从流水线选择新 ID 跑样例。发布后的仓库版本目录为 `1/`。级联二级模型须先在目标环境登记。
+
+导出和上传使用同一 API Key。导出包遵循上传的 2 GiB 请求限制。大文件可以用命令行直接保存到磁盘，例如在已设置 `INFER_API_KEY` 的终端执行以下命令。管理服务会在临时目录生成 ZIP，自定义代理的读取超时应覆盖生成时间。
+
+```bash
+curl --fail --show-error --remote-name --remote-header-name \
+  --header "Authorization: Bearer ${INFER_API_KEY}" \
+  http://localhost:8080/models/repository/yolov8n_cpu/export
+```
+
 ## 依赖
 
 | 依赖 | 版本要求 | 说明 |

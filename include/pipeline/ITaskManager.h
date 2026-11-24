@@ -106,6 +106,9 @@ public:
     virtual std::vector<RepositoryModelInfo> listRepositoryModels() const = 0;
     // Scan repository, find `id`, and load it. Returns false if not found or already loaded.
     virtual bool loadFromRepository(const std::string& id) = 0;
+    virtual RepositoryModelExport describeModelExport(const std::string&) const {
+        return {"export_unavailable", "model export is unavailable", {}, {}, {}, {}};
+    }
     virtual ModelPublishResult publishModel(const std::string&, const std::string&, const std::string&) {
         return {"publish_unavailable", "model publication is unavailable"};
     }

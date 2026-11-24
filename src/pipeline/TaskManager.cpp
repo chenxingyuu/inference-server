@@ -570,6 +570,10 @@ bool TaskManager::loadFromRepository(const std::string& id) {
     return loadModel(*it);
 }
 
+RepositoryModelExport TaskManager::describeModelExport(const std::string& id) const {
+    return describeRepositoryModelExport(cfg_.server.model_repository, id);
+}
+
 ModelPublishResult TaskManager::publishModel(const std::string& id, const std::string& token,
                                             const std::string& attempt) {
     namespace fs = std::filesystem;

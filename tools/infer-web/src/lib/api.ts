@@ -31,7 +31,7 @@ class ApiError extends Error {
   }
 }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+async function request(path: string, init?: RequestInit): Promise<Response> {
   const key = auth.get()
   const res = await fetch(buildApiUrl(path), {
     ...init,
@@ -47,6 +47,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, body.message ?? res.statusText, body.code)
   }
 
+  return res
+}
+
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await request(path, init)
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
@@ -89,6 +94,11 @@ export const api = {
     listRepository: () => req<RepositoryModel[]>('/models/repository'),
     loadFromRepository: (id: string) =>
       req<OkResponse>(`/models/repository/${id}/load`, { method: 'POST' }),
+    exportFromRepository: async (id: string) => {
+      const res = await request(`/models/repository/${encodeURIComponent(id)}/export`)
+      const filename = /\bfilename="?([A-Za-z0-9_-]+\.zip)"?/.exec(res.headers.get('Content-Disposition') ?? '')?.[1]
+      return { filename: filename ?? `${id}.zip`, archive: await res.blob() }
+    },
     publish: (body: URLSearchParams) =>
       req<OkResponse>('/models/upload', {
         method: 'POST',

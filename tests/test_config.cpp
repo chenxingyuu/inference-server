@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <yaml-cpp/yaml.h>
 #include "common/Config.h"
 #include <stdexcept>
 #include <fstream>
@@ -936,6 +937,16 @@ TEST(ModelRepository, ScanResolvesSingleOnnx) {
     EXPECT_EQ(out[0].backend, DeviceType::CPU);
     ASSERT_FALSE(out[0].onnx_path.empty());
     EXPECT_NE(out[0].onnx_path.find(std::string("/1/")), std::string::npos);
+
+    const auto exported = describeRepositoryModelExport(base.string(), "repo_m");
+    ASSERT_TRUE(exported.code.empty()) << exported.message;
+    EXPECT_EQ(exported.version, "1");
+    EXPECT_EQ(exported.weight_paths, std::vector<std::string>{"model.onnx"});
+    const auto overrides = YAML::Load(exported.overrides_yaml);
+    EXPECT_EQ(overrides["onnx_path"].as<std::string>(), "model.onnx");
+    EXPECT_EQ(overrides["batch_size"].as<int>(), out[0].batch_size);
+    EXPECT_FLOAT_EQ(overrides["conf_thresh"].as<float>(), out[0].conf_thresh);
+    EXPECT_FALSE(YAML::Load(exported.config_yaml)["batch_size"].IsDefined());
     fs::remove_all(base);
 }
 
@@ -964,6 +975,26 @@ TEST(ModelRepository, ActiveVersionSelectsOlder) {
     ASSERT_EQ(out.size(), 1u);
     EXPECT_NE(out[0].onnx_path.find("/1/"), std::string::npos);
     EXPECT_NE(out[0].onnx_path.find("v1.onnx"), std::string::npos);
+
+    const auto older = describeRepositoryModelExport(base.string(), "ver_m");
+    EXPECT_TRUE(older.code.empty()) << older.message;
+    EXPECT_EQ(older.version, "1");
+    EXPECT_EQ(older.weight_paths, std::vector<std::string>{"v1.onnx"});
+    {
+        std::ofstream cfg(base / "ver_m" / "config.yaml");
+        cfg << "backend: cpu\ninput_size: [640, 640]\n";
+    }
+    const auto latest = describeRepositoryModelExport(base.string(), "ver_m");
+    ASSERT_TRUE(latest.code.empty()) << latest.message;
+    EXPECT_EQ(latest.version, "2");
+    EXPECT_EQ(latest.weight_paths, std::vector<std::string>{"v2.onnx"});
+    EXPECT_EQ(YAML::Load(latest.overrides_yaml)["active_version"].as<int>(), 1);
+
+    {
+        std::ofstream cfg(base / "ver_m" / "config.yaml");
+        cfg << "backend: cpu\ninput_size: [640, 640]\nonnx_path: ../1/v1.onnx\n";
+    }
+    EXPECT_EQ(describeRepositoryModelExport(base.string(), "ver_m").code, "model_not_exportable");
     fs::remove_all(base);
 }
 

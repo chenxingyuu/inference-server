@@ -50,6 +50,7 @@ public:
     bool unloadModel(const std::string& id)          override;
     std::vector<RepositoryModelInfo> listRepositoryModels() const override;
     bool loadFromRepository(const std::string& id)   override;
+    RepositoryModelExport describeModelExport(const std::string& id) const override;
 
     ModelPublishResult publishModel(const std::string& id, const std::string& token,
                                     const std::string& attempt) override;
