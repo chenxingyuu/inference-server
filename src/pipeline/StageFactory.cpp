@@ -103,6 +103,11 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
         const auto* model_cfg = ctx.app_config.findModel(model_id_it->second);
         if (!model_cfg) throw std::runtime_error("infer.engine model not found: " + model_id_it->second);
 
+        const auto thresholds = parseInferEngineThresholdOverrides(cfg);
+        ModelConfig effective_model = *model_cfg;
+        effective_model.conf_thresh = thresholds.confidence.value_or(model_cfg->conf_thresh);
+        effective_model.nms_thresh = thresholds.nms.value_or(model_cfg->nms_thresh);
+
         std::vector<ModelConfig> secondary_models;
         secondary_models.reserve(model_cfg->cascade.size());
         for (const auto& cas : model_cfg->cascade) {
@@ -116,7 +121,7 @@ std::unique_ptr<IStage> StageFactory::create(const StageConfig& cfg, const Conte
 
         return std::make_unique<InferEngineWorkerStage>(
             cfg.id,
-            *model_cfg,
+            std::move(effective_model),
             [](const ModelConfig& c) { return createBackend(c); },
             [](const ModelConfig& c) { return createDecoder(c); },
             std::move(secondary_models));

@@ -12,6 +12,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <locale>
 #include <sstream>
 
 namespace infer {
@@ -82,6 +83,9 @@ void validatePipelineGraphs(const AppConfig& cfg) {
             if (n.id.empty()) throw std::runtime_error("pipeline node id must not be empty");
             if (!node_ids.insert(n.id).second) {
                 throw std::runtime_error("duplicate pipeline node id: " + n.id);
+            }
+            if (n.type == "infer.engine") {
+                parseInferEngineThresholdOverrides(n);
             }
             if (n.type == "sink.stream") {
                 auto output_url_it = n.with.find("output_url");
@@ -191,6 +195,28 @@ void validateAppConfig(const AppConfig& cfg) {
 }
 
 } // namespace
+
+InferEngineThresholdOverrides parseInferEngineThresholdOverrides(const StageConfig& stage) {
+    const auto parse = [&](const char* key) -> std::optional<float> {
+        const auto it = stage.with.find(key);
+        if (it == stage.with.end()) return std::nullopt;
+
+        std::istringstream input(it->second);
+        input.imbue(std::locale::classic());
+        if ((input >> std::ws).eof()) return std::nullopt;
+
+        double value = 0.0;
+        if (it->second.find_first_not_of("0123456789.+-eE \t\n\r\f\v") != std::string::npos ||
+            !(input >> value) || !(input >> std::ws).eof() ||
+            !std::isfinite(value) || value < 0.0 || value > 1.0) {
+            throw std::runtime_error("infer.engine node '" + stage.id + "': with." +
+                                     key + " must be a decimal number between 0 and 1");
+        }
+        return static_cast<float>(value);
+    };
+
+    return {parse("conf_thresh"), parse("nms_thresh")};
+}
 
 YOLOVersion parseYOLOVersion(const std::string& s);
 DeviceType  parseDeviceType(const std::string& s);

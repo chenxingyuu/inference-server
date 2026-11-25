@@ -32,7 +32,13 @@ function formatValidationErrors(
   if (result.ok) return ''
   return result.errors
     .map((code) => {
-      const suffix = code.split(':')[0]
+      const [suffix, field, ...nodeParts] = code.split(':')
+      if (suffix === 'infer_engine_threshold') {
+        return t('pipelines.editor.error.infer_engine_threshold', {
+          node: nodeParts.join(':'),
+          field: t(field === 'conf_thresh' ? 'pipelines.editor.confidence_threshold' : 'pipelines.editor.nms_threshold'),
+        })
+      }
       const key = `pipelines.editor.error.${suffix}` as Parameters<ReturnType<typeof useT>['t']>[0]
       const msg = t(key)
       return msg !== key ? msg : code
@@ -343,6 +349,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
   }
 
   const pending = add.isPending || update.isPending
+  const inspectorNode = selectedNode ? nodes.find((node) => node.id === selectedNode.id) ?? null : null
 
   if (isEdit && !isLoading && initialized && !pipelines.find((p) => p.id === routeId)) {
     return (
@@ -417,7 +424,7 @@ function PipelineEditorInner({ mode }: { mode: 'create' | 'edit' }) {
           }}
         />
         <PipelineInspector
-          selectedNode={selectedNode}
+          selectedNode={inspectorNode}
           selectedEdge={selectedEdge}
           graphRevision={graphRevision}
           inspectorFlushRef={inspectorFlushRef}

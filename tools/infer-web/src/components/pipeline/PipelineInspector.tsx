@@ -3,10 +3,17 @@ import type { Edge, Node } from '@xyflow/react'
 import { Field, Input, Select } from '../ui/Field'
 import { ParamKeyCombobox } from '../ui/ParamKeyCombobox'
 import { ParamValueInput } from '../ui/ParamValueInput'
+import { useModels } from '../../hooks/queries'
 import { useT } from '../../lib/i18n'
 import { NODE_CATEGORIES, NODE_TYPE_DEFS, getNodeTypeDef } from '../../lib/nodeTypes'
-import type { PipelineEdgeData, PipelineNodeData } from '../../lib/pipelineGraph'
-import { pairsToWith } from '../../lib/pipelineGraph'
+import {
+  INFER_ENGINE_THRESHOLD_KEYS,
+  isValidInferEngineThreshold,
+  pairsToWith,
+  type InferEngineThresholdKey,
+  type PipelineEdgeData,
+  type PipelineNodeData,
+} from '../../lib/pipelineGraph'
 import type { DropPolicy } from '../../types'
 
 const CUSTOM = '__custom__'
@@ -114,6 +121,52 @@ function withToPairs(withRecord: Record<string, string> | undefined): WithPair[]
   return Object.entries(withRecord ?? {}).map(([k, v]) => ({ k, v }))
 }
 
+function InferEngineThresholdFields({
+  params,
+  onChange,
+}: {
+  params: Record<string, string> | undefined
+  onChange: (key: InferEngineThresholdKey, value: string) => void
+}) {
+  const { t } = useT()
+  const { data: models } = useModels()
+  const model = models?.find(({ id }) => id === params?.model_id)
+  const supportsNms = model?.model_type === 'detector' && ['v5', 'v8', 'v11'].includes(model.version)
+  const keys = supportsNms ? INFER_ENGINE_THRESHOLD_KEYS : (['conf_thresh'] as const)
+
+  return (
+    <details className="rounded border border-border px-3 py-2">
+      <summary className="cursor-pointer text-xs text-ink-secondary">
+        {t('pipelines.editor.infer_advanced')}
+      </summary>
+      <div className="mt-3 space-y-3">
+        {keys.map((key) => {
+          const label = t(key === 'conf_thresh' ? 'pipelines.editor.confidence_threshold' : 'pipelines.editor.nms_threshold')
+          const modelDefault = model?.[key]
+          const value = params?.[key] ?? ''
+          const placeholder = typeof modelDefault === 'number'
+            ? t('pipelines.editor.model_default_value', { value: Number(modelDefault.toPrecision(6)) })
+            : t('pipelines.editor.model_default')
+
+          return (
+            <Field key={key} label={label}>
+              <Input
+                aria-label={label}
+                aria-invalid={!isValidInferEngineThreshold(value)}
+                className="text-xs"
+                inputMode="decimal"
+                placeholder={placeholder}
+                value={value}
+                onChange={(e) => onChange(key, e.target.value)}
+              />
+            </Field>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
+
 function NodeInspectorForm({
   node,
   onUpdateNode,
@@ -157,12 +210,6 @@ function NodeInspectorForm({
       inspectorFlushRef.current = null
     }
   }, [inspectorFlushRef])
-
-  useEffect(() => {
-    return () => {
-      syncPairsToGraphRef.current(pairsRef.current, { commit: 'immediate' })
-    }
-  }, [node.id])
 
   const selectValue = getNodeTypeDef(data.stageType) ? data.stageType : (data.stageType ? CUSTOM : '')
   const typeDef = getNodeTypeDef(data.stageType)
@@ -213,6 +260,13 @@ function NodeInspectorForm({
   const updatePair = (i: number, patch: Partial<WithPair>) =>
     handlePairsChange(pairs.map((p, j) => (j === i ? { ...p, ...patch } : p)))
 
+  const setThreshold = (key: InferEngineThresholdKey, value: string) => {
+    const next = pairs.filter((pair) => pair.k !== key)
+    handlePairsChange(value === '' ? next : [...next, { k: key, v: value }])
+  }
+
+  const isInferEngine = data.stageType === 'infer.engine'
+
   return (
     <div className="space-y-3">
       <Field label={t('pipelines.col.node_id')}>
@@ -258,6 +312,7 @@ function NodeInspectorForm({
         <span className="label block mb-2">{t('pipelines.editor.params')}</span>
         <div className="space-y-2">
           {pairs.map((p, i) => {
+            if (isInferEngine && INFER_ENGINE_THRESHOLD_KEYS.some((key) => key === p.k)) return null
             const paramDef = typeDef?.withTemplate.find((d) => d.k === p.k)
             return (
               <div key={i} className="flex gap-1">
@@ -294,6 +349,7 @@ function NodeInspectorForm({
           </button>
         </div>
       </div>
+      {isInferEngine && <InferEngineThresholdFields params={pairsToWith(pairs)} onChange={setThreshold} />}
     </div>
   )
 }

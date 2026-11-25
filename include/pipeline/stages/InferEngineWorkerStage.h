@@ -49,6 +49,11 @@ public:
     // Test hook: InferWorkerGroup instance count after construction.
     int workerInstanceCount() const { return group_ ? group_->instanceCount() : 0; }
 
+    // Test hook: thresholds supplied to the primary worker group.
+    std::pair<float, float> decoderThresholdsForTest() const {
+        return {model_cfg_.conf_thresh, model_cfg_.nms_thresh};
+    }
+
     // Test hook: number of secondary cascade worker groups.
     int secondaryGroupCount() const {
         return static_cast<int>(secondary_groups_.size());

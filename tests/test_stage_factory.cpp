@@ -293,6 +293,33 @@ TEST(StageFactory, InferEngineCreatesInferEngineWorkerStage) {
     EXPECT_EQ(worker_stage->workerInstanceCount(), 2);
 }
 
+TEST(StageFactory, InferEngineThresholdOverridesAreLocalToEachNode) {
+    const auto ctx = makeInferEngineContext();
+    const auto* model = ctx.app_config.findModel("model_multi");
+    ASSERT_NE(model, nullptr);
+
+    auto first = StageFactory::create(
+        {"first", "infer.engine", {{"model_id", model->id}, {"conf_thresh", "0"}}}, ctx);
+    auto second = StageFactory::create(
+        {"second", "infer.engine", {{"model_id", model->id}, {"conf_thresh", "0.65"}, {"nms_thresh", "1"}}},
+        ctx);
+    auto inherited = StageFactory::create(
+        {"inherited", "infer.engine", {{"model_id", model->id}, {"conf_thresh", " "}}}, ctx);
+
+    const auto first_thresholds = static_cast<InferEngineWorkerStage&>(*first).decoderThresholdsForTest();
+    const auto second_thresholds = static_cast<InferEngineWorkerStage&>(*second).decoderThresholdsForTest();
+    const auto inherited_thresholds = static_cast<InferEngineWorkerStage&>(*inherited).decoderThresholdsForTest();
+
+    EXPECT_FLOAT_EQ(first_thresholds.first, 0.0f);
+    EXPECT_FLOAT_EQ(first_thresholds.second, 0.45f);
+    EXPECT_FLOAT_EQ(second_thresholds.first, 0.65f);
+    EXPECT_FLOAT_EQ(second_thresholds.second, 1.0f);
+    EXPECT_FLOAT_EQ(inherited_thresholds.first, 0.4f);
+    EXPECT_FLOAT_EQ(inherited_thresholds.second, 0.45f);
+    EXPECT_FLOAT_EQ(model->conf_thresh, 0.4f);
+    EXPECT_FLOAT_EQ(model->nms_thresh, 0.45f);
+}
+
 TEST(StageFactory, InferEngineRejectsUnknownCascadeSecondary) {
     StageConfig cfg;
     cfg.id = "infer_cascade";

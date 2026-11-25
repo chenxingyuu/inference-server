@@ -188,6 +188,23 @@ pipelines:
           protocol: rtsp
 ```
 
+### 推理节点阈值
+
+在 Web 流水线编辑器中选中 `infer.engine` 节点，通过「推理高级参数」调整置信度和 NMS 阈值。每项独立覆盖该节点主模型的解码阈值，留空时沿用模型配置，取值范围为 `[0, 1]`。YOLO v5、v8、v11 检测模型使用 NMS 阈值，YOLO26 和分类模型只使用置信度阈值。
+
+在 YAML 的节点 `with` 中可以直接设置这两项。HTTP 流水线接口的 `with` 参数仍使用字符串值，例如 `"conf_thresh": "0.3"`。
+
+```yaml
+- id: detector
+  type: infer.engine
+  with:
+    model_id: yolov8n_cpu
+    conf_thresh: 0.3
+    nms_thresh: 0.5
+```
+
+更新现有流水线前，先停止使用该流水线的运行中任务。保存会重建相关任务图，任务下次启动时使用新阈值。
+
 ### 多路发布配置（publishers:）
 
 `sink.kafka` stage 通过 `buildPublisher()` 工厂自动扇出，多路启用时内部包装为 `MultiPublisher`，单路失败不影响其余路。

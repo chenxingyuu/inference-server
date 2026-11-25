@@ -374,6 +374,33 @@ TEST_F(UnixSocketServerTest, AddPipelineDuplicate) {
     EXPECT_TRUE(resp.contains("message"));
 }
 
+TEST_F(UnixSocketServerTest, ValidatesThresholdsBeforeAddingOrUpdatingPipeline) {
+    fake_tm_.pipelines = {pipelineWithId("pipe_1")};
+    for (const char* cmd : {"add_pipeline", "update_pipeline"}) {
+        SCOPED_TRACE(cmd);
+        json req{
+            {"cmd", cmd},
+            {"id", "pipe_1"},
+            {"nodes", json::array({{
+                {"id", "detector"},
+                {"type", "infer.engine"},
+                {"with", {{"model_id", "shared"}, {"conf_thresh", "0"}, {"nms_thresh", "1"}}},
+            }})},
+        };
+        EXPECT_EQ(roundtrip(req)["status"], "ok");
+
+        req["nodes"][0]["with"]["conf_thresh"] = "1.1";
+        auto response = roundtrip(req);
+        EXPECT_EQ(response["code"], "invalid_pipeline");
+        const auto message = response["message"].get<std::string>();
+        EXPECT_NE(message.find("detector"), std::string::npos);
+        EXPECT_NE(message.find("conf_thresh"), std::string::npos);
+
+        req["nodes"][0]["with"]["conf_thresh"] = 0.3;
+        EXPECT_EQ(roundtrip(req)["code"], "invalid_pipeline");
+    }
+}
+
 TEST_F(UnixSocketServerTest, RemovePipelineSuccess) {
     fake_tm_.pipelines = {pipelineWithId("pipeline_default")};
     auto resp = roundtrip({{"cmd", "remove_pipeline"}, {"id", "pipeline_default"}});

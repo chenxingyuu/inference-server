@@ -8,6 +8,49 @@
 
 using namespace infer;
 
+TEST(InferEngineThresholdOverrides, ParsesIndependentOverridesAndValidatesInput) {
+    StageConfig node{"detector", "infer.engine", {{"conf_thresh", " 0 "}, {"nms_thresh", "\t"}}};
+    const auto overrides = parseInferEngineThresholdOverrides(node);
+    EXPECT_EQ(overrides.confidence, 0.0f);
+    EXPECT_EQ(overrides.nms, std::nullopt);
+
+    node.with = {{"nms_thresh", "1e0"}};
+    const auto nms_only = parseInferEngineThresholdOverrides(node);
+    EXPECT_EQ(nms_only.confidence, std::nullopt);
+    EXPECT_EQ(nms_only.nms, 1.0f);
+
+    for (const char* invalid : {"-0.01", "1.00001", "nan", "inf", "0x0", "0.4junk", "1e", "0,4"}) {
+        SCOPED_TRACE(invalid);
+        node.with["nms_thresh"] = invalid;
+        EXPECT_THROW(parseInferEngineThresholdOverrides(node), std::runtime_error);
+    }
+}
+
+TEST(LoadConfig, ValidatesInferEngineThresholdsInYaml) {
+    const std::string path = "data/test_infer_engine_thresholds.yaml";
+    const auto writeYaml = [&](const char* confidence) {
+        std::ofstream out(path);
+        out << "publishers:\n"
+            << "  - {id: test_publisher, type: kafka}\n"
+            << "sources:\n"
+            << "  - {id: camera, url: 'rtsp://localhost/test'}\n"
+            << "pipelines:\n"
+            << "  - id: pipeline_1\n"
+            << "    nodes:\n"
+            << "      - id: detector\n"
+            << "        type: infer.engine\n"
+            << "        with: {model_id: shared_model, nms_thresh: '', conf_thresh: " << confidence << "}\n"
+            << "tasks:\n"
+            << "  - {id: task_1, source_id: camera, pipeline_id: pipeline_1}\n";
+    };
+
+    writeYaml("0.3");
+    EXPECT_NO_THROW(loadConfig(path));
+    writeYaml("1.5");
+    EXPECT_THROW(loadConfig(path), std::runtime_error);
+    std::remove(path.c_str());
+}
+
 // ── parseYOLOVersion ──────────────────────────────────────────────────────
 
 TEST(ParseYOLOVersion, KnownStrings) {

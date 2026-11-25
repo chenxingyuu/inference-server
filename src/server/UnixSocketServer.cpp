@@ -277,56 +277,46 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 
-    if (cmd == "add_pipeline") {
+    if (cmd == "add_pipeline" || cmd == "update_pipeline") {
         const auto id = req.value("id", std::string{});
         if (id.empty())
             return json({{"status", "error"}, {"message", "missing field: id"}}).dump();
         PipelineConfig p;
         p.id = id;
-        for (const auto& n : req.value("nodes", json::array())) {
-            StageConfig s;
-            s.id   = n.value("id",   std::string{});
-            s.type = n.value("type", std::string{});
-            if (n.contains("with") && n["with"].is_object())
-                for (const auto& [k, v] : n["with"].items())
-                    s.with[k] = v.get<std::string>();
-            p.nodes.push_back(std::move(s));
+        try {
+            for (const auto& n : req.value("nodes", json::array())) {
+                StageConfig s;
+                s.id   = n.value("id",   std::string{});
+                s.type = n.value("type", std::string{});
+                if (n.contains("with") && n["with"].is_object()) {
+                    for (const auto& [k, v] : n["with"].items()) {
+                        if (!v.is_string()) {
+                            throw std::runtime_error("pipeline node '" + s.id + "': with." +
+                                                     k + " must be a string");
+                        }
+                        s.with[k] = v.get<std::string>();
+                    }
+                }
+                if (s.type == "infer.engine") {
+                    parseInferEngineThresholdOverrides(s);
+                }
+                p.nodes.push_back(std::move(s));
+            }
+            for (const auto& e : req.value("edges", json::array())) {
+                EdgeConfig ec;
+                ec.from        = e.value("from", std::string{});
+                ec.to          = e.value("to",   std::string{});
+                ec.capacity    = e.value("capacity", ec.capacity);
+                ec.drop_policy = parseEdgeDropPolicy(e.value("drop_policy", std::string{"block"}));
+                p.edges.push_back(std::move(ec));
+            }
+        } catch (const std::exception& error) {
+            return json({{"status", "error"}, {"code", "invalid_pipeline"}, {"message", error.what()}}).dump();
         }
-        for (const auto& e : req.value("edges", json::array())) {
-            EdgeConfig ec;
-            ec.from        = e.value("from", std::string{});
-            ec.to          = e.value("to",   std::string{});
-            ec.capacity    = e.value("capacity", ec.capacity);
-            ec.drop_policy = parseEdgeDropPolicy(e.value("drop_policy", std::string{"block"}));
-            p.edges.push_back(std::move(ec));
-        }
-        if (!task_manager_.addPipeline(p))
-            return json({{"status", "error"}, {"message", "already exists: " + id}}).dump();
-        return json({{"status", "ok"}, {"id", id}}).dump();
-    }
-
-    if (cmd == "update_pipeline") {
-        const auto id = req.value("id", std::string{});
-        if (id.empty())
-            return json({{"status", "error"}, {"message", "missing field: id"}}).dump();
-        PipelineConfig p;
-        p.id = id;
-        for (const auto& n : req.value("nodes", json::array())) {
-            StageConfig s;
-            s.id   = n.value("id",   std::string{});
-            s.type = n.value("type", std::string{});
-            if (n.contains("with") && n["with"].is_object())
-                for (const auto& [k, v] : n["with"].items())
-                    s.with[k] = v.get<std::string>();
-            p.nodes.push_back(std::move(s));
-        }
-        for (const auto& e : req.value("edges", json::array())) {
-            EdgeConfig ec;
-            ec.from        = e.value("from", std::string{});
-            ec.to          = e.value("to",   std::string{});
-            ec.capacity    = e.value("capacity", ec.capacity);
-            ec.drop_policy = parseEdgeDropPolicy(e.value("drop_policy", std::string{"block"}));
-            p.edges.push_back(std::move(ec));
+        if (cmd == "add_pipeline") {
+            if (!task_manager_.addPipeline(p))
+                return json({{"status", "error"}, {"message", "already exists: " + id}}).dump();
+            return json({{"status", "ok"}, {"id", id}}).dump();
         }
         const auto pipes = task_manager_.listPipelines();
         const bool exists =

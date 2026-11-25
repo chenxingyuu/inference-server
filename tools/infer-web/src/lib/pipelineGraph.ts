@@ -6,6 +6,18 @@ import { getNodeTypeDef } from './nodeTypes'
 export const PIPELINE_NODE_TYPE = 'pipelineNode'
 export const PIPELINE_EDGE_TYPE = 'pipelineEdge'
 
+export const INFER_ENGINE_THRESHOLD_KEYS = ['conf_thresh', 'nms_thresh'] as const
+export type InferEngineThresholdKey = (typeof INFER_ENGINE_THRESHOLD_KEYS)[number]
+
+export function isValidInferEngineThreshold(rawValue: string | undefined): boolean {
+  const value = rawValue?.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '') ?? ''
+  if (!value) return true
+
+  const threshold = Number(value)
+  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)
+    && threshold >= 0 && threshold <= 1
+}
+
 export const NODE_WIDTH = 200
 export const NODE_HEIGHT = 72
 
@@ -166,6 +178,13 @@ export function validatePipelineGraph(
     else nodeIds.add(id)
     if (!type) errors.push(`node_type_empty:${id || n.id}`)
 
+    if (type === 'infer.engine') {
+      for (const key of INFER_ENGINE_THRESHOLD_KEYS) {
+        if (!isValidInferEngineThreshold(n.data.with?.[key])) {
+          errors.push('infer_engine_threshold:' + key + ':' + (id || n.id))
+        }
+      }
+    }
     if (type === 'sink.stream') {
       const url = n.data.with?.output_url?.trim()
       if (!url) errors.push(`sink_stream_output_url:${id}`)

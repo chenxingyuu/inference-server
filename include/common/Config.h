@@ -123,6 +123,13 @@ struct StageConfig {
     std::map<std::string, std::string> with;
 };
 
+struct InferEngineThresholdOverrides {
+    std::optional<float> confidence;
+    std::optional<float> nms;
+};
+
+InferEngineThresholdOverrides parseInferEngineThresholdOverrides(const StageConfig& stage);
+
 struct EdgeConfig {
     std::string     from;
     std::string     to;
