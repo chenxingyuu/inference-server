@@ -1,5 +1,5 @@
 export type SourceState = 'CONNECTING' | 'STREAMING' | 'RECONNECTING' | 'DEGRADED' | 'STOPPED'
-export type TaskState = 'running' | 'stopped'
+export type TaskState = 'stopped' | 'starting' | 'running' | 'failed'
 export type BackendType = 'cpu' | 'trt' | 'ascend'
 export type ModelVersion = 'v5' | 'v8' | 'v11' | 'v26'
 export type ModelType = 'detector' | 'classifier'
@@ -138,6 +138,8 @@ export interface ModelTestResult {
 export interface TaskInfo {
   id: string
   state: TaskState
+  failure?: { code: string; message: string }
+  cleanup_pending?: boolean
   source_id?: string
   pipeline_id?: string
   sample_fps?: number

@@ -1,6 +1,8 @@
 #include "pipeline/InferWorkerGroup.h"
 #include "common/Logger.h"
 
+#include <algorithm>
+
 namespace infer {
 
 InferWorkerGroup::InferWorkerGroup(const ModelConfig&  model_cfg,
@@ -46,6 +48,18 @@ void InferWorkerGroup::start() {
 
 void InferWorkerGroup::stop() {
     for (auto& w : workers_) w->stop();
+}
+
+bool InferWorkerGroup::idle() const {
+    return std::all_of(workers_.begin(), workers_.end(), [](const auto& worker) {
+        return worker->idle() || worker->state() == WorkerState::STOPPED;
+    });
+}
+
+bool InferWorkerGroup::unavailable() const {
+    return std::all_of(workers_.begin(), workers_.end(), [](const auto& worker) {
+        return worker->state() == WorkerState::STOPPED;
+    });
 }
 
 void InferWorkerGroup::enqueue(Batch batch, std::optional<int> restrict_cuda_device_id) {

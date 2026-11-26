@@ -737,6 +737,11 @@ AppConfig loadConfig(const std::string& yaml_path) {
     if (auto sn = root["server"]) {
         cfg.server.stream_pool_threads = sn["stream_pool_threads"].as<int>(32);
         cfg.server.max_streams         = sn["max_streams"].as<int>(100);
+        cfg.server.task_start_timeout_ms = sn["task_start_timeout_ms"].as<int>(
+            cfg.server.task_start_timeout_ms);
+        if (cfg.server.task_start_timeout_ms <= 0) {
+            throw std::runtime_error("server.task_start_timeout_ms must be positive");
+        }
         cfg.server.socket_path         = sn["socket_path"].as<std::string>("/var/run/infer.sock");
         cfg.server.ffmpeg_log_level    = sn["ffmpeg_log_level"].as<std::string>("warning");
         cfg.server.ffmpeg_decode_threads =

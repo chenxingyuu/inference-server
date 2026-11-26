@@ -1210,7 +1210,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Creates a task binding a source to a pipeline. Starts in stopped state; use POST /tasks/{id}/start to activate.",
+                "description": "Creates a task binding a source to a pipeline and requests startup. Query GET /tasks for the outcome.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1276,7 +1276,7 @@ const docTemplate = `{
                 "tags": [
                     "tasks"
                 ],
-                "summary": "Update a task (must be stopped)",
+                "summary": "Update an inactive task",
                 "parameters": [
                     {
                         "type": "string",
@@ -1315,7 +1315,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "task is running",
+                        "description": "task is active or cleaning up",
                         "schema": {
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
@@ -1391,7 +1391,7 @@ const docTemplate = `{
                 "tags": [
                     "tasks"
                 ],
-                "summary": "Start or stop a task",
+                "summary": "Request task startup or shutdown",
                 "parameters": [
                     {
                         "type": "string",
@@ -1427,6 +1427,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "task cleanup in progress",
                         "schema": {
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
@@ -1826,8 +1832,10 @@ const docTemplate = `{
                 "state": {
                     "type": "string",
                     "enum": [
+                        "stopped",
+                        "starting",
                         "running",
-                        "stopped"
+                        "failed"
                     ]
                 }
             }
@@ -2128,11 +2136,28 @@ const docTemplate = `{
                 }
             }
         },
+        "infer-server.TaskFailure": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "infer-server.TaskInfo": {
             "type": "object",
             "properties": {
                 "ascend_device_id": {
                     "type": "integer"
+                },
+                "cleanup_pending": {
+                    "type": "boolean"
+                },
+                "failure": {
+                    "$ref": "#/definitions/infer-server.TaskFailure"
                 },
                 "id": {
                     "type": "string"
@@ -2152,8 +2177,10 @@ const docTemplate = `{
                 "state": {
                     "type": "string",
                     "enum": [
+                        "stopped",
+                        "starting",
                         "running",
-                        "stopped"
+                        "failed"
                     ]
                 },
                 "use_ascend_dvpp": {

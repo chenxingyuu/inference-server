@@ -376,6 +376,36 @@ TEST(InferEngineWorkerStage, EvictsStaleInflightWhenResultNeverArrives) {
     stage.stop();
 }
 
+TEST(InferEngineWorkerStage, FinishingInputFlushesPartialBatchBeforeOutputIsDrained) {
+    ModelConfig model = makeModel();
+    model.batch_size = 4;
+    model.max_queue_delay_us = 10'000'000;
+
+    const auto backend_factory = [](const ModelConfig&) -> std::unique_ptr<IInferBackend> {
+        return std::make_unique<FakeBackend>(nullptr);
+    };
+    std::atomic<int> results{0};
+    InferEngineWorkerStage stage("partial", model, backend_factory, createDecoder);
+    stage.start();
+
+    EventEnvelope event;
+    event.stream_id = "cam";
+    event.frame = std::make_shared<Frame>();
+    event.frame->meta.stream_id = "cam";
+    event.frame->image = cv::Mat::zeros(64, 64, CV_8UC3);
+    stage.process(event, [&](const EventEnvelope&) { ++results; });
+    EXPECT_EQ(results.load(), 0);
+
+    stage.finishInput();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    bool drained = false;
+    while (!(drained = stage.outputDrained()) && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_TRUE(drained);
+    EXPECT_EQ(results.load(), 1);
+}
+
 TEST(InferEngineWorkerStage, CascadeMergesSecondaryAttributesIntoEmit) {
     ModelConfig primary = makeCascadePrimary();
     ModelConfig secondary = makeClassifierModel();

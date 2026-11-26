@@ -181,11 +181,17 @@ void DrawAndStreamStage::enqueue(StreamItem item) {
         dropped_total);
 }
 
+bool DrawAndStreamStage::outputDrained() {
+    std::lock_guard lock(mu_);
+    return queue_.empty() && !output_busy_;
+}
+
 void DrawAndStreamStage::runWorker() {
     while (running_.load(std::memory_order_relaxed)) {
         StreamItem item;
         {
             std::unique_lock<std::mutex> lock(mu_);
+            output_busy_ = false;
             cv_.wait(lock, [this] {
                 return !running_.load(std::memory_order_relaxed) || !queue_.empty();
             });
@@ -194,6 +200,7 @@ void DrawAndStreamStage::runWorker() {
             }
             item = std::move(queue_.front());
             queue_.pop_front();
+            output_busy_ = true;
         }
         if (!item.frame || item.frame->image.empty()) {
             continue;

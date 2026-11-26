@@ -4,6 +4,9 @@
 #include "common/Logger.h"
 #include "infer/AscendProcessRuntime.h"
 #include "stream/DvppOutputPool.h"
+#include "stream/InterruptCtx.h"
+#include "stream/StreamHealthRegistry.h"
+#include "stream/StopAwareSleep.h"
 
 #include <acl/acl.h>
 #include <acl/ops/acl_dvpp.h>
@@ -32,6 +35,8 @@ DVPPDecoder::~DVPPDecoder() {
 }
 
 void DVPPDecoder::start(const StreamConfig& cfg, FrameCallback cb) {
+    end_reason_.store(DecoderEnd::None);
+    delivered_frames_.store(0);
     stream_id_  = cfg.id;
     device_id_  = cfg.ascend_device_id;
     stop_flag_.store(false, std::memory_order_relaxed);
@@ -39,15 +44,36 @@ void DVPPDecoder::start(const StreamConfig& cfg, FrameCallback cb) {
     {
         std::lock_guard<std::mutex> lk(ctx_mu_);
         ctx_.device_id = device_id_;
-        ctx_.cb        = std::move(cb);
+        ctx_.cb = [this, cb = std::move(cb)](Frame frame) {
+            ++delivered_frames_;
+            StreamHealthRegistry::get().onFrameDecoded(stream_id_, frame.meta.capture_ts);
+            cb(std::move(frame));
+        };
     }
 
     startup_done_ = false;
     startup_ok_   = false;
-    thread_ = std::thread(&DVPPDecoder::decodeLoop, this, cfg);
+    thread_ = std::thread([this, cfg] {
+        try {
+            decodeLoop(cfg);
+        } catch (const std::exception& error) {
+            LOG_ERROR("DVPPDecoder [{}]: {}", cfg.id, error.what());
+        }
+        if (running_.exchange(false)) {
+            if (!stop_flag_.load() && end_reason_.load() == DecoderEnd::None) {
+                end_reason_.store(DecoderEnd::Error);
+            }
+            StreamHealthRegistry::get().onStreamRemoved(cfg.id);
+        }
+        {
+            std::lock_guard lock(startup_mu_);
+            startup_done_ = true;
+        }
+        startup_cv_.notify_all();
+    });
 
     // Wait until decodeLoop signals its startup result (success or permanent failure).
-    // 15 s accommodates slow RTSP connections (stimeout=5s) plus DVPP channel init.
+    // Bound the initial hardware attempt before the source stage tries FFmpeg.
     std::unique_lock<std::mutex> lk(startup_mu_);
     startup_cv_.wait_for(lk, std::chrono::seconds(15),
                          [this] { return startup_done_; });
@@ -331,9 +357,9 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
 
     // Ensure aclInit() has been called before any ACL API usage.
     AscendProcessRuntime::acquire();
-    struct RuntimeGuard {
-        ~RuntimeGuard() { AscendProcessRuntime::release(); }
-    } runtime_guard;
+    auto runtime = std::shared_ptr<void>(nullptr, [](void*) {
+        AscendProcessRuntime::release();
+    });
 
     // On any early return, signal startup failure so start() doesn't wait forever.
     // Cancelled (set to true) once we successfully enter the packet decode loop.
@@ -361,16 +387,45 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         LOG_ERROR("DVPPDecoder: aclrtCreateContext failed: {}", static_cast<int>(rc));
         return;
     }
+    // Frames may survive a reconnect while downstream inference still uses the pool.
+    auto context = std::shared_ptr<void>(ctx_handle, [runtime](void* handle) {
+        aclrtDestroyContext(handle);
+    });
+    const auto make_pool = [&] {
+        return std::shared_ptr<DvppOutputPool>(new DvppOutputPool, [context](DvppOutputPool* pool) {
+            aclrtContext previous = nullptr;
+            (void)aclrtGetCurrentContext(&previous);
+            (void)aclrtSetCurrentContext(context.get());
+            pool->destroy();
+            delete pool;
+            if (previous && previous != context.get()) (void)aclrtSetCurrentContext(previous);
+        });
+    };
     rc = aclrtSetCurrentContext(ctx_handle);
     if (rc != ACL_SUCCESS) {
         LOG_ERROR("DVPPDecoder: aclrtSetCurrentContext failed: {}", static_cast<int>(rc));
-        aclrtDestroyContext(ctx_handle);
         return;
     }
 
     const int reconnect_delay_ms =
         cfg.reconnect_delay_ms > 0 ? cfg.reconnect_delay_ms : 2000;
     bool first_connect = true;
+    int failures = 0;
+    auto& health = StreamHealthRegistry::get();
+    const auto retry = [&](bool delivered) {
+        if (stop_flag_.load()) return false;
+        health.onStreamDropped(cfg.id);
+        if (delivered) {
+            failures = 0;
+        } else {
+            health.onReconnectFailed(cfg.id);
+            if (cfg.max_reconnect_attempts > 0 && ++failures >= cfg.max_reconnect_attempts) {
+                end_reason_.store(DecoderEnd::RetriesExhausted);
+                return false;
+            }
+        }
+        return !waitForOrStop(stop_flag_, std::chrono::milliseconds(reconnect_delay_ms));
+    };
 
     // ── Outer reconnect loop ──────────────────────────────────────────────────
     // Each iteration: open RTSP → init DVPP channel → decode packets.
@@ -380,25 +435,31 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     // ── Open RTSP and detect stream geometry BEFORE creating DVPP channel ────
     // initChannel requires codec type and aligned resolution, which are only
     // known after avformat_find_stream_info().
-    AVFormatContext* fmt_ctx = nullptr;
-    AVDictionary*    opts    = nullptr;
-    av_dict_set(&opts, "stimeout", "5000000", 0);
+    AVFormatContext* fmt_ctx = avformat_alloc_context();
+    if (!fmt_ctx) break;
+    InterruptCtx interrupt;
+    interrupt.stop_flag = &stop_flag_;
+    fmt_ctx->interrupt_callback = {InterruptCtx::check, &interrupt};
+    AVDictionary* opts = nullptr;
+    av_dict_set(&opts, "stimeout", std::to_string(static_cast<int64_t>(cfg.open_timeout_ms) * 1000).c_str(), 0);
     av_dict_set(&opts, "rtsp_transport", "tcp", 0);
 
+    interrupt.arm(static_cast<int64_t>(cfg.open_timeout_ms) * 1000);
     if (avformat_open_input(&fmt_ctx, cfg.url.c_str(), nullptr, &opts) < 0) {
         av_dict_free(&opts);
         if (first_connect) {
             LOG_ERROR("DVPPDecoder: cannot open RTSP: {}", cfg.url);
-            aclrtDestroyContext(ctx_handle);
             return;
         }
         LOG_WARN("DVPPDecoder [{}]: cannot open RTSP, retrying in {}ms",
                  stream_id_, reconnect_delay_ms);
-        std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
+        if (!retry(false)) break;
         continue;
     }
     av_dict_free(&opts);
-    avformat_find_stream_info(fmt_ctx, nullptr);
+    interrupt.arm(static_cast<int64_t>(cfg.open_timeout_ms) * 1000);
+    const int stream_info = avformat_find_stream_info(fmt_ctx, nullptr);
+    interrupt.disarm();
 
     int video_idx = -1;
     for (unsigned i = 0; i < fmt_ctx->nb_streams; ++i) {
@@ -407,11 +468,11 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
             break;
         }
     }
-    if (video_idx < 0) {
+    if (stream_info < 0 || video_idx < 0) {
         LOG_ERROR("DVPPDecoder [{}]: no video stream in {}", stream_id_, cfg.url);
         avformat_close_input(&fmt_ctx);
-        if (first_connect) { aclrtDestroyContext(ctx_handle); return; }
-        std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
+        if (first_connect) return;
+        if (!retry(false)) break;
         continue;
     }
 
@@ -433,7 +494,6 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
                   aligned_width_, aligned_height_,
                   kDvppMinDim, kDvppMaxDim, kDvppMinDim, kDvppMaxDim);
         avformat_close_input(&fmt_ctx);
-        aclrtDestroyContext(ctx_handle);
         return;
     }
 
@@ -443,7 +503,6 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         LOG_ERROR("DVPPDecoder [{}]: unsupported codec {} (only H.264/H.265 supported)",
                   stream_id_, static_cast<int>(codec_id));
         avformat_close_input(&fmt_ctx);
-        aclrtDestroyContext(ctx_handle);
         return;
     }
 
@@ -457,15 +516,15 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         LOG_ERROR("DVPPDecoder [{}]: aclrtSetCurrentContext failed before channel init",
                   stream_id_);
         avformat_close_input(&fmt_ctx);
-        if (first_connect) { aclrtDestroyContext(ctx_handle); return; }
-        std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
+        if (first_connect) return;
+        if (!retry(false)) break;
         continue;
     }
 
     if (!initChannel(device_id_, aligned_width_, aligned_height_, h264_profile, is_h265)) {
         avformat_close_input(&fmt_ctx);
-        if (first_connect) { aclrtDestroyContext(ctx_handle); return; }
-        std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
+        if (first_connect) return;
+        if (!retry(false)) break;
         continue;
     }
 
@@ -506,17 +565,6 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
                  "BSF skipped", stream_id_, fmt_name);
     }
 
-    if (first_connect) {
-        running_.store(true, std::memory_order_release);
-        {
-            std::lock_guard<std::mutex> lk(startup_mu_);
-            startup_done_ = true;
-            startup_ok_   = true;
-            startup_cv_.notify_one();
-        }
-        startup_guard.cancelled = true;
-        first_connect = false;
-    }
     LOG_INFO("DVPPDecoder [{}]: starting packet decode loop (CANN_VERSION_MAJOR={})",
              stream_id_, CANN_VERSION_MAJOR);
 
@@ -530,15 +578,15 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     // each aclvdecSendFrame. Reusing pool slots (rather than malloc/free per frame)
     // ensures params are always reset and bounds DVPP memory usage.
     const uint32_t yuv_size = alignedYuvSize(codec_width_, codec_height_);
-    auto output_pool = std::make_shared<DvppOutputPool>();
+    auto output_pool = make_pool();
     if (!output_pool->init(yuv_size, codec_width_, codec_height_,
                            aligned_width_, aligned_height_)) {
         LOG_ERROR("DVPPDecoder [{}]: failed to allocate output buffer pool", stream_id_);
         if (bsf_ctx) av_bsf_free(&bsf_ctx);
         avformat_close_input(&fmt_ctx);
         destroyChannel();
-        if (first_connect) { aclrtDestroyContext(ctx_handle); return; }
-        std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
+        if (first_connect) return;
+        if (!retry(false)) break;
         continue;
     }
     LOG_INFO("DVPPDecoder [{}]: output pool allocated ({} slots, {} bytes each)",
@@ -554,27 +602,25 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     if (vpc_enabled_) {
         if (!vpc_scaler_ptr->init(device_id_, ctx_handle)) {
             LOG_ERROR("DVPPDecoder [{}]: DvppVpcScaler init failed", stream_id_);
-            output_pool->destroy();
             if (bsf_ctx) av_bsf_free(&bsf_ctx);
             avformat_close_input(&fmt_ctx);
             destroyChannel();
-            if (first_connect) { aclrtDestroyContext(ctx_handle); return; }
-            std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
+            if (first_connect) return;
+            if (!retry(false)) break;
             continue;
         }
         const uint32_t vpc_aw = (vpc_out_w_ + 15u) & ~15u;
         const uint32_t vpc_ah = (vpc_out_h_ +  1u) & ~1u;
         const uint32_t vpc_yuv = alignedYuvSize(vpc_out_w_, vpc_out_h_);
-        vpc_output_pool = std::make_shared<DvppOutputPool>();
+        vpc_output_pool = make_pool();
         if (!vpc_output_pool->init(vpc_yuv, vpc_out_w_, vpc_out_h_, vpc_aw, vpc_ah)) {
             LOG_ERROR("DVPPDecoder [{}]: failed to allocate VPC output pool", stream_id_);
             vpc_scaler_ptr->shutdown();
-            output_pool->destroy();
             if (bsf_ctx) av_bsf_free(&bsf_ctx);
             avformat_close_input(&fmt_ctx);
             destroyChannel();
-            if (first_connect) { aclrtDestroyContext(ctx_handle); return; }
-            std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
+            if (first_connect) return;
+            if (!retry(false)) break;
             continue;
         }
         LOG_INFO("DVPPDecoder [{}]: VPC enabled {}x{} -> {}x{} ({} bytes/slot)",
@@ -596,11 +642,28 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
         if (bsf_ctx) av_bsf_free(&bsf_ctx);
         avformat_close_input(&fmt_ctx);
         destroyChannel();
-        if (first_connect) { aclrtDestroyContext(ctx_handle); return; }
-        std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
+        if (first_connect) return;
+        if (!retry(false)) break;
         continue;
     }
 #endif
+
+    if (first_connect) {
+        health.onStreamAdded(cfg.id, cfg.degraded_threshold, cfg.max_reconnect_attempts);
+        health.onStreamOpened(cfg.id);
+        running_.store(true, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lk(startup_mu_);
+            startup_done_ = true;
+            startup_ok_   = true;
+            startup_cv_.notify_one();
+        }
+        startup_guard.cancelled = true;
+        first_connect = false;
+    } else {
+        health.onReconnectSucceeded(cfg.id);
+    }
+    const auto frames_before = delivered_frames_.load();
 
     // ── Single-packet DVPP submit helper ─────────────────────────────────
     //
@@ -754,16 +817,19 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     AVPacket* pkt = av_packet_alloc();
     int consecutive_failures = 0;
     constexpr int kMaxConsecutiveFailures = 5;
-    bool channel_poisoned = false;
     bool got_keyframe = false;
 
     while (!stop_flag_.load(std::memory_order_acquire)) {
-        int ret = av_read_frame(fmt_ctx, pkt);
-        if (ret < 0) {
-            if (ret == AVERROR_EOF) break;
-            LOG_WARN("DVPPDecoder: av_read_frame error: {}", ret);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        interrupt.arm(static_cast<int64_t>(cfg.read_timeout_ms) * 1000);
+        const int ret = av_read_frame(fmt_ctx, pkt);
+        interrupt.disarm();
+        if (ret == AVERROR(EAGAIN)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
+        }
+        if (ret < 0) {
+            if (!stop_flag_.load()) LOG_WARN("DVPPDecoder: av_read_frame ended: {}", ret);
+            break;
         }
         if (pkt->stream_index != video_idx) {
             av_packet_unref(pkt);
@@ -813,7 +879,6 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
                 LOG_ERROR("DVPPDecoder [{}]: {} consecutive sendFrame failures — "
                           "channel poisoned (aicpu exception), reconnecting",
                           stream_id_, consecutive_failures);
-                channel_poisoned = true;
                 break;
             }
         } else {
@@ -850,29 +915,17 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     if (session_frame_cfg) { aclvdecDestroyFrameConfig(session_frame_cfg); session_frame_cfg = nullptr; }
 #endif
     if (vpc_output_pool) {
-        vpc_output_pool->destroy();
         vpc_output_pool.reset();
     }
     if (vpc_enabled_) {
         vpc_scaler_ptr->shutdown();
     }
 
-    output_pool->destroy();
     output_pool.reset();
 
-    if (!channel_poisoned || stop_flag_.load(std::memory_order_acquire)) {
-        break;  // EOF or graceful stop — exit reconnect loop
-    }
-
-    LOG_WARN("DVPPDecoder [{}]: sleeping {}ms before reconnect",
-             stream_id_, reconnect_delay_ms);
-    std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_delay_ms));
-    // Continue outer reconnect loop
-
+    if (!retry(delivered_frames_.load() != frames_before)) break;
     } // end while (!stop_flag_) reconnect loop
 
-    running_.store(false, std::memory_order_release);
-    aclrtDestroyContext(ctx_handle);
 }
 
 } // namespace infer

@@ -37,6 +37,16 @@ std::string SourceRtspStage::id() const { return id_; }
 
 bool SourceRtspStage::isSource() const { return true; }
 
+const char* SourceRtspStage::terminalError() const {
+    auto reason = decoder_.endReason();
+#ifdef BUILD_ASCEND_BACKEND
+    if (dvpp_decoder_) reason = dvpp_decoder_->endReason();
+#endif
+    if (reason == DecoderEnd::RetriesExhausted) return "source_retries_exhausted";
+    if (reason != DecoderEnd::None) return "source_error";
+    return nullptr;
+}
+
 void SourceRtspStage::start() {
     bool expected = false;
     if (!running_.compare_exchange_strong(expected, true)) return;
@@ -71,7 +81,7 @@ void SourceRtspStage::start() {
         cfg.ascend_vpc_out_height = vpc_out_height_;
         dvpp_decoder_ = std::make_unique<DVPPDecoder>();
         dvpp_decoder_->start(cfg, frame_cb);
-        if (dvpp_decoder_->running()) {
+        if (dvpp_decoder_->initialized()) {
             return;
         }
         // DVPP failed to start (resolution out of range, unsupported codec, ACL
@@ -99,11 +109,17 @@ void SourceRtspStage::stop() {
     if (dvpp_decoder_) {
         dvpp_decoder_->stop();
         dvpp_decoder_.reset();
+        std::lock_guard lock(mu_);
+        queue_.clear();
         return;
     }
 #endif
 
     decoder_.stop();
+    {
+        std::lock_guard lock(mu_);
+        queue_.clear();
+    }
     if (use_hwdec_ && gpu_alloc_) {
         gpu_alloc_->release(cuda_device_id_);
     }

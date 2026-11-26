@@ -20,6 +20,9 @@ public:
 
     std::string id() const override;
     bool isSource() const override;
+    bool inputEnded() const override;
+    bool inputDrained() const override;
+    const char* terminalError() const override;
 
     void start() override;
     void stop() override;
@@ -34,7 +37,7 @@ private:
     bool loop_;
     FFmpegDecoder decoder_;
     std::atomic<bool> running_{false};
-    std::mutex mu_;
+    mutable std::mutex mu_;
     std::deque<Frame> queue_;
     std::size_t max_queue_size_{64};
 };

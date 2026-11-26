@@ -44,6 +44,9 @@ public:
     void start() override;
     void stop() override;
     void onGraphExecutorDraining() noexcept override;
+    const char* terminalError() const override;
+    void finishInput() override;
+    bool outputDrained() override;
     void process(const EventEnvelope& input, const EmitFn& emit) override;
 
     // Test hook: InferWorkerGroup instance count after construction.
@@ -116,6 +119,8 @@ private:
     std::vector<std::unique_ptr<InferWorkerGroup>>   secondary_groups_;
 
     std::mutex                pending_mutex_;
+    bool input_finished_{false};  // guarded by pending_mutex_
+    bool flushing_{false};        // guarded by pending_mutex_
     std::deque<PendingEmit>   pending_events_;   // each entry owns its emit fn
     std::chrono::steady_clock::time_point batch_deadline_;
 

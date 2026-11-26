@@ -42,7 +42,7 @@ type ModelPipelineRef struct {
 
 type ModelPipelineTaskRef struct {
 	ID    string `json:"id"`
-	State string `json:"state" enums:"running,stopped"`
+	State string `json:"state" enums:"stopped,starting,running,failed"`
 }
 
 type ModelCascadeRef struct {

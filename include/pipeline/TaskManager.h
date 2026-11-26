@@ -6,6 +6,7 @@
 #include "pipeline/ITaskManager.h"
 #include "publisher/IPublisher.h"
 #include "archive/FrameArchiver.h"
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -18,6 +19,7 @@ class TaskManager : public ITaskManager {
 public:
     using State = ITaskManager::State;
     using ModelProbe = std::function<void(const std::filesystem::path&)>;
+    using GraphBuilder = std::function<std::unique_ptr<GraphExecutor>(const AppConfig&, const TaskConfig&)>;
     using ModelTest = std::function<nlohmann::json(const ModelConfig&, const std::string&)>;
 
     // config_path is stored for runtime-state persistence (sidecar JSON).
@@ -27,12 +29,15 @@ public:
                 std::string config_path,
                 std::unordered_map<std::string, IPublisher*> publishers,
                 std::shared_ptr<FrameArchiver> frame_archiver, ModelProbe model_probe = {},
-                ModelTest model_test = {});
+                ModelTest model_test = {}, GraphBuilder graph_builder = {},
+                std::chrono::milliseconds drain_timeout = std::chrono::seconds(30));
 
+    ~TaskManager() override;
     void loadAll();
     void startAll();
     void stopAll();
     bool start(const std::string& task_id) override;
+    ActionResult requestStart(const std::string& task_id) override;
     bool stop(const std::string& task_id) override;
 
     std::vector<TaskRuntimeInfo>               listTasks()    const override;
@@ -46,7 +51,8 @@ public:
     bool removePipeline(const std::string& id)          override;
     bool updatePipeline(const PipelineConfig& pipeline) override;
     bool addTask(const TaskConfig& task, bool autostart = true) override;
-    bool updateTask(const TaskConfig& task)          override;
+    bool updateTask(const TaskConfig& task) override;
+    ActionResult requestUpdate(const TaskConfig& task) override;
     bool removeTask(const std::string& id)           override;
     bool loadModel(const ModelConfig& model)         override;
     UnregisterResult unloadModel(const std::string& id) override;
@@ -60,14 +66,27 @@ public:
                                     const std::string& attempt) override;
 
 private:
-    struct Entry {
-        std::shared_ptr<GraphExecutor> executor;
-        State state{State::Stopped};
+    // Each run owns its graph. It remains attached until its worker has been joined.
+    struct Run {
+        std::atomic<bool> cancelled{false};
+        bool done{false};
+        bool stop_requested{false};
+        std::chrono::steady_clock::time_point startup_deadline;
+        std::thread thread;
     };
 
-    // Build and optionally start a single task entry. Returns false if the
-    // referenced source or pipeline doesn't exist in cfg_.
-    bool buildEntry(const TaskConfig& task, bool autostart);
+    struct Entry {
+        State state{State::Stopped};
+        std::optional<TaskFailure> failure;
+        std::shared_ptr<Run> run;
+        bool removed{false};
+    };
+
+    bool validateTask(const TaskConfig& task) const;
+    std::unique_ptr<GraphExecutor> buildGraph(const AppConfig& cfg, const TaskConfig& task);
+    ActionResult startLocked(const std::string& task_id);
+    void runTask(const TaskConfig& task, const AppConfig& cfg, const std::shared_ptr<Run>& run);
+    void watchTasks();
 
     // Persist current runtime mutations to the sidecar JSON file.
     void persist();
@@ -82,9 +101,15 @@ private:
     std::shared_ptr<FrameArchiver> frame_archiver_;
     ModelProbe model_probe_;
     ModelTest model_test_;
+    GraphBuilder graph_builder_;
+    std::chrono::milliseconds drain_timeout_;
     std::mutex model_check_mu_;
     mutable std::mutex mu_;
     std::unordered_map<std::string, Entry> entries_;
+    std::condition_variable lifecycle_cv_;
+    bool stopping_all_{false};
+    bool watcher_exit_{false};
+    std::thread watcher_;
 };
 
 } // namespace infer

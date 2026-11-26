@@ -97,6 +97,7 @@ void InferEngineWorkerStage::start() {
     started_ = true;
     flush_stop_.store(false);
     draining_.store(false);
+    input_finished_ = false;
 
     // Secondary workers must be RUNNING before primary can route crops.
     for (auto& sg : secondary_groups_) sg->start();
@@ -287,20 +288,29 @@ void InferEngineWorkerStage::flushLoop() {
 
     while (!flush_stop_.load()) {
         std::vector<PendingEmit> to_flush;
+        bool finishing = false;
         {
             std::unique_lock<std::mutex> lk(pending_mutex_);
-            flush_cv_.wait_for(lk, half_delay, [this] { return flush_stop_.load(); });
+            flush_cv_.wait_for(lk, half_delay, [this] {
+                return flush_stop_.load() || (input_finished_ && !pending_events_.empty());
+            });
             if (flush_stop_.load()) break;
+            finishing = input_finished_;
 
             if (!pending_events_.empty() &&
-                std::chrono::steady_clock::now() >= batch_deadline_) {
+                (input_finished_ || std::chrono::steady_clock::now() >= batch_deadline_)) {
                 const int eff_bs = effectiveBatchSize();
                 const int fc = std::min(static_cast<int>(pending_events_.size()), eff_bs);
                 to_flush = extractBatch(fc);
+                flushing_ = true;
             }
         }
 
-        if (!to_flush.empty()) flushToWorkers(std::move(to_flush));
+        if (!to_flush.empty()) {
+            flushToWorkers(std::move(to_flush));
+            std::lock_guard lock(pending_mutex_);
+            flushing_ = false;
+        }
 
         // Reclaim inflight entries whose result never came back (dropped batch /
         // fault / inference exception). Timer-driven — not tied to inbound traffic —
@@ -310,6 +320,37 @@ void InferEngineWorkerStage::flushLoop() {
             sweepStaleInflightLocked();
         }
     }
+}
+
+const char* InferEngineWorkerStage::terminalError() const {
+    return group_->unavailable() ? "inference_unavailable" : nullptr;
+}
+
+void InferEngineWorkerStage::finishInput() {
+    {
+        std::lock_guard lock(pending_mutex_);
+        input_finished_ = true;
+    }
+    flush_cv_.notify_all();
+}
+
+bool InferEngineWorkerStage::outputDrained() {
+    {
+        std::lock_guard lock(pending_mutex_);
+        if (!pending_events_.empty() || flushing_) return false;
+    }
+    if (!group_->idle()) return false;
+    for (const auto& group : secondary_groups_) {
+        if (!group->idle()) return false;
+    }
+    if (merger_) {
+        merger_->flushExpired();
+        if (!merger_->empty()) return false;
+    }
+    // All workers have finished. Any unmatched inputs were dropped or failed.
+    std::lock_guard lock(inflight_mutex_);
+    inflight_.clear();
+    return true;
 }
 
 void InferEngineWorkerStage::process(const EventEnvelope& input, const EmitFn& emit) {

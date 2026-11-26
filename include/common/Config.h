@@ -14,6 +14,7 @@ namespace infer {
 struct ServerConfig {
     int stream_pool_threads{32};
     int max_streams{100};
+    int task_start_timeout_ms{180000};
     std::string socket_path{"/var/run/infer.sock"};
     std::string ffmpeg_log_level{"warning"};  // FFmpeg log threshold (quiet/fatal/error/warning/info/debug/trace)
     // libavcodec AVCodecContext::thread_count for CPU software decode (ignored for NVDEC hwdec).

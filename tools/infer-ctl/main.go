@@ -324,9 +324,10 @@ func listTasks() {
 	resp := must(send(map[string]any{"cmd": "list_tasks"}))
 	var tableRows [][]string
 	for _, item := range dataRows(resp) {
-		tableRows = append(tableRows, []string{str(item["id"]), str(item["state"])})
+		failure, _ := item["failure"].(map[string]any)
+		tableRows = append(tableRows, []string{str(item["id"]), str(item["state"]), str(failure["message"])})
 	}
-	printTable([]string{"ID", "STATE"}, tableRows)
+	printTable([]string{"ID", "STATE", "FAILURE"}, tableRows)
 }
 
 func tasksAdd(args []string) {

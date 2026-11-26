@@ -124,17 +124,24 @@ type RepositoryModel struct {
 	Loaded        bool    `json:"loaded"`
 }
 
+type TaskFailure struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 // TaskInfo describes a task's current state and configuration.
 type TaskInfo struct {
-	ID             string  `json:"id"`
-	State          string  `json:"state"                        enums:"running,stopped"`
-	SourceID       string  `json:"source_id,omitempty"`
-	PipelineID     string  `json:"pipeline_id,omitempty"`
-	SampleFPS      float64 `json:"sample_fps,omitempty"`
-	SamplingMode   string  `json:"sampling_mode,omitempty"`
-	UseHwdec       bool    `json:"use_hwdec"`
-	UseAscendDvpp  bool    `json:"use_ascend_dvpp"`
-	AscendDeviceID int     `json:"ascend_device_id"`
+	Failure        *TaskFailure `json:"failure,omitempty"`
+	CleanupPending bool         `json:"cleanup_pending,omitempty"`
+	ID             string       `json:"id"`
+	State          string       `json:"state"                        enums:"stopped,starting,running,failed"`
+	SourceID       string       `json:"source_id,omitempty"`
+	PipelineID     string       `json:"pipeline_id,omitempty"`
+	SampleFPS      float64      `json:"sample_fps,omitempty"`
+	SamplingMode   string       `json:"sampling_mode,omitempty"`
+	UseHwdec       bool         `json:"use_hwdec"`
+	UseAscendDvpp  bool         `json:"use_ascend_dvpp"`
+	AscendDeviceID int          `json:"ascend_device_id"`
 }
 
 // TaskCreate is the request body for POST /tasks.

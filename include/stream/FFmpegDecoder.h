@@ -65,6 +65,7 @@ public:
     ~FFmpegDecoder() override;
 
     void start(const StreamConfig& cfg, FrameCallback cb) override;
+    DecoderEnd endReason() const { return end_reason_.load(); }
     void stop() override;
     bool running() const override { return running_.load(); }
     const std::string& streamId() const override { return stream_id_; }
@@ -81,6 +82,7 @@ private:
 
     std::string          stream_id_;
     std::thread          thread_;
+    std::atomic<DecoderEnd> end_reason_{DecoderEnd::None};
     std::atomic<bool>    running_{false};
     std::atomic<bool>    stop_flag_{false};
 

@@ -20,6 +20,20 @@ std::string SourceFileStage::id() const { return id_; }
 
 bool SourceFileStage::isSource() const { return true; }
 
+bool SourceFileStage::inputEnded() const {
+    return decoder_.endReason() == DecoderEnd::EndOfFile;
+}
+
+bool SourceFileStage::inputDrained() const {
+    if (!inputEnded()) return false;
+    std::lock_guard lock(mu_);
+    return queue_.empty();
+}
+
+const char* SourceFileStage::terminalError() const {
+    return decoder_.endReason() == DecoderEnd::Error ? "source_error" : nullptr;
+}
+
 void SourceFileStage::start() {
     bool expected = false;
     if (!running_.compare_exchange_strong(expected, true)) return;
@@ -47,6 +61,8 @@ void SourceFileStage::stop() {
     bool expected = true;
     if (!running_.compare_exchange_strong(expected, false)) return;
     decoder_.stop();
+    std::lock_guard lock(mu_);
+    queue_.clear();
 }
 
 void SourceFileStage::process(const EventEnvelope&, const EmitFn& emit) {
@@ -54,7 +70,6 @@ void SourceFileStage::process(const EventEnvelope&, const EmitFn& emit) {
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (queue_.empty()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
             return;
         }
         frame = std::move(queue_.front());

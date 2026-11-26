@@ -235,9 +235,9 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
     if (cmd == "list_tasks") {
         json arr = json::array();
         for (const auto& info : task_manager_.listTasks()) {
-            arr.push_back({
+            json task = {
                 {"id",               info.config.id},
-                {"state",            info.state == ITaskManager::State::Running ? "running" : "stopped"},
+                {"state",            taskStateName(info.state)},
                 {"source_id",        info.config.source_id},
                 {"pipeline_id",      info.config.pipeline_id},
                 {"sample_fps",       info.config.sample_fps},
@@ -245,15 +245,21 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
                 {"use_hwdec",        info.config.use_hwdec},
                 {"use_ascend_dvpp",  info.config.use_ascend_dvpp},
                 {"ascend_device_id", info.config.ascend_device_id},
-            });
+            };
+            if (info.failure) task["failure"] = {{"code", info.failure->code}, {"message", info.failure->message}};
+            if (info.cleanup_pending) task["cleanup_pending"] = true;
+            arr.push_back(std::move(task));
         }
         return json({{"status", "ok"}, {"data", arr}}).dump();
     }
 
     if (cmd == "start_task") {
         const auto id = req.value("id", std::string{});
-        if (!task_manager_.start(id))
-            return json({{"status", "error"}, {"message", "task not found: " + id}}).dump();
+        const auto result = task_manager_.requestStart(id);
+        if (result == ITaskManager::ActionResult::Busy)
+            return json({{"status", "error"}, {"code", "task_busy"}, {"message", "task cleanup is in progress"}}).dump();
+        if (result == ITaskManager::ActionResult::NotFound)
+            return json({{"status", "error"}, {"code", "not_found"}, {"message", "task not found: " + id}}).dump();
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 
@@ -335,8 +341,8 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
             auto tasks = json::array();
             const auto related = detail.tasks_by_pipeline.find(pipeline_id);
             if (related != detail.tasks_by_pipeline.end()) {
-                for (const auto& [task_id, running] : related->second)
-                    tasks.push_back({{"id", task_id}, {"state", running ? "running" : "stopped"}});
+                for (const auto& [task_id, state] : related->second)
+                    tasks.push_back({{"id", task_id}, {"state", taskStateName(state)}});
             }
             pipelines.push_back({{"id", pipeline_id}, {"nodes", nodes.direct_nodes},
                                  {"cascade_nodes", nodes.cascade_nodes}, {"tasks", std::move(tasks)}});
@@ -470,7 +476,8 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
             return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();
         if (!task_manager_.updatePipeline(p)) {
             for (const auto& tri : task_manager_.listTasks()) {
-                if (tri.config.pipeline_id == id && tri.state == ITaskManager::State::Running)
+                if (tri.config.pipeline_id == id &&
+                    (tri.state == TaskState::Running || tri.state == TaskState::Starting || tri.cleanup_pending))
                     return json({{"status", "error"},
                                   {"code", "in_use"},
                                   {"message", "pipeline in use by a running task: " + id}})
@@ -508,8 +515,12 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         if (adding) {
             if (!task_manager_.addTask(task, autostart))
                 return json({{"status", "error"}, {"message", "failed to add task: " + task.id}}).dump();
-        } else if (!task_manager_.updateTask(task)) {
-            return json({{"status", "error"}, {"message", "not found, running, or invalid deps: " + task.id}}).dump();
+        } else {
+            const auto result = task_manager_.requestUpdate(task);
+            if (result == ITaskManager::ActionResult::Busy)
+                return json({{"status", "error"}, {"code", "task_busy"}, {"message", "stop the task and wait for cleanup before editing"}}).dump();
+            if (result != ITaskManager::ActionResult::Accepted)
+                return json({{"status", "error"}, {"message", "not found or invalid dependencies: " + task.id}}).dump();
         }
         return json({{"status", "ok"}, {"id", task.id}}).dump();
     }

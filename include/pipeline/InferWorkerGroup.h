@@ -42,6 +42,8 @@ public:
 
     void start();
     void stop();
+    bool idle() const;
+    bool unavailable() const;
 
     // Distribute batch to an available worker.
     // For GPU batches: if restrict_cuda_device_id is set, only workers on that

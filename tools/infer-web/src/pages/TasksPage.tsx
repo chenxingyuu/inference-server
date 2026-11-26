@@ -3,7 +3,7 @@ import {
   useTasks, useAddTask, useUpdateTask, useRemoveTask, useStartTask, useStopTask,
   useSources, usePipelines,
 } from '../hooks/queries'
-import { StatusBadge } from '../components/ui/StatusBadge'
+import { TaskStatusBadge } from '../components/ui/StatusBadge'
 import { Modal } from '../components/ui/Modal'
 import { Field, Input, Select } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
@@ -157,6 +157,7 @@ export function TasksPage() {
                 <EmptyState message={t('tasks.empty')} cols={TASK_COLUMN_COUNT} />
               )}
               {tasks.map((tk) => {
+                const inactive = tk.state === 'stopped' || tk.state === 'failed'
                 const isExpanded = expanded === tk.id
                 const sourceState = tk.source_id ? sourceStates.get(tk.source_id) : undefined
                 const showSourceWarning = tk.state === 'running' &&
@@ -180,7 +181,10 @@ export function TasksPage() {
                           {tk.id}
                         </button>
                       </td>
-                      <td><StatusBadge status={tk.state} label={t(`tasks.state.${tk.state}`)} /></td>
+                      <td>
+                        <TaskStatusBadge state={tk.state} />
+                        {tk.cleanup_pending && <p className="mt-1 text-[11px] text-ink-muted">{t('tasks.cleaning_up')}</p>}
+                      </td>
                       <td>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <span className="font-mono text-[12px] text-ink-secondary">{tk.source_id || '—'}</span>
@@ -194,9 +198,10 @@ export function TasksPage() {
                       <td className="font-mono text-[12px] text-ink-secondary">{tk.pipeline_id || '—'}</td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1 pr-2">
-                          {tk.state === 'stopped' ? (
+                          {inactive ? (
                             <>
                               <button
+                                disabled={tk.cleanup_pending}
                                 onClick={() => openEdit(tk)}
                                 className="btn-icon text-ink-muted hover:text-accent"
                                 title={t('tasks.edit')}
@@ -205,8 +210,9 @@ export function TasksPage() {
                               </button>
                               <button
                                 onClick={() => start.mutate(tk.id)}
-                                disabled={start.isPending}
-                                title="Start"
+                                disabled={start.isPending || tk.cleanup_pending}
+                                title={t(tk.state === 'failed' ? 'tasks.retry' : 'tasks.start')}
+                                aria-label={t(tk.state === 'failed' ? 'tasks.retry' : 'tasks.start')}
                                 className="btn-icon text-success/60 hover:text-success"
                               >
                                 <PlayIcon />
@@ -215,8 +221,9 @@ export function TasksPage() {
                           ) : (
                             <button
                               onClick={() => stop.mutate(tk.id)}
-                              disabled={stop.isPending}
-                              title="Stop"
+                              disabled={stop.isPending || tk.cleanup_pending}
+                              title={t('tasks.stop')}
+                              aria-label={t('tasks.stop')}
                               className="btn-icon text-warning/60 hover:text-warning"
                             >
                               <StopIcon />
@@ -232,6 +239,11 @@ export function TasksPage() {
                     {isExpanded && (
                       <tr>
                         <td colSpan={TASK_COLUMN_COUNT} className="bg-bg-overlay px-6 py-3">
+                          {tk.failure && (
+                            <p className="mb-2 text-xs text-danger">
+                              {t('tasks.failure_reason')} {tk.failure.message}
+                            </p>
+                          )}
                           <div className="label mb-2">{t('tasks.section.settings')}</div>
                           <dl className="grid w-fit grid-cols-[auto_auto] gap-x-4 gap-y-1 text-[12px]">
                             <dt className="text-ink-muted">{t('tasks.field.sample_fps')}</dt>

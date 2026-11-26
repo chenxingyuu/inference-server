@@ -26,6 +26,7 @@ public:
 
     std::string id() const override;
     bool isSource() const override;
+    const char* terminalError() const override;
 
     void start() override;
     void stop() override;

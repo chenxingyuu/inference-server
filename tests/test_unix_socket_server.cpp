@@ -701,3 +701,23 @@ TEST_F(UnixSocketServerTest, UnloadModelInUse) {
     EXPECT_EQ(resp["status"], "error");
     EXPECT_EQ(resp["code"],   "in_use");
 }
+
+TEST_F(UnixSocketServerTest, ListsTaskLifecycleStatesAndFailureDetails) {
+    {
+        std::lock_guard lock(fake_tm_.tasks_mu);
+        TaskConfig task;
+        task.id = "connecting";
+        fake_tm_.tasks.push_back({task, TaskState::Starting});
+        task.id = "timed-out";
+        fake_tm_.tasks.push_back({task, TaskState::Failed,
+                                  TaskFailure{"startup_timeout", "Startup timed out"}, true});
+    }
+    const auto reply = roundtrip({{"cmd", "list_tasks"}});
+    ASSERT_EQ(reply["status"], "ok");
+    ASSERT_EQ(reply["data"].size(), 2);
+    EXPECT_EQ(reply["data"][0]["state"], "starting");
+    EXPECT_FALSE(reply["data"][0].contains("failure"));
+    EXPECT_EQ(reply["data"][1]["state"], "failed");
+    EXPECT_EQ(reply["data"][1]["failure"]["code"], "startup_timeout");
+    EXPECT_EQ(reply["data"][1]["cleanup_pending"], true);
+}

@@ -84,11 +84,17 @@ void SinkFfplayStage::enqueue(QueueItem item) {
     cv_.notify_one();
 }
 
+bool SinkFfplayStage::outputDrained() {
+    std::lock_guard lock(mu_);
+    return queue_.empty() && !output_busy_;
+}
+
 void SinkFfplayStage::runWorker() {
     while (running_.load(std::memory_order_relaxed)) {
         QueueItem item;
         {
             std::unique_lock<std::mutex> lock(mu_);
+            output_busy_ = false;
             cv_.wait(lock, [this] {
                 return !running_.load(std::memory_order_relaxed) || !queue_.empty();
             });
@@ -97,6 +103,7 @@ void SinkFfplayStage::runWorker() {
             }
             item = std::move(queue_.front());
             queue_.pop_front();
+            output_busy_ = true;
             Metrics::get().setSinkFfplayQueueDepth(id_, queue_.size());
         }
         if (!item.frame || item.frame->image.empty()) {

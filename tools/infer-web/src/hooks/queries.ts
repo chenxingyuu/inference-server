@@ -162,7 +162,8 @@ export const useTasks = () =>
   useQuery({
     queryKey: ['tasks'],
     queryFn: api.tasks.list,
-    refetchInterval: 5_000,
+    refetchInterval: (query) =>
+      query.state.data?.some((task) => task.state === 'starting' || task.cleanup_pending) ? 1_000 : 5_000,
   })
 
 export const useAddTask = () => {
@@ -201,10 +202,11 @@ export const useRemoveTask = () => {
 
 export const useStartTask = () => {
   const qc = useQueryClient()
+  const { t } = useT()
   return useMutation({
     mutationFn: (id: string) => api.tasks.start(id),
     onSuccess: (_, id) => {
-      toast.success(`Task "${id}" started`)
+      toast.success(t('tasks.start_requested', { id }))
       qc.invalidateQueries({ queryKey: ['tasks'] })
     },
     onError: (e: Error) => toast.error(e.message),
@@ -213,10 +215,11 @@ export const useStartTask = () => {
 
 export const useStopTask = () => {
   const qc = useQueryClient()
+  const { t } = useT()
   return useMutation({
     mutationFn: (id: string) => api.tasks.stop(id),
     onSuccess: (_, id) => {
-      toast.success(`Task "${id}" stopped`)
+      toast.success(t('tasks.stop_requested', { id }))
       qc.invalidateQueries({ queryKey: ['tasks'] })
     },
     onError: (e: Error) => toast.error(e.message),

@@ -50,7 +50,6 @@ DvppOutputPool::Slot* DvppOutputPool::acquire(int timeout_ms) {
 }
 
 void DvppOutputPool::release(Slot* s) {
-    resetDesc(*s);
     {
         std::lock_guard<std::mutex> lk(mu);
         s->in_use = false;

@@ -249,7 +249,7 @@ TEST_F(ModelPublicationTest, ReferencesProtectStoppedTasksAndCascadeChildren) {
     const auto& refs = detail.references.pipelines.at("pipeline");
     EXPECT_EQ(refs.direct_nodes, (std::vector<std::string>{"second", "third"}));
     EXPECT_EQ(refs.cascade_nodes, std::vector<std::string>{"first"});
-    EXPECT_EQ(detail.tasks_by_pipeline.at("pipeline"), (std::vector<std::pair<std::string, bool>>{{"stopped", false}}));
+    EXPECT_EQ(detail.tasks_by_pipeline.at("pipeline"), (std::vector<std::pair<std::string, TaskState>>{{"stopped", TaskState::Stopped}}));
     EXPECT_EQ(tm.unloadModel("child"), ITaskManager::UnregisterResult::InUse);
     EXPECT_EQ(tm.unloadModel("parent"), ITaskManager::UnregisterResult::InUse);
 }

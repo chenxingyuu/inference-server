@@ -54,6 +54,7 @@ public:
     // Drops batch silently if queue is full or worker is STOPPED.
     void enqueue(Batch batch);
 
+    bool idle() const;
     WorkerState state() const { return state_.load(); }
     int cudaDeviceId()   const { return model_cfg_.device_id; }
     int ascendDeviceId() const { return model_cfg_.device_id; }
@@ -83,7 +84,8 @@ private:
     std::function<ByteTrackConfig(const std::string&)> bytetrack_config_resolver_;
 
     std::deque<Batch>       queue_; // deque allows front-insertion for OOM re-queue
-    std::mutex              mutex_;
+    mutable std::mutex      mutex_;
+    bool processing_{false};  // guarded by mutex_
     std::condition_variable cv_;
     std::thread             thread_;
     std::atomic<bool>       running_{false};

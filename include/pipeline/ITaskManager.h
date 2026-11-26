@@ -1,8 +1,10 @@
 #pragma once
 
 #include "common/Config.h"
+#include "pipeline/TaskState.h"
 #include <nlohmann/json.hpp>
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,7 +85,7 @@ struct ModelDetail {
     RepositoryModelExport repository;
     ModelReferences references;
     std::vector<CascadeConfig> cascade_children;
-    std::map<std::string, std::vector<std::pair<std::string, bool>>> tasks_by_pipeline;
+    std::map<std::string, std::vector<std::pair<std::string, TaskState>>> tasks_by_pipeline;
 };
 
 struct ModelPublishResult {
@@ -93,16 +95,22 @@ struct ModelPublishResult {
 
 class ITaskManager {
 public:
-    enum class State { Stopped, Running };
+    using State = TaskState;
     enum class UnregisterResult { Removed, NotFound, InUse };
 
     struct TaskRuntimeInfo {
         TaskConfig config;
         State      state{State::Stopped};
+        std::optional<TaskFailure> failure{};
+        bool cleanup_pending{false};
     };
 
     virtual ~ITaskManager() = default;
+    enum class ActionResult { Accepted, NotFound, Busy };
     virtual bool start(const std::string& task_id) = 0;
+    virtual ActionResult requestStart(const std::string& task_id) {
+        return start(task_id) ? ActionResult::Accepted : ActionResult::NotFound;
+    }
     virtual bool stop(const std::string& task_id) = 0;
     virtual std::vector<TaskRuntimeInfo> listTasks()    const = 0;
     virtual std::vector<SourceInfo>                    listSources()  const = 0;
@@ -119,6 +127,9 @@ public:
 
     virtual bool addTask(const TaskConfig& task, bool autostart = true) = 0;
     virtual bool updateTask(const TaskConfig& task) = 0;
+    virtual ActionResult requestUpdate(const TaskConfig& task) {
+        return updateTask(task) ? ActionResult::Accepted : ActionResult::NotFound;
+    }
     virtual bool removeTask(const std::string& id) = 0;
 
     virtual bool loadModel(const ModelConfig& model) = 0;

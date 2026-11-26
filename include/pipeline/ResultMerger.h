@@ -43,6 +43,7 @@ public:
     // Flush all entries whose deadline has passed. Should be called periodically
     // (e.g. by a background thread or by the InferWorker after each batch).
     void flushExpired();
+    bool empty() const;
 
 private:
     struct PendingEntry {
@@ -57,7 +58,7 @@ private:
     IPublisher& publisher_;
     int         max_wait_ms_;
 
-    std::mutex                                    mu_;
+    mutable std::mutex                            mu_;
     std::unordered_map<std::string, PendingEntry> pending_;  // key = stream_id:frame_seq
 };
 

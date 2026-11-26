@@ -67,6 +67,11 @@ void ResultMerger::flushExpired() {
     }
 }
 
+bool ResultMerger::empty() const {
+    std::lock_guard lock(mu_);
+    return pending_.empty();
+}
+
 void ResultMerger::publishAndErase(
         std::unordered_map<std::string, PendingEntry>::iterator it) {
     // Called under mu_

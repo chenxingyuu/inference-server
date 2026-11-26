@@ -9,6 +9,8 @@ namespace infer {
 // Callback invoked with each decoded frame (called from decoder thread)
 using FrameCallback = std::function<void(Frame)>;
 
+enum class DecoderEnd { None, EndOfFile, Error, RetriesExhausted };
+
 class IStreamDecoder {
 public:
     virtual ~IStreamDecoder() = default;

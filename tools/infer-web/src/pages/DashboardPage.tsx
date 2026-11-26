@@ -2,7 +2,8 @@ import { useHealth, useSources, useModels, usePipelines, useTasks } from '../hoo
 import { serverUrl } from '../lib/api'
 import { useT } from '../lib/i18n'
 import { PageHeader } from '../components/layout/Layout'
-import type { SourceState, TaskState } from '../types'
+import type { SourceState } from '../types'
+import { TaskStatusBadge } from '../components/ui/StatusBadge'
 
 function StatCard({
   label, value, sub, color = 'text-ink-primary',
@@ -27,11 +28,6 @@ const sourceColors: Record<SourceState, string> = {
   RECONNECTING: 'text-warning',
   DEGRADED: 'text-warning',
   STOPPED: 'text-ink-muted',
-}
-
-const taskColors: Record<TaskState, string> = {
-  running: 'text-success',
-  stopped: 'text-ink-muted',
 }
 
 export function DashboardPage() {
@@ -105,7 +101,7 @@ export function DashboardPage() {
           label={t('dashboard.stat.tasks')}
           value={tasks.length}
           sub={tasks.length ? t('dashboard.tasks.sub', { running }) : t('dashboard.tasks.empty')}
-          color={running > 0 ? taskColors.running : 'text-ink-primary'}
+          color={running > 0 ? 'text-success' : 'text-ink-primary'}
         />
       </div>
 
@@ -171,9 +167,7 @@ export function DashboardPage() {
                   <tr key={tk.id}>
                     <td className="font-mono text-[12px] text-ink-primary">{tk.id}</td>
                     <td>
-                      <span className={`font-mono text-[11px] font-medium ${taskColors[tk.state]}`}>
-                        {tk.state}
-                      </span>
+                      <TaskStatusBadge state={tk.state} />
                     </td>
                   </tr>
                 ))}

@@ -131,11 +131,23 @@ FFmpegDecoder::~FFmpegDecoder() {
 
 void FFmpegDecoder::start(const StreamConfig& cfg, FrameCallback cb) {
     if (running_.load()) return;
+    end_reason_.store(DecoderEnd::None);
     stream_id_      = cfg.id;
     use_hwdec_      = cfg.use_hwdec;
     cuda_device_id_ = cfg.cuda_device_id;
     stop_flag_      = false;
-    thread_     = std::thread(&FFmpegDecoder::decodeLoop, this, cfg, std::move(cb));
+    interrupt_ctx_.stop_flag = &stop_flag_;
+    thread_ = std::thread([this, cfg, cb = std::move(cb)]() mutable {
+        try {
+            decodeLoop(cfg, std::move(cb));
+        } catch (const std::exception& error) {
+            LOG_ERROR("[{}] decoder exception: {}", cfg.id, error.what());
+            closeStream();
+            end_reason_.store(DecoderEnd::Error);
+            StreamHealthRegistry::get().onStreamRemoved(cfg.id);
+            running_.store(false);
+        }
+    });
 }
 
 void FFmpegDecoder::stop() {
@@ -312,19 +324,16 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
             break;
         }
         if (ret == AVERROR(EAGAIN)) { av_usleep(1000); continue; }
-        if (ret == AVERROR_EOF) {
-            exit_reason = ReadExitReason::EndOfFile;
-            break;
-        }
-        if (ret < 0) {
+        const bool end_of_file = ret == AVERROR_EOF;
+        if (ret < 0 && !end_of_file) {
             exit_reason = ReadExitReason::Error;
             break;
         }
 
-        if (pkt->stream_index == video_stream_idx_) {
+        if (end_of_file || pkt->stream_index == video_stream_idx_) {
             const auto pkt_t0 = std::chrono::steady_clock::now();
             const auto send_t0 = std::chrono::steady_clock::now();
-            const int send_ret = avcodec_send_packet(codec_ctx_, pkt);
+            const int send_ret = avcodec_send_packet(codec_ctx_, end_of_file ? nullptr : pkt);
             const double send_ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - send_t0).count();
 
@@ -424,6 +433,10 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
             }
         }
         av_packet_unref(pkt);
+        if (end_of_file) {
+            exit_reason = ReadExitReason::EndOfFile;
+            break;
+        }
     }
 
     av_frame_free(&frame);
@@ -455,21 +468,26 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
     auto& reg = StreamHealthRegistry::get();
     reg.onStreamAdded(cfg.id, cfg.degraded_threshold, cfg.max_reconnect_attempts);
 
+    DecoderEnd end = DecoderEnd::None;
+    uint32_t failures = 0;
+    const auto retry_exhausted = [&] {
+        reg.onReconnectFailed(cfg.id);
+        ++failures;
+        if (cfg.max_reconnect_attempts <= 0 ||
+            failures < static_cast<uint32_t>(cfg.max_reconnect_attempts)) return false;
+        LOG_ERROR("[{}] reached terminal reconnect failure (attempt {})", cfg.id, failures);
+        end = DecoderEnd::RetriesExhausted;
+        return true;
+    };
     while (!stop_flag_.load()) {
         if (!openStream(cfg)) {
             // File sources: a failed open is terminal — don't retry.
             if (cfg.source_type == SourceType::File) {
                 LOG_ERROR("[{}] failed to open file: {}", cfg.id, cfg.url);
+                end = DecoderEnd::Error;
                 break;
             }
-            reg.onReconnectFailed(cfg.id);
-            const auto h = reg.getHealth(cfg.id);
-            if (h.state == StreamState::FAILED) {
-                LOG_ERROR("[{}] reached terminal reconnect failure (attempt {}), stopping decoder thread",
-                          cfg.id, h.consecutive_failures);
-                break;
-            }
-            uint32_t failures = h.consecutive_failures;
+            if (retry_exhausted()) break;
             int64_t delay = backoffDelayMs(cfg.reconnect_delay_ms,
                                            cfg.max_reconnect_delay_ms, failures);
             LOG_WARN("[{}] open failed (attempt {}), retry in {}ms",
@@ -503,7 +521,15 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
                  params.mode == SamplingMode::TimeBased ? "time_based" : "frame_count",
                  params.sample_fps, params.sample_interval);
 
-        auto reason = readAndDecode(cb, params);
+        bool delivered = false;
+        FrameCallback on_frame = [&](Frame frame) {
+            if (!delivered) {
+                delivered = true;
+                failures = 0;
+            }
+            cb(std::move(frame));
+        };
+        auto reason = readAndDecode(on_frame, params);
         closeStream();
 
         // File sources: EOF is a clean terminal; optionally loop by re-opening.
@@ -512,14 +538,20 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
                 LOG_INFO("[{}] EOF, looping file", cfg.id);
                 continue;  // outer while re-opens the file from the start
             }
-            LOG_INFO("[{}] file playback complete", cfg.id);
-            break;  // clean exit — no StreamDropped event
+            if (reason == ReadExitReason::EndOfFile) {
+                LOG_INFO("[{}] file playback complete", cfg.id);
+                end = DecoderEnd::EndOfFile;
+            } else {
+                LOG_ERROR("[{}] file decoding ended with a read error", cfg.id);
+                end = DecoderEnd::Error;
+            }
+            break;
         }
 
         // RTSP: treat any exit (including timeout/error) as a drop → reconnect.
         if (!stop_flag_.load()) {
             reg.onStreamDropped(cfg.id);
-            uint32_t failures = reg.getHealth(cfg.id).consecutive_failures;
+            if (!delivered && retry_exhausted()) break;
             int64_t delay = backoffDelayMs(cfg.reconnect_delay_ms,
                                            cfg.max_reconnect_delay_ms, failures);
             LOG_WARN("[{}] stream dropped, reconnecting in {}ms", cfg.id, delay);
@@ -529,6 +561,7 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
         }
     }
 
+    if (!stop_flag_.load()) end_reason_.store(end);
     reg.onStreamRemoved(cfg.id);
     LOG_INFO("[{}] decode thread stopped", cfg.id);
     running_.store(false);

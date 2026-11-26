@@ -138,3 +138,45 @@ func TestTaskWritesForwardAndValidateParameters(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskLifecycleListAndConflicts(t *testing.T) {
+	oldCall := callFn
+	t.Cleanup(func() { callFn = oldCall })
+	callFn = func(command map[string]any) (map[string]any, error) {
+		if command["cmd"] == "list_tasks" {
+			return map[string]any{"status": "ok", "data": []TaskInfo{
+				{ID: "waiting", State: "starting"},
+				{ID: "failed", State: "failed", CleanupPending: true,
+					Failure: &TaskFailure{Code: "startup_timeout", Message: "Startup timed out"}},
+			}}, nil
+		}
+		return map[string]any{"status": "error", "code": "task_busy", "message": "cleanup pending"}, nil
+	}
+	router := gin.New()
+	router.GET("/tasks", handleListTasks)
+	router.POST("/tasks/:id/:action", handleTaskAction)
+	router.PUT("/tasks/:id", handleUpdateTask)
+
+	result := httptest.NewRecorder()
+	router.ServeHTTP(result, httptest.NewRequest(http.MethodGet, "/tasks", nil))
+	var tasks []TaskInfo
+	if result.Code != http.StatusOK || json.Unmarshal(result.Body.Bytes(), &tasks) != nil || len(tasks) != 2 {
+		t.Fatalf("list tasks returned %d: %s", result.Code, result.Body)
+	}
+	if tasks[0].State != "starting" || tasks[1].State != "failed" ||
+		!tasks[1].CleanupPending || tasks[1].Failure == nil || tasks[1].Failure.Code != "startup_timeout" {
+		t.Fatalf("lifecycle fields were lost: %+v", tasks)
+	}
+	for _, req := range []*http.Request{
+		httptest.NewRequest(http.MethodPost, "/tasks/failed/start", nil),
+		httptest.NewRequest(http.MethodPut, "/tasks/failed",
+			strings.NewReader(`{"id":"failed","source_id":"cam","pipeline_id":"graph"}`)),
+	} {
+		req.Header.Set("Content-Type", "application/json")
+		result = httptest.NewRecorder()
+		router.ServeHTTP(result, req)
+		if result.Code != http.StatusConflict {
+			t.Fatalf("%s returned %d: %s", req.Method, result.Code, result.Body)
+		}
+	}
+}

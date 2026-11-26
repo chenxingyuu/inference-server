@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { TaskStatusBadge } from '../components/ui/StatusBadge'
 import { PageHeader } from '../components/layout/Layout'
 import { useModelDetail } from '../hooks/queries'
 import { ApiError, api } from '../lib/api'
@@ -95,7 +96,7 @@ function ModelReferences({ detail }: { detail: ModelDetail }) {
           <ul className="flex flex-wrap gap-x-3 gap-y-1">
             {pipeline.tasks.map(task => (
               <li className="text-xs text-ink-secondary" key={task.id}>
-                {task.id} · {t(task.state === 'running' ? 'models.detail.task_running' : 'models.detail.task_stopped')}
+                {task.id} · <TaskStatusBadge state={task.state} />
               </li>
             ))}
           </ul>

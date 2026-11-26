@@ -1,5 +1,8 @@
 #include "pipeline/GraphExecutor.h"
 
+#include "common/Logger.h"
+
+#include <algorithm>
 #include <sstream>
 #include <stdexcept>
 
@@ -50,67 +53,147 @@ std::string GraphExecutor::graphText() const {
     return oss.str();
 }
 
-void GraphExecutor::start() {
+void GraphExecutor::start(const std::atomic<bool>* cancelled) {
     if (running_.exchange(true)) return;
-    for (auto& [_, q] : edges_) q->reopen();
-    for (auto& entry : stages_) {
-        const auto id = entry.first;
-        auto& stage = entry.second;
-        stage->start();
-        worker_threads_.emplace_back([this, id] { runNodeWorker(id); });
+    ready_sources_.store(0);
+    ended_sources_.store(0);
+    finished_nodes_.store(0);
+    {
+        std::lock_guard lock(failure_mutex_);
+        failure_.reset();
+    }
+    source_count_ = std::count_if(stages_.begin(), stages_.end(), [](const auto& entry) {
+        return entry.second->isSource();
+    });
+    for (auto& [_, queue] : edges_) queue->reopen();
+    for (auto& [id, stage] : stages_) {
+        if (cancelled && cancelled->load()) return;
+        try {
+            // A stage that throws can still have resources that must be stopped.
+            started_stages_.push_back(stage.get());
+            stage->start();
+        } catch (const std::exception& error) {
+            LOG_ERROR("Task {} node {} startup exception: {}", cfg_.id, id, error.what());
+            recordFailure("startup_failed", id, "Pipeline node failed to start");
+            return;
+        } catch (...) {
+            recordFailure("startup_failed", id, "unknown exception");
+            return;
+        }
+    }
+    for (const auto& [id, stage] : stages_) {
+        if (cancelled && cancelled->load()) return;
+        worker_threads_.emplace_back([this, node_id = id] { runNodeWorker(node_id); });
     }
 }
 
 void GraphExecutor::stop() {
     if (!running_.exchange(false)) return;
-    // Unblock all queue pop() calls so worker threads can observe running_=false.
-    for (auto& [_, q] : edges_) q->stop();
-    // Before joining node workers, tell stages the graph is draining. Otherwise sinks
-    // that manage their own worker (ffplay/ffmpeg) can still reconnect while graph
-    // threads are winding down, which delays process exit after SIGINT.
-    for (auto& [_, stage] : stages_) {
-        stage->onGraphExecutorDraining();
-    }
-    // Join first: ensures no worker is inside stage->process() before we release resources.
-    for (auto& t : worker_threads_) {
-        if (t.joinable()) t.join();
+    for (auto& [_, queue] : edges_) queue->stop();
+    for (auto* stage : started_stages_) stage->onGraphExecutorDraining();
+    for (auto& thread : worker_threads_) {
+        if (thread.joinable()) thread.join();
     }
     worker_threads_.clear();
-    // Safe to release stage resources now that no worker thread is running.
-    for (auto& [_, stage] : stages_) stage->stop();
+    for (auto it = started_stages_.rbegin(); it != started_stages_.rend(); ++it) {
+        try {
+            (*it)->stop();
+        } catch (const std::exception& error) {
+            LOG_ERROR("Task {} node {} cleanup exception: {}", cfg_.id, (*it)->id(), error.what());
+            recordFailure("pipeline_error", (*it)->id(), "Pipeline node cleanup failed");
+        } catch (...) {
+            recordFailure("pipeline_error", (*it)->id(), "unknown exception during cleanup");
+        }
+    }
+    started_stages_.clear();
+}
+
+std::optional<TaskFailure> GraphExecutor::failure() const {
+    std::lock_guard lock(failure_mutex_);
+    return failure_;
+}
+
+void GraphExecutor::recordFailure(const char* code, const std::string& node, const char* detail) {
+    LOG_ERROR("Task {} node {}: {}", cfg_.id, node, detail);
+    std::lock_guard lock(failure_mutex_);
+    if (!failure_) failure_ = TaskFailure{code, "Pipeline node " + node + ": " + detail};
 }
 
 void GraphExecutor::runNodeWorker(const std::string& node_id) {
-    auto stage_it = stages_.find(node_id);
-    if (stage_it == stages_.end()) return;
-    auto* stage = stage_it->second.get();
-    while (running_.load()) {
-        bool processed = false;
-        if (stage->isSource()) {
-            EventEnvelope tick;
-            stage->process(tick, [this, node_id](const EventEnvelope& out) {
-                emitToDownstream(node_id, out);
-            });
-            processed = true;
-        }
-        const auto in_it = incoming_edge_keys_.find(node_id);
-        if (in_it != incoming_edge_keys_.end()) {
-            for (const auto& key : in_it->second) {
-                auto q = edges_.at(key);
-                EventEnvelope event;
-                if (q->pop(event, 20)) {
-                    event.ingress_edge = key;
-                    event.ingress_edge_queue_size = q->size();
-                    stage->process(event, [this, node_id](const EventEnvelope& out) {
-                        emitToDownstream(node_id, out);
-                    });
+    auto& stage = *stages_.at(node_id);
+    const auto incoming = incoming_edge_keys_.find(node_id);
+    bool first_frame = false;
+    bool input_ended = false;
+    bool finishing = false;
+    // Async emitters may outlive this worker's stack.
+    const IStage::EmitFn emit = [this, node_id](const EventEnvelope& event) {
+        emitToDownstream(node_id, event);
+    };
+    try {
+        while (running_.load()) {
+            if (const char* error = stage.terminalError()) {
+                const std::string_view code(error);
+                const char* message = "Video input ended unexpectedly";
+                if (code == "source_retries_exhausted") message = "Video source retries exhausted";
+                if (code == "inference_unavailable") message = "Primary inference workers could not recover";
+                recordFailure(error, node_id, message);
+                return;
+            }
+            if (stage.isSource() && stage.inputEnded() && !input_ended) {
+                input_ended = true;
+                ++ended_sources_;
+            }
+            bool processed = false;
+            if (!finishing && stage.isSource() && !stage.inputDrained()) {
+                stage.process({}, [&](const EventEnvelope& event) {
                     processed = true;
+                    if (event.frame && !first_frame) {
+                        first_frame = true;
+                        ++ready_sources_;
+                    }
+                    emit(event);
+                });
+            }
+            bool upstream_drained = incoming != incoming_edge_keys_.end();
+            if (!finishing && incoming != incoming_edge_keys_.end()) {
+                for (const auto& key : incoming->second) {
+                    const auto& queue = edges_.at(key);
+                    if (queue->inputDrained()) continue;
+                    upstream_drained = false;
+                    EventEnvelope event;
+                    if (queue->pop(event, 20) && running_.load()) {
+                        event.ingress_edge = key;
+                        event.ingress_edge_queue_size = queue->size();
+                        stage.process(event, emit);
+                        processed = true;
+                    }
                 }
             }
+            const bool no_live_root = incoming == incoming_edge_keys_.end() && inputsEnded();
+            if (!finishing && (upstream_drained || no_live_root) &&
+                (!stage.isSource() || stage.inputDrained())) {
+                if (stage.isSource() && !first_frame) {
+                    recordFailure("source_error", node_id, "Video input ended before the first frame");
+                    return;
+                }
+                stage.finishInput();
+                finishing = true;
+            }
+            if (finishing && stage.outputDrained()) {
+                const auto outgoing = outgoing_.find(node_id);
+                if (outgoing != outgoing_.end()) {
+                    for (const auto& target : outgoing->second) edges_.at(edgeKey(node_id, target))->closeInput();
+                }
+                ++finished_nodes_;
+                return;
+            }
+            if (!processed) std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        if (!processed) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+    } catch (const std::exception& error) {
+        LOG_ERROR("Task {} node {} exception: {}", cfg_.id, node_id, error.what());
+        recordFailure("pipeline_error", node_id, "Pipeline node execution failed");
+    } catch (...) {
+        recordFailure("pipeline_error", node_id, "Unknown pipeline node exception");
     }
 }
 

@@ -66,6 +66,8 @@ public:
 
     // IStreamDecoder interface
     void start(const StreamConfig& cfg, FrameCallback cb) override;
+    bool initialized() const { return startup_ok_.load(); }
+    DecoderEnd endReason() const { return end_reason_.load(); }
     void stop()                                           override;
     bool running()             const override { return running_.load(); }
     const std::string& streamId() const override { return stream_id_; }
@@ -144,6 +146,8 @@ private:
 
     std::string              stream_id_;
     std::thread              thread_;
+    std::atomic<uint64_t> delivered_frames_{0};
+    std::atomic<DecoderEnd> end_reason_{DecoderEnd::None};
     std::atomic<bool>        running_{false};
     std::atomic<bool>        stop_flag_{false};
     int                      device_id_{0};
@@ -175,7 +179,7 @@ private:
     std::mutex               startup_mu_;
     std::condition_variable  startup_cv_;
     bool                     startup_done_{false};
-    bool                     startup_ok_{false};
+    std::atomic<bool>                     startup_ok_{false};
 
     // Process-wide channel counter — each DVPPDecoder gets a unique channel ID.
     static std::atomic<uint32_t> s_channel_counter_;

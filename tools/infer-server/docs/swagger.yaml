@@ -258,8 +258,10 @@ definitions:
         type: string
       state:
         enum:
-        - running
         - stopped
+        - starting
+        - running
+        - failed
         type: string
     type: object
   infer-server.ModelPrediction:
@@ -460,10 +462,21 @@ definitions:
     - pipeline_id
     - source_id
     type: object
+  infer-server.TaskFailure:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
   infer-server.TaskInfo:
     properties:
       ascend_device_id:
         type: integer
+      cleanup_pending:
+        type: boolean
+      failure:
+        $ref: '#/definitions/infer-server.TaskFailure'
       id:
         type: string
       pipeline_id:
@@ -476,8 +489,10 @@ definitions:
         type: string
       state:
         enum:
-        - running
         - stopped
+        - starting
+        - running
+        - failed
         type: string
       use_ascend_dvpp:
         type: boolean
@@ -1254,8 +1269,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Creates a task binding a source to a pipeline. Starts in stopped
-        state; use POST /tasks/{id}/start to activate.
+      description: Creates a task binding a source to a pipeline and requests startup.
+        Query GET /tasks for the outcome.
       parameters:
       - description: Task definition
         in: body
@@ -1350,7 +1365,7 @@ paths:
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
         "409":
-          description: task is running
+          description: task is active or cleaning up
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
@@ -1359,7 +1374,7 @@ paths:
             type: string
       security:
       - ApiKeyAuth: []
-      summary: Update a task (must be stopped)
+      summary: Update an inactive task
       tags:
       - tasks
   /tasks/{id}/{action}:
@@ -1393,13 +1408,17 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/infer-server.ErrorResponse'
+        "409":
+          description: task cleanup in progress
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
         "503":
           description: engine unreachable
           schema:
             type: string
       security:
       - ApiKeyAuth: []
-      summary: Start or stop a task
+      summary: Request task startup or shutdown
       tags:
       - tasks
 securityDefinitions:

@@ -15,6 +15,8 @@ public:
     bool push(const EventEnvelope& event);
     bool push(EventEnvelope&& event);
     bool pop(EventEnvelope& event, int wait_ms);
+    void closeInput();
+    bool inputDrained() const;
     void stop();
     void reopen();
     std::size_t size() const;
@@ -25,6 +27,7 @@ private:
     std::condition_variable cv_;
     std::deque<EventEnvelope> queue_;
     bool stopped_{false};
+    bool input_closed_{false};
 };
 
 } // namespace infer

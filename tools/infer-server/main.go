@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,6 +40,7 @@ var (
 	statePath           = envOr("INFER_STATE_FILE", "/var/lib/infer-server/state.json")
 	modelRepositoryPath = envOr("MODEL_REPOSITORY", "")
 	store               *Store
+	taskWritesMu        sync.Mutex
 )
 
 func envOr(key, def string) string {
@@ -503,7 +505,7 @@ func taskBodyError(c *gin.Context, err error) {
 // handleAddTask godoc
 //
 //	@Summary		Add a task
-//	@Description	Creates a task binding a source to a pipeline. Starts in stopped state; use POST /tasks/{id}/start to activate.
+//	@Description	Creates a task binding a source to a pipeline and requests startup. Query GET /tasks for the outcome.
 //	@Tags			tasks
 //	@Accept			json
 //	@Produce		json
@@ -515,6 +517,8 @@ func taskBodyError(c *gin.Context, err error) {
 //	@Failure		503		{string}	string	"engine unreachable"
 //	@Router			/tasks [post]
 func handleAddTask(c *gin.Context) {
+	taskWritesMu.Lock()
+	defer taskWritesMu.Unlock()
 	var body TaskCreate
 	if err := c.ShouldBindJSON(&body); err != nil {
 		taskBodyError(c, err)
@@ -540,7 +544,7 @@ func handleAddTask(c *gin.Context) {
 
 // handleUpdateTask godoc
 //
-//	@Summary	Update a task (must be stopped)
+//	@Summary	Update an inactive task
 //	@Tags		tasks
 //	@Accept		json
 //	@Produce	json
@@ -550,10 +554,12 @@ func handleAddTask(c *gin.Context) {
 //	@Success	200		{object}	OkResponse
 //	@Failure	400		{object}	ErrorResponse
 //	@Failure	401		{object}	ErrorResponse
-//	@Failure	409		{object}	ErrorResponse	"task is running"
+//	@Failure	409		{object}	ErrorResponse	"task is active or cleaning up"
 //	@Failure	503		{string}	string			"engine unreachable"
 //	@Router		/tasks/{id} [put]
 func handleUpdateTask(c *gin.Context) {
+	taskWritesMu.Lock()
+	defer taskWritesMu.Unlock()
 	id := c.Param("id")
 	var body TaskCreate
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -575,6 +581,9 @@ func handleUpdateTask(c *gin.Context) {
 	if resp["status"] != "ok" {
 		code = http.StatusBadRequest
 	}
+	if resp["code"] == "task_busy" {
+		code = http.StatusConflict
+	}
 	c.JSON(code, resp)
 }
 
@@ -591,12 +600,14 @@ func handleUpdateTask(c *gin.Context) {
 //	@Failure	503	{string}	string	"engine unreachable"
 //	@Router		/tasks/{id} [delete]
 func handleRemoveTask(c *gin.Context) {
+	taskWritesMu.Lock()
+	defer taskWritesMu.Unlock()
 	callDelete(c, "remove_task", func(id string) { _ = store.DeleteTask(id) })
 }
 
 // handleTaskAction godoc
 //
-//	@Summary	Start or stop a task
+//	@Summary	Request task startup or shutdown
 //	@Tags		tasks
 //	@Produce	json
 //	@Security	ApiKeyAuth
@@ -605,9 +616,12 @@ func handleRemoveTask(c *gin.Context) {
 //	@Success	200		{object}	OkResponse
 //	@Failure	401		{object}	ErrorResponse
 //	@Failure	404		{object}	ErrorResponse
+//	@Failure	409		{object}	ErrorResponse	"task cleanup in progress"
 //	@Failure	503		{string}	string	"engine unreachable"
 //	@Router		/tasks/{id}/{action} [post]
 func handleTaskAction(c *gin.Context) {
+	taskWritesMu.Lock()
+	defer taskWritesMu.Unlock()
 	id := c.Param("id")
 	action := c.Param("action")
 	if action != "start" && action != "stop" {
@@ -625,6 +639,9 @@ func handleTaskAction(c *gin.Context) {
 	code := http.StatusOK
 	if resp["status"] != "ok" {
 		code = http.StatusNotFound
+	}
+	if resp["code"] == "task_busy" {
+		code = http.StatusConflict
 	}
 	c.JSON(code, resp)
 }

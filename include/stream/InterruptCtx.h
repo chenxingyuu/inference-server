@@ -17,10 +17,12 @@ namespace infer {
 //   fmt_ctx->interrupt_callback = {InterruptCtx::check, &ctx};
 struct InterruptCtx {
     std::atomic<int64_t> deadline_us{0};
+    const std::atomic<bool>* stop_flag{nullptr};
 
     // FFmpeg interrupt callback. Returns 1 when the deadline has passed.
     static int check(void* opaque) {
         auto* ctx = static_cast<InterruptCtx*>(opaque);
+        if (ctx->stop_flag && ctx->stop_flag->load(std::memory_order_relaxed)) return 1;
         int64_t d = ctx->deadline_us.load(std::memory_order_relaxed);
         if (d == 0) return 0;
         using namespace std::chrono;

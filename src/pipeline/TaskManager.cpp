@@ -2,7 +2,6 @@
 #include "pipeline/StageFactory.h"
 #include <fstream>
 #include <regex>
-#include "stream/GpuDeviceAllocator.h"
 #include "stream/StreamHealthRegistry.h"
 #include "common/Logger.h"
 #include "common/Config.h"
@@ -91,61 +90,60 @@ void interpolatePipelineForTask(PipelineConfig& runtime_cfg, const TaskConfig& t
 TaskManager::TaskManager(AppConfig cfg,
                          std::string config_path,
                          std::unordered_map<std::string, IPublisher*> publishers,
-                         std::shared_ptr<FrameArchiver> frame_archiver, ModelProbe model_probe, ModelTest model_test)
+                         std::shared_ptr<FrameArchiver> frame_archiver, ModelProbe model_probe, ModelTest model_test,
+                         GraphBuilder graph_builder, std::chrono::milliseconds drain_timeout)
     : cfg_(std::move(cfg))
     , config_path_(std::move(config_path))
     , publishers_(std::move(publishers))
     , frame_archiver_(std::move(frame_archiver))
     , model_probe_(std::move(model_probe))
     , model_test_(std::move(model_test))
+    , graph_builder_(std::move(graph_builder))
+    , drain_timeout_(drain_timeout)
 {
     runtime_state_ = loadRuntimeState(runtimeStatePath(config_path_));
     applyRuntimeState(cfg_, runtime_state_);
+    watcher_ = std::thread(&TaskManager::watchTasks, this);
+}
+
+TaskManager::~TaskManager() {
+    stopAll();
+    {
+        std::lock_guard lock(mu_);
+        watcher_exit_ = true;
+    }
+    lifecycle_cv_.notify_all();
+    watcher_.join();
+}
+
+bool TaskManager::validateTask(const TaskConfig& task) const {
+    const auto* pipeline = cfg_.findPipeline(task.pipeline_id);
+    if (!cfg_.findSource(task.source_id) || !pipeline || referencesUnregisteredModel(*pipeline)) return false;
+    auto runtime = *pipeline;
+    interpolatePipelineForTask(runtime, task, pipeline->id);
+    return true;
 }
 
 void TaskManager::loadAll() {
-    std::lock_guard<std::mutex> lock(mu_);
-    for (auto& [_, entry] : entries_) {
-        if (entry.state == State::Running) {
-            entry.executor->stop();
-            entry.state = State::Stopped;
-        }
-    }
+    stopAll();
+    std::lock_guard lock(mu_);
     entries_.clear();
-
-    std::shared_ptr<GpuDeviceAllocator> gpu_alloc;
-    {
-        std::set<int> device_id_set;
-        for (const auto& model : cfg_.models) {
-            if (!model.device_ids.empty()) {
-                for (int id : model.device_ids) device_id_set.insert(id);
-            } else {
-                device_id_set.insert(model.device_id);
-            }
-        }
-        if (!device_id_set.empty()) {
-            gpu_alloc = std::make_shared<GpuDeviceAllocator>(
-                std::vector<int>(device_id_set.begin(), device_id_set.end()));
-        }
-    }
-
     for (const auto& task : cfg_.tasks) {
-        buildEntry(task, false);
+        if (validateTask(task)) entries_.try_emplace(task.id);
     }
-    (void)gpu_alloc; // used inside buildEntry via StageFactory
 }
 
-bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
-    auto source       = cfg_.findSource(task.source_id);
-    auto pipeline_tpl = cfg_.findPipeline(task.pipeline_id);
-    if (!source || !pipeline_tpl) return false;
+std::unique_ptr<GraphExecutor> TaskManager::buildGraph(const AppConfig& cfg, const TaskConfig& task) {
+    const auto* source = cfg.findSource(task.source_id);
+    const auto* pipeline_tpl = cfg.findPipeline(task.pipeline_id);
+    if (!source || !pipeline_tpl) throw std::runtime_error("task dependency missing");
 
     bool use_ascend_dvpp = task.use_ascend_dvpp;
     int  ingest_vpc_out_w = 0;
     int  ingest_vpc_out_h = 0;
     if (use_ascend_dvpp) {
         const std::string infer_model_id = findInferModelId(*pipeline_tpl);
-        const auto* model_cfg = infer_model_id.empty() ? nullptr : cfg_.findModel(infer_model_id);
+        const auto* model_cfg = infer_model_id.empty() ? nullptr : cfg.findModel(infer_model_id);
         if (!model_cfg || model_cfg->backend != DeviceType::Ascend) {
             LOG_WARN("TaskManager: task {} use_ascend_dvpp but no Ascend model; fallback", task.id);
             use_ascend_dvpp = false;
@@ -158,9 +156,9 @@ bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
     PipelineConfig runtime_cfg = *pipeline_tpl;
     runtime_cfg.id = task.id;
     interpolatePipelineForTask(runtime_cfg, task, pipeline_tpl->id);
-    auto executor = std::make_shared<GraphExecutor>(runtime_cfg);
+    auto executor = std::make_unique<GraphExecutor>(runtime_cfg);
     StageFactory::Context ctx{
-        cfg_,
+        cfg,
         *source,
         publishers_,
         frame_archiver_,
@@ -178,86 +176,193 @@ bool TaskManager::buildEntry(const TaskConfig& task, bool autostart) {
     LOG_INFO("Pipeline built for task={} (pipeline={}, source={})\n{}",
              task.id, task.pipeline_id, task.source_id, executor->graphText());
 
-    if (autostart) executor->start();
-    entries_[task.id] = Entry{std::move(executor), autostart ? State::Running : State::Stopped};
-    return true;
+    return executor;
 }
 
 void TaskManager::startAll() {
-    std::vector<std::shared_ptr<GraphExecutor>> to_start;
-    {
-        std::lock_guard<std::mutex> lock(mu_);
-        to_start.reserve(entries_.size());
-        for (auto& [_, entry] : entries_) {
-            if (entry.state == State::Running) continue;
-            entry.state = State::Running;
-            to_start.push_back(entry.executor);
-        }
-    }
-    for (const auto& executor : to_start) {
-        executor->start();
+    std::lock_guard lock(mu_);
+    for (const auto& [id, entry] : entries_) {
+        if (!entry.removed) startLocked(id);
     }
 }
 
 void TaskManager::stopAll() {
-    std::vector<std::shared_ptr<GraphExecutor>> to_stop;
-    {
-        std::lock_guard<std::mutex> lock(mu_);
-        to_stop.reserve(entries_.size());
-        for (auto& [_, entry] : entries_) {
-            if (entry.state == State::Stopped) continue;
-            entry.state = State::Stopped;
-            to_stop.push_back(entry.executor);
-        }
+    std::unique_lock lock(mu_);
+    stopping_all_ = true;
+    for (auto& [_, entry] : entries_) {
+        if (entry.run) entry.run->cancelled.store(true);
     }
-    for (const auto& executor : to_stop) {
-        executor->stop();
+    lifecycle_cv_.notify_all();
+    lifecycle_cv_.wait(lock, [&] {
+        return std::none_of(entries_.begin(), entries_.end(), [](const auto& item) {
+            return item.second.run != nullptr;
+        });
+    });
+    stopping_all_ = false;
+}
+
+ITaskManager::ActionResult TaskManager::startLocked(const std::string& task_id) {
+    const auto it = entries_.find(task_id);
+    if (it == entries_.end() || it->second.removed) return ActionResult::NotFound;
+    auto& entry = it->second;
+    if (stopping_all_ || (entry.run && entry.run->cancelled.load())) return ActionResult::Busy;
+    if (entry.run) return ActionResult::Accepted;
+
+    const auto* config = cfg_.findTask(task_id);
+    if (!config) return ActionResult::NotFound;
+    auto run = std::make_shared<Run>();
+    run->startup_deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(cfg_.server.task_start_timeout_ms);
+    entry.run = run;
+    entry.state = State::Starting;
+    entry.failure.reset();
+    try {
+        run->thread = std::thread([this, task = *config, cfg = cfg_, run] {
+            runTask(task, cfg, run);
+        });
+    } catch (const std::exception& error) {
+        LOG_ERROR("Task {} could not start a lifecycle thread: {}", task_id, error.what());
+        entry.state = State::Failed;
+        entry.failure = TaskFailure{"startup_failed", "Task worker could not be started"};
+        entry.run.reset();
     }
+    lifecycle_cv_.notify_all();
+    return ActionResult::Accepted;
+}
+
+ITaskManager::ActionResult TaskManager::requestStart(const std::string& task_id) {
+    std::lock_guard lock(mu_);
+    return startLocked(task_id);
 }
 
 bool TaskManager::start(const std::string& task_id) {
-    std::shared_ptr<GraphExecutor> executor;
-    {
-        std::lock_guard<std::mutex> lock(mu_);
-        auto it = entries_.find(task_id);
-        if (it == entries_.end()) return false;
-        if (it->second.state == State::Stopped) {
-            it->second.state = State::Running;
-            executor = it->second.executor;
-        }
-    }
-    if (executor) {
-        executor->start();
-    }
-    return true;
+    return requestStart(task_id) == ActionResult::Accepted;
 }
 
 bool TaskManager::stop(const std::string& task_id) {
-    std::shared_ptr<GraphExecutor> executor;
-    {
-        std::lock_guard<std::mutex> lock(mu_);
-        auto it = entries_.find(task_id);
-        if (it == entries_.end()) return false;
-        if (it->second.state == State::Running) {
-            it->second.state = State::Stopped;
-            executor = it->second.executor;
-        }
-    }
-    if (executor) {
-        executor->stop();
+    std::lock_guard lock(mu_);
+    const auto it = entries_.find(task_id);
+    if (it == entries_.end() || it->second.removed) return false;
+    auto& entry = it->second;
+    if (entry.run) {
+        entry.run->stop_requested = true;
+        entry.run->cancelled.store(true);
+        lifecycle_cv_.notify_all();
+    } else {
+        entry.state = State::Stopped;
+        entry.failure.reset();
     }
     return true;
 }
 
+void TaskManager::runTask(const TaskConfig& task, const AppConfig& cfg, const std::shared_ptr<Run>& run) {
+    std::unique_ptr<GraphExecutor> executor;
+    std::optional<TaskFailure> failure;
+    try {
+        if (!run->cancelled.load()) {
+            executor = graph_builder_ ? graph_builder_(cfg, task) : buildGraph(cfg, task);
+            executor->start(&run->cancelled);
+            std::optional<std::chrono::steady_clock::time_point> drain_deadline;
+            while (!run->cancelled.load()) {
+                if ((failure = executor->failure())) break;
+                std::unique_lock lock(mu_);
+                auto& entry = entries_.at(task.id);
+                if (run->cancelled.load()) break;
+                const auto now = std::chrono::steady_clock::now();
+                if (entry.state == State::Starting) {
+                    if (now >= run->startup_deadline) {
+                        LOG_ERROR("Task {} startup timed out", task.id);
+                        failure = TaskFailure{"startup_timeout", "Pipeline startup timed out"};
+                        break;
+                    }
+                    if (executor->inputsReady()) entry.state = State::Running;
+                }
+                if (executor->inputsEnded() && !drain_deadline) {
+                    drain_deadline = now + drain_timeout_;
+                }
+                if (executor->drained()) break;
+                if (drain_deadline && now >= *drain_deadline) {
+                    LOG_ERROR("Task {} output drain timed out", task.id);
+                    failure = TaskFailure{"drain_timeout", "Pipeline did not finish processing the video in time"};
+                    break;
+                }
+                lifecycle_cv_.wait_for(lock, std::chrono::milliseconds(10));
+            }
+        }
+    } catch (const std::exception& error) {
+        LOG_ERROR("Task {} startup exception: {}", task.id, error.what());
+        failure = TaskFailure{"startup_failed", "Pipeline failed to initialize"};
+    } catch (...) {
+        LOG_ERROR("Task {} encountered an unknown exception during startup", task.id);
+        failure = TaskFailure{"startup_failed", "Pipeline failed to initialize"};
+    }
+    {
+        std::lock_guard lock(mu_);
+        auto& entry = entries_.at(task.id);
+        if (!run->cancelled.exchange(true) && failure) {
+            entry.state = State::Failed;
+            entry.failure = std::move(failure);
+        }
+    }
+    executor.reset();
+    {
+        std::lock_guard lock(mu_);
+        run->done = true;
+    }
+    lifecycle_cv_.notify_all();
+}
+
+void TaskManager::watchTasks() {
+    std::unique_lock lock(mu_);
+    while (!watcher_exit_) {
+        const auto now = std::chrono::steady_clock::now();
+        std::vector<std::pair<std::string, std::shared_ptr<Run>>> finished;
+        for (auto& [id, entry] : entries_) {
+            if (!entry.run) continue;
+            auto& run = *entry.run;
+            if (run.done) {
+                finished.emplace_back(id, entry.run);
+            } else if (entry.state == State::Starting && now >= run.startup_deadline &&
+                       !run.cancelled.exchange(true)) {
+                LOG_ERROR("Task {} startup timed out", id);
+                entry.state = State::Failed;
+                entry.failure = TaskFailure{"startup_timeout", "Pipeline startup timed out"};
+                lifecycle_cv_.notify_all();
+            }
+        }
+        if (!finished.empty()) {
+            lock.unlock();
+            for (const auto& [_, run] : finished) run->thread.join();
+            lock.lock();
+            for (const auto& [id, run] : finished) {
+                const auto it = entries_.find(id);
+                if (it == entries_.end() || it->second.run != run) continue;
+                auto& entry = it->second;
+                if (entry.removed) {
+                    entries_.erase(it);
+                } else {
+                    entry.run.reset();
+                    if (entry.state != State::Failed || run->stop_requested) {
+                        entry.state = State::Stopped;
+                        entry.failure.reset();
+                    }
+                }
+            }
+            lifecycle_cv_.notify_all();
+        }
+        lifecycle_cv_.wait_for(lock, std::chrono::milliseconds(10));
+    }
+}
+
 std::vector<TaskManager::TaskRuntimeInfo> TaskManager::listTasks() const {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::lock_guard lock(mu_);
     std::vector<TaskRuntimeInfo> out;
     out.reserve(entries_.size());
-    for (const auto& [id, entry] : entries_) {
-        TaskConfig cfg;
-        for (const auto& t : cfg_.tasks)
-            if (t.id == id) { cfg = t; break; }
-        out.push_back({cfg, entry.state});
+    for (const auto& task : cfg_.tasks) {
+        const auto it = entries_.find(task.id);
+        if (it == entries_.end() || it->second.removed) continue;
+        const auto& entry = it->second;
+        out.push_back({task, entry.state, entry.failure, entry.run && entry.run->cancelled.load()});
     }
     return out;
 }
@@ -396,8 +501,8 @@ ModelDetail TaskManager::describeModel(const std::string& id) const {
     for (const auto& task : cfg_.tasks) {
         if (detail.references.pipelines.count(task.pipeline_id) == 0) continue;
         const auto entry = entries_.find(task.id);
-        const bool running = entry != entries_.end() && entry->second.state == State::Running;
-        detail.tasks_by_pipeline[task.pipeline_id].emplace_back(task.id, running);
+        const auto state = entry == entries_.end() ? State::Stopped : entry->second.state;
+        detail.tasks_by_pipeline[task.pipeline_id].emplace_back(task.id, state);
     }
     return detail;
 }
@@ -497,91 +602,67 @@ bool TaskManager::updatePipeline(const PipelineConfig& pipeline) {
     const auto* old_ptr = cfg_.findPipeline(pipeline.id);
     if (!old_ptr || referencesUnregisteredModel(pipeline)) return false;
 
-    // Block only while a task is actually running this pipeline; stopped tasks keep a
-    // snapshot GraphExecutor and must be rebuilt after the template changes.
-    for (const auto& t : cfg_.tasks) {
-        if (t.pipeline_id != pipeline.id) continue;
-        auto it = entries_.find(t.id);
-        if (it != entries_.end() && it->second.state == State::Running) return false;
+    for (const auto& task : cfg_.tasks) {
+        if (task.pipeline_id != pipeline.id) continue;
+        const auto it = entries_.find(task.id);
+        if (it != entries_.end() && it->second.run) return false;
+        auto runtime = pipeline;
+        interpolatePipelineForTask(runtime, task, pipeline.id);
     }
-
-    const PipelineConfig backup = *old_ptr;
-
     for (auto& p : cfg_.pipelines)
         if (p.id == pipeline.id) { p = pipeline; break; }
     for (auto& p : runtime_state_.added_pipelines)
         if (p.id == pipeline.id) { p = pipeline; break; }
 
-    std::vector<TaskConfig> affected;
-    for (const auto& t : cfg_.tasks) {
-        if (t.pipeline_id == pipeline.id) affected.push_back(t);
-    }
-    for (const auto& t : affected) {
-        entries_.erase(t.id);
-    }
-
-    for (const auto& t : affected) {
-        if (!buildEntry(t, false)) {
-            LOG_ERROR(
-                "TaskManager: updatePipeline failed to rebuild stopped task '{}' after template change; restoring previous pipeline",
-                t.id);
-            for (auto& p : cfg_.pipelines)
-                if (p.id == pipeline.id) { p = backup; break; }
-            for (auto& p : runtime_state_.added_pipelines)
-                if (p.id == pipeline.id) { p = backup; break; }
-            for (const auto& t2 : affected) {
-                entries_.erase(t2.id);
-            }
-            for (const auto& t2 : affected) {
-                if (!buildEntry(t2, false)) {
-                    LOG_ERROR("TaskManager: updatePipeline failed to restore task '{}' to previous graph", t2.id);
-                }
-            }
-            return false;
-        }
-    }
-
     persist();
     return true;
 }
 
-bool TaskManager::updateTask(const TaskConfig& task) {
-    std::lock_guard<std::mutex> lock(mu_);
-    auto it = entries_.find(task.id);
-    if (it == entries_.end()) return false;
-    if (it->second.state == State::Running) return false;
-    if (!cfg_.findSource(task.source_id))     return false;
-    if (!cfg_.findPipeline(task.pipeline_id)) return false;
-    entries_.erase(it);
+ITaskManager::ActionResult TaskManager::requestUpdate(const TaskConfig& task) {
+    std::lock_guard lock(mu_);
+    const auto it = entries_.find(task.id);
+    if (it == entries_.end() || it->second.removed) return ActionResult::NotFound;
+    if (it->second.run) return ActionResult::Busy;
+    if (!validateTask(task)) return ActionResult::NotFound;
     for (auto& t : cfg_.tasks)
         if (t.id == task.id) { t = task; break; }
     for (auto& t : runtime_state_.added_tasks)
         if (t.id == task.id) { t = task; break; }
-    buildEntry(task, false);
+    it->second.state = State::Stopped;
+    it->second.failure.reset();
     persist();
-    return true;
+    return ActionResult::Accepted;
+}
+
+bool TaskManager::updateTask(const TaskConfig& task) {
+    return requestUpdate(task) == ActionResult::Accepted;
 }
 
 bool TaskManager::addTask(const TaskConfig& task, bool autostart) {
     std::lock_guard<std::mutex> lock(mu_);
     if (entries_.count(task.id)) return false;
-    if (!buildEntry(task, autostart)) return false;
+    if (!validateTask(task)) return false;
+    entries_.try_emplace(task.id);
     cfg_.tasks.push_back(task);
     auto& removed = runtime_state_.removed_task_ids;
     removed.erase(std::remove(removed.begin(), removed.end(), task.id), removed.end());
     runtime_state_.added_tasks.push_back(task);
     persist();
+    if (autostart) startLocked(task.id);
     return true;
 }
 
 bool TaskManager::removeTask(const std::string& id) {
     std::lock_guard<std::mutex> lock(mu_);
     auto it = entries_.find(id);
-    if (it == entries_.end()) return false;
-    if (it->second.state == State::Running) {
-        it->second.executor->stop();
+    if (it == entries_.end() || it->second.removed) return false;
+    if (it->second.run) {
+        it->second.removed = true;
+        it->second.run->cancelled.store(true);
+        lifecycle_cv_.notify_all();
+    } else {
+        entries_.erase(it);
     }
-    entries_.erase(it);
     cfg_.tasks.erase(std::remove_if(cfg_.tasks.begin(), cfg_.tasks.end(),
         [&](const auto& t){ return t.id == id; }), cfg_.tasks.end());
     auto& added = runtime_state_.added_tasks;

@@ -35,7 +35,7 @@ static StreamConfig makeFileCfg(bool loop = false) {
 static void waitForCompletion(FFmpegDecoder& dec,
                               std::chrono::seconds timeout = std::chrono::seconds(20)) {
     const auto start_dl = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (!dec.running() && std::chrono::steady_clock::now() < start_dl) {
+    while (!dec.running() && dec.endReason() == DecoderEnd::None && std::chrono::steady_clock::now() < start_dl) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -59,7 +59,8 @@ TEST(FFmpegFileDecoder, StopsOnEOFWithoutReconnect) {
 
     // Decoder should have stopped on its own (no reconnect loop)
     EXPECT_FALSE(decoder.running()) << "Decoder should stop on EOF without reconnect";
-    EXPECT_GT(frame_count.load(), 0) << "At least one frame should have been decoded";
+    EXPECT_EQ(frame_count.load(), 25);
+    EXPECT_EQ(decoder.endReason(), DecoderEnd::EndOfFile);
 }
 
 // ─── Frames are produced ─────────────────────────────────────────────────────
@@ -92,4 +93,26 @@ TEST(FFmpegFileDecoder, StopBeforeEOF) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     EXPECT_NO_THROW(decoder.stop());
     EXPECT_FALSE(decoder.running());
+}
+
+TEST(FFmpegFileDecoder, ReportsOpenErrorInsteadOfEndOfFile) {
+    FFmpegDecoder decoder;
+    auto cfg = makeFileCfg();
+    cfg.url = "/dev/null";
+    decoder.start(cfg, [](Frame) {});
+    waitForCompletion(decoder);
+    EXPECT_EQ(decoder.endReason(), DecoderEnd::Error);
+}
+
+TEST(FFmpegFileDecoder, LoopDoesNotReportTerminalEndOfFile) {
+    FFmpegDecoder decoder;
+    std::atomic<int> frame_count{0};
+    decoder.start(makeFileCfg(true), [&](Frame) { ++frame_count; });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (frame_count.load() <= 25 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    decoder.stop();
+    EXPECT_GT(frame_count.load(), 25);
+    EXPECT_EQ(decoder.endReason(), DecoderEnd::None);
 }

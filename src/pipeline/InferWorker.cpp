@@ -104,6 +104,11 @@ void InferWorker::enqueueHead(Batch batch) {
     cv_.notify_one();
 }
 
+bool InferWorker::idle() const {
+    std::lock_guard lock(mutex_);
+    return !processing_ && queue_.empty();
+}
+
 void InferWorker::workerLoop() {
     running_.store(true);
     LOG_INFO("InferWorker[{}]: started", model_cfg_.id);
@@ -112,19 +117,23 @@ void InferWorker::workerLoop() {
 
     while (!stop_flag_.load()) {
         Batch batch;
+        std::size_t remaining = 0;
         {
             std::unique_lock lock(mutex_);
+            processing_ = false;
             cv_.wait_for(lock, std::chrono::milliseconds(20),
                          [this] { return !queue_.empty() || stop_flag_.load(); });
             if (queue_.empty()) continue;
             batch = std::move(queue_.front());
             queue_.pop_front();
+            remaining = queue_.size();
+            processing_ = true;
         }
 
         if (batch.empty()) continue;
 
         LOG_DEBUG("InferWorker[{}]: dequeued batch_size={} queue_remaining={}",
-                  model_cfg_.id, batch.size(), queue_.size());
+                  model_cfg_.id, batch.size(), remaining);
 
         const double dequeue_ts = nowEpoch();
         const uint64_t dequeue_mono_ns = static_cast<uint64_t>(
@@ -291,6 +300,10 @@ void InferWorker::workerLoop() {
         }
     }
 
+    {
+        std::lock_guard lock(mutex_);
+        processing_ = false;
+    }
     LOG_INFO("InferWorker[{}]: stopped", model_cfg_.id);
     running_.store(false);
 }

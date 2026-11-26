@@ -9,7 +9,7 @@ bool EdgeQueue::push(const EventEnvelope& event) {
 
 bool EdgeQueue::push(EventEnvelope&& event) {
     std::unique_lock<std::mutex> lock(mu_);
-    if (stopped_) return false;
+    if (stopped_ || input_closed_) return false;
 
     if (queue_.size() >= static_cast<std::size_t>(cfg_.capacity)) {
         if (cfg_.drop_policy == EdgeDropPolicy::DropNewest) return false;
@@ -18,8 +18,8 @@ bool EdgeQueue::push(EventEnvelope&& event) {
         } else {
             const bool has_space = cv_.wait_for(
                 lock, std::chrono::milliseconds(100),
-                [this] { return stopped_ || queue_.size() < static_cast<std::size_t>(cfg_.capacity); });
-            if (!has_space || stopped_) return false;
+                [this] { return stopped_ || input_closed_ || queue_.size() < static_cast<std::size_t>(cfg_.capacity); });
+            if (!has_space || stopped_ || input_closed_) return false;
         }
     }
     queue_.push_back(std::move(event));
@@ -29,12 +29,23 @@ bool EdgeQueue::push(EventEnvelope&& event) {
 
 bool EdgeQueue::pop(EventEnvelope& event, int wait_ms) {
     std::unique_lock<std::mutex> lock(mu_);
-    cv_.wait_for(lock, std::chrono::milliseconds(wait_ms), [this] { return stopped_ || !queue_.empty(); });
+    cv_.wait_for(lock, std::chrono::milliseconds(wait_ms), [this] { return stopped_ || input_closed_ || !queue_.empty(); });
     if (queue_.empty()) return false;
     event = std::move(queue_.front());
     queue_.pop_front();
     cv_.notify_all();
     return true;
+}
+
+void EdgeQueue::closeInput() {
+    std::lock_guard<std::mutex> lock(mu_);
+    input_closed_ = true;
+    cv_.notify_all();
+}
+
+bool EdgeQueue::inputDrained() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return input_closed_ && queue_.empty();
 }
 
 void EdgeQueue::stop() {
@@ -45,6 +56,8 @@ void EdgeQueue::stop() {
 
 void EdgeQueue::reopen() {
     std::lock_guard<std::mutex> lock(mu_);
+    queue_.clear();
+    input_closed_ = false;
     stopped_ = false;
     cv_.notify_all();
 }

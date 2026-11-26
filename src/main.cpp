@@ -160,7 +160,7 @@ int main(int argc, char* argv[]) {
     infer::UnixSocketServer mgmt_server(mgmt_socket_path, task_manager);
     mgmt_server.start();
 
-    LOG_INFO("All tasks running. TaskCount: {} SocketPath: {}",
+    LOG_INFO("Task startup requested. TaskCount: {} SocketPath: {}",
              task_count, mgmt_socket_path);
 
     // ── Main wait loop ────────────────────────────────────────────────────────
