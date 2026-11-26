@@ -3,6 +3,7 @@ import { Layout } from './components/layout/Layout'
 import { DashboardPage } from './pages/DashboardPage'
 import { SourcesPage } from './pages/SourcesPage'
 import { ModelsPage } from './pages/ModelsPage'
+import { ModelDetailPage } from './pages/ModelDetailPage'
 import { PipelinesPage } from './pages/PipelinesPage'
 import { PipelineEditorPage } from './pages/PipelineEditorPage'
 import { TasksPage } from './pages/TasksPage'
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/sources" element={<SourcesPage />} />
         <Route path="/models" element={<ModelsPage />} />
+        <Route path="/models/:id" element={<ModelDetailPage />} />
         <Route path="/pipelines" element={<PipelinesPage />} />
         <Route path="/pipelines/new" element={<PipelineEditorPage mode="create" />} />
         <Route path="/pipelines/:id/edit" element={<PipelineEditorPage mode="edit" />} />

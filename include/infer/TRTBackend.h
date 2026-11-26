@@ -46,6 +46,7 @@ public:
     void infer(const Batch& input, std::vector<float>& output) override;
     void unloadModel() override;
 
+    int        minBatchSize() const override { return min_batch_size_; }
     int        maxBatchSize() const override { return max_batch_size_; }
     DeviceType deviceType()   const override { return DeviceType::CUDA; }
     bool       isLoaded()     const override { return loaded_; }
@@ -55,13 +56,15 @@ private:
                        int h, int w);
     void preprocessGPU(const Batch& input, PooledBuffer* slot, int batch_size);
     void inferGPU(const Batch& input, std::vector<float>& output);
+    size_t resolveOutputBytes(int batch_size);
+    void bindTensors(PooledBuffer* slot);
     // Throws GpuFaultException(TIMEOUT) if elapsed time since start exceeds threshold.
     void checkInferTimeout(const std::chrono::steady_clock::time_point& start) const;
 
+    int    min_batch_size_{1};
     int    max_batch_size_{1};
     int    input_h_{640};
     int    input_w_{640};
-    int    num_classes_{80};
     bool   loaded_{false};
     int    device_id_{0};
     double infer_timeout_ms_{5000.0}; // default 5s; override via ModelConfig in future
@@ -80,7 +83,6 @@ private:
 
     // Staging buffers for CPU inference path
     std::vector<float> input_staging_;
-    std::vector<float> output_staging_;
 
     // Two CUDA streams: preprocessing runs on preprocess_stream_,
     // TRT inference runs on infer_stream_.  CUDA Events synchronize them

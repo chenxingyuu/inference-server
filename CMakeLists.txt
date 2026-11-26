@@ -331,6 +331,7 @@ set(METRICS_SOURCES
 
 set(SERVER_SOURCES
     src/server/UnixSocketServer.cpp
+    src/server/ModelTest.cpp
 )
 
 # ── Library ───────────────────────────────────────────────────────────────────

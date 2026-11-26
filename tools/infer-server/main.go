@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -82,11 +83,11 @@ var callFn = func(cmd map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	defer conn.Close()
-	if cmd["cmd"] == "publish_model" {
+	if cmd["cmd"] == "publish_model" || cmd["cmd"] == "test_model" {
 		if err := conn.SetDeadline(time.Now().Add(105 * time.Second)); err != nil {
 			return nil, err
 		}
-	} else if cmd["cmd"] == "describe_model_export" {
+	} else if cmd["cmd"] == "describe_model_export" || cmd["cmd"] == "describe_model" {
 		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			return nil, err
 		}
@@ -101,7 +102,11 @@ var callFn = func(cmd map[string]any) (map[string]any, error) {
 	}
 
 	var resp map[string]any
-	if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&resp); err != nil {
+	var response io.Reader = conn
+	if cmd["cmd"] == "test_model" {
+		response = io.LimitReader(conn, maxModelTestResponseBytes+2)
+	}
+	if err := json.NewDecoder(bufio.NewReader(response)).Decode(&resp); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -409,7 +414,7 @@ func handleLoadModel(c *gin.Context) {
 //	@Success	200	{object}	OkResponse
 //	@Failure	401	{object}	ErrorResponse
 //	@Failure	404	{object}	ErrorResponse
-//	@Failure	409	{object}	ErrorResponse	"model is in use by a running task"
+//	@Failure	409	{object}	ErrorResponse	"model is in use by a pipeline or registered model"
 //	@Failure	503	{string}	string			"engine unreachable"
 //	@Router		/models/{id} [delete]
 func handleUnloadModel(c *gin.Context) {
@@ -659,6 +664,7 @@ func main() {
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	registerModelUploadRoutes(r)
 	registerModelExportRoute(r)
+	registerModelTestRoute(r)
 
 	// Protected management endpoints.
 	api := r.Group("/")
@@ -676,6 +682,7 @@ func main() {
 	api.DELETE("/pipelines/:id", handleRemovePipeline)
 
 	api.GET("/models", handleListModels)
+	api.GET("/models/detail/:id", handleModelDetail)
 	api.POST("/models", handleLoadModel)
 	api.DELETE("/models/:id", handleUnloadModel)
 	api.GET("/models/repository", handleListRepository)

@@ -1,4 +1,5 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useModels, useUnloadModel, useRepositoryModels, useLoadFromRepository } from '../hooks/queries'
 import { ModelUploadModal } from '../components/ModelUploadModal'
@@ -6,6 +7,22 @@ import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components
 import { useT } from '../lib/i18n'
 import { api } from '../lib/api'
 import type { ModelInfo, RepositoryModel } from '../types'
+
+const backendLabels = new Map([
+  ['cpu', 'CPU'],
+  ['mps', 'MPS'],
+  ['tensorrt', 'TensorRT'],
+  ['trt', 'TensorRT'],
+  ['cuda', 'TensorRT'],
+  ['ascend', 'Ascend'],
+])
+
+const yoloLabels = new Map([
+  ['v5', 'YOLOv5'],
+  ['v8', 'YOLOv8'],
+  ['v11', 'YOLO11'],
+  ['v26', 'YOLO26'],
+])
 
 function Tag({ children }: { children: string }) {
   return (
@@ -28,25 +45,6 @@ function StatusBadge({ registered }: { registered: boolean | undefined }) {
   )
 }
 
-function DetailItem({ label, value }: { label: string; value: ReactNode }) {
-  const displayValue = value === undefined || value === null || value === '' ? '—' : value
-
-  return (
-    <div>
-      <div className="label mb-1">{label}</div>
-      <div className="font-mono text-[12px] text-ink-secondary break-all">{displayValue}</div>
-    </div>
-  )
-}
-
-function formatList(values?: Array<string | number>) {
-  return values && values.length > 0 ? values.join(', ') : undefined
-}
-
-function formatThreshold(value?: number) {
-  return value === undefined ? undefined : Number(value.toFixed(4)).toString()
-}
-
 export function ModelsPage() {
   const { data: registeredModels, isLoading: modelsLoading, isError: modelsError, refetch: refetchModels } = useModels()
   const { data: repositoryModels, isLoading: repoLoading, isError: repoError, refetch: refetchRepo } = useRepositoryModels()
@@ -55,7 +53,6 @@ export function ModelsPage() {
   const { t } = useT()
 
   const [uploadOpen, setUploadOpen] = useState(false)
-  const [expandedID, setExpandedID] = useState<string | null>(null)
   const [exportingID, setExportingID] = useState<string | null>(null)
   const modelsByID = new Map<string, { registered?: ModelInfo; repository?: RepositoryModel }>()
   for (const model of registeredModels ?? []) {
@@ -108,125 +105,91 @@ export function ModelsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>{t('common.id')}</th>
-                <th>{t('models.col.backend')}</th>
-                <th>{t('models.col.version')}</th>
-                <th>{t('common.state')}</th>
-                <th>{t('models.col.summary')}</th>
+                <th>{t('models.field.id')}</th>
+                <th>{t('models.field.model_type')}</th>
+                <th>{t('models.col.inference_backend')}</th>
+                <th>{t('models.col.registration_state')}</th>
                 <th className="text-right">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
-              {isLoading && <LoadingRows cols={6} />}
+              {isLoading && <LoadingRows cols={5} />}
               {!isLoading && !hasListError && rows.length === 0 && (
                 <EmptyState message={t('models.empty')} />
               )}
               {!isLoading && rows.map(([id, { registered, repository }]) => {
                 const isRegistered = registeredModels === undefined ? undefined : !!registered
-                const expanded = expandedID === id
                 const modelType = registered?.model_type ?? repository?.model_type
-                const batchSize = registered?.batch_size ?? repository?.batch_size
-                const instanceCount = registered?.instance_count ?? repository?.instance_count
-                const summary = [
-                  modelType,
-                  registered?.input_shape,
-                  batchSize === undefined ? undefined : `${t('models.col.batch')} ${batchSize}`,
-                  instanceCount === undefined ? undefined : `${t('models.col.instances')} ${instanceCount}`,
-                ].filter(Boolean).join(' · ')
+                const typeLabel = modelType === 'detector' ? t('models.detector')
+                  : modelType === 'classifier' ? t('models.classifier') : modelType || '—'
+                const version = registered?.version || repository?.version
+                const yoloLabel = modelType === 'detector' && version ? yoloLabels.get(version) : undefined
+                const backend = registered?.backend || repository?.backend
+                const backendLabel = backend ? backendLabels.get(backend) ?? backend : '—'
 
                 return (
-                  <Fragment key={id}>
-                    <tr className="cursor-pointer" onClick={() => setExpandedID(expanded ? null : id)}>
-                      <td className="font-mono text-[12px] font-medium text-ink-primary">
-                        <button type="button" aria-expanded={expanded} className="rounded text-left hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
-                          <span aria-hidden="true" className="mr-2 text-ink-muted">{expanded ? '▼' : '▶'}</span>
-                          {id}
-                        </button>
-                      </td>
-                      <td><Tag>{registered?.backend || repository?.backend || '—'}</Tag></td>
-                      <td><Tag>{registered?.version || repository?.version || '—'}</Tag></td>
-                      <td><StatusBadge registered={isRegistered} /></td>
-                      <td className="font-mono text-[12px] text-ink-secondary">{summary || '—'}</td>
-                      <td className="w-px" onClick={(event) => event.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-3 whitespace-nowrap">
-                          {isRegistered && (
-                            <DeleteButton
-                              label={t('models.unregister')}
-                              loading={registrationPending}
-                              onClick={() => unregister.mutate(id)}
-                            />
-                          )}
-                          {isRegistered === false && repository && (
-                            <button
-                              type="button"
-                              onClick={() => register.mutate(id)}
-                              disabled={registrationPending}
-                              className="text-xs text-accent hover:underline disabled:opacity-50"
-                            >
-                              {register.isPending && register.variables === id ? t('models.repo_loading') : t('models.repo_load')}
-                            </button>
-                          )}
-                          {repository && (
-                            <button
-                              type="button"
-                              onClick={() => void exportModel(id)}
-                              disabled={exportingID !== null}
-                              aria-busy={exportingID === id}
-                              className="btn-ghost px-2 py-1 text-xs enabled:hover:bg-bg-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent aria-busy:disabled:cursor-wait aria-busy:disabled:opacity-100 disabled:active:scale-100"
-                            >
-                              {exportingID === id ? (
-                                <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin">
-                                  <circle cx="8" cy="8" r="5.5" opacity=".25" />
-                                  <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" />
-                                </svg>
-                              ) : (
-                                <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
-                                  <path d="M8 2v8m-3-3 3 3 3-3M2.5 11v2.5h11V11" />
-                                </svg>
-                              )}
-                              <span className="grid text-center">
-                                <span className={exportingID === id ? 'invisible col-start-1 row-start-1' : 'col-start-1 row-start-1'}>
-                                  {t('models.repo_export')}
-                                </span>
-                                {exportingID === id && (
-                                  <span className="col-start-1 row-start-1">{t('models.repo_exporting')}</span>
-                                )}
-                              </span>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                    {expanded && (
-                      <tr>
-                        <td colSpan={6} className="bg-bg-overlay px-6 py-3">
-                          <div className="label mb-2">{t('models.section.details')}</div>
-                          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                            <DetailItem
-                              label={t('models.field.source')}
-                              value={repository ? t('models.source.repository')
-                                : repositoryModels && t('models.source.outside_repository')}
-                            />
-                            <DetailItem label={t('models.field.model_type')} value={modelType} />
-                            <DetailItem label={t('models.field.batch_size')} value={batchSize} />
-                            <DetailItem label={t('models.field.instances')} value={instanceCount} />
-                            <DetailItem label={t('models.field.num_classes')} value={registered?.num_classes ?? repository?.num_classes} />
-                            <DetailItem label={t('models.field.conf_thresh')} value={formatThreshold(registered?.conf_thresh ?? repository?.conf_thresh)} />
-                            <DetailItem label={t('models.field.nms_thresh')} value={formatThreshold(registered?.nms_thresh ?? repository?.nms_thresh)} />
-                            {registered && (
-                              <>
-                                <DetailItem label={t('models.col.input_shape')} value={registered.input_shape} />
-                                <DetailItem label={t('models.field.device_id')} value={registered.device_id} />
-                                <DetailItem label={t('models.field.preferred_batch_sizes')} value={formatList(registered.preferred_batch_sizes)} />
-                                <DetailItem label={t('models.field.max_queue_delay_us')} value={registered.max_queue_delay_us} />
-                                <DetailItem label={t('models.field.class_names')} value={formatList(registered.class_names)} />
-                              </>
+                  <tr key={id}>
+                    <td className="font-mono text-[12px] font-medium">
+                      <Link to={`/models/${encodeURIComponent(id)}`} className="text-accent hover:underline">
+                        {id}
+                      </Link>
+                    </td>
+                    <td>
+                      <div className="whitespace-nowrap text-xs text-ink-secondary">{typeLabel}</div>
+                      {yoloLabel && <div className="mt-0.5 font-mono text-[11px] text-ink-muted">{yoloLabel}</div>}
+                    </td>
+                    <td><Tag>{backendLabel}</Tag></td>
+                    <td><StatusBadge registered={isRegistered} /></td>
+                    <td className="w-px">
+                      <div className="flex items-center justify-end gap-3 whitespace-nowrap">
+                        {isRegistered && (
+                          <DeleteButton
+                            label={t('models.unregister')}
+                            loading={registrationPending}
+                            onClick={() => unregister.mutate(id)}
+                          />
+                        )}
+                        {isRegistered === false && repository && (
+                          <button
+                            type="button"
+                            onClick={() => register.mutate(id)}
+                            disabled={registrationPending}
+                            className="text-xs text-accent hover:underline disabled:opacity-50"
+                          >
+                            {register.isPending && register.variables === id ? t('models.repo_loading') : t('models.repo_load')}
+                          </button>
+                        )}
+                        {repository && (
+                          <button
+                            type="button"
+                            onClick={() => void exportModel(id)}
+                            disabled={exportingID !== null}
+                            aria-busy={exportingID === id}
+                            className="btn-ghost px-2 py-1 text-xs enabled:hover:bg-bg-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent aria-busy:disabled:cursor-wait aria-busy:disabled:opacity-100 disabled:active:scale-100"
+                          >
+                            {exportingID === id ? (
+                              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin">
+                                <circle cx="8" cy="8" r="5.5" opacity=".25" />
+                                <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" />
+                              </svg>
+                            ) : (
+                              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
+                                <path d="M8 2v8m-3-3 3 3 3-3M2.5 11v2.5h11V11" />
+                              </svg>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
+                            <span className="grid text-center">
+                              <span className={exportingID === id ? 'invisible col-start-1 row-start-1' : 'col-start-1 row-start-1'}>
+                                {t('models.repo_export')}
+                              </span>
+                              {exportingID === id && (
+                                <span className="col-start-1 row-start-1">{t('models.repo_exporting')}</span>
+                              )}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
                 )
               })}
             </tbody>

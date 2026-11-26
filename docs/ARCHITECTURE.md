@@ -67,6 +67,8 @@ Operational detail: `docs/ascend-guide.md` §12–§14.
 
 - Web publication requires a configured management API key and authenticates uploads before reading the request body. It stages one model under the shared repository's hidden `.uploads` directory. `publish_model` uses a bounded child process to load the weights with the enabled backend. Cascade dependencies must be registered and resolvable from the startup config and repository merge. After validation, `TaskManager` atomically renames the directory into the repository and registers it. Retrying the token and model ID reconciles a lost response.
 - Export uses the configured management API key and the same active-version resolver as repository loading. The engine describes the selected weights and config through the Unix socket. The management server reads the shared repository and serves a ZIP that the upload analyzer accepts as a single model.
+- Model details take registration and dependency information from the runtime configuration. Every inference node and registered cascade parent participates in the unregister check. A referenced model returns HTTP 409 and retains its registry entry.
+- Single-image tests authenticate and validate the upload in the Go sidecar, then use a bounded Unix socket request. The engine snapshots the registered configuration and uses a subprocess to run the existing backend and decoder, sharing the publication check slot. Preview results return to the caller without creating a pipeline task. The engine, management sidecar, and Web UI should ship together.
 
 ## Publishers
 

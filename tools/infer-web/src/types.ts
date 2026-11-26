@@ -109,6 +109,32 @@ export interface RepositoryModel {
   loaded: boolean
 }
 
+export interface ModelDetail {
+  model: ModelInfo
+  registered: boolean
+  repository: { version: string; weight_paths: string[] } | null
+  repository_error: boolean
+  pipelines: { id: string; nodes: string[]; cascade_nodes: string[]; tasks: Pick<TaskInfo, 'id' | 'state'>[] }[]
+  cascade_parents: string[]
+  cascade_children: { model_id: string; attribute_key: string; trigger_classes: number[]; crop_expand: number }[]
+}
+
+export interface ModelTestResult {
+  model_type: ModelType
+  backend: BackendType | 'mps' | 'tensorrt'
+  conf_thresh: number
+  nms_thresh: number | null
+  width: number
+  height: number
+  preview_jpeg: string
+  results: {
+    class_id: number
+    class_name: string
+    confidence: number
+    bbox?: { x1: number; y1: number; x2: number; y2: number }
+  }[]
+}
+
 export interface TaskInfo {
   id: string
   state: TaskState

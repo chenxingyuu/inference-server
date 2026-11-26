@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useT } from '../lib/i18n'
 import type { SourceCreate, PipelineCreate, ModelLoad, TaskCreate } from '../types'
 
@@ -101,6 +101,14 @@ export const useModels = () =>
     refetchInterval: 30_000,
   })
 
+export const useModelDetail = (id: string) =>
+  useQuery({
+    queryKey: ['models', 'detail', id],
+    queryFn: ({ signal }) => api.models.detail(id, signal),
+    refetchInterval: 30_000,
+    retry: (count, error) => count < 1 && !(error instanceof ApiError && error.status < 500),
+  })
+
 export const useRepositoryModels = () =>
   useQuery({
     queryKey: ['models', 'repository'],
@@ -142,7 +150,9 @@ export const useUnloadModel = () => {
       toast.success(t('models.unregister_success', { id }))
       return qc.invalidateQueries({ queryKey: ['models'] })
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      toast.error(e instanceof ApiError && e.code === 'in_use' ? t('models.unregister_in_use') : e.message)
+    },
   })
 }
 

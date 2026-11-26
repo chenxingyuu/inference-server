@@ -239,7 +239,8 @@ struct RepositoryModelExport {
     std::vector<std::string> weight_paths;
 };
 
-RepositoryModelExport describeRepositoryModelExport(const std::string& root, const std::string& id);
+RepositoryModelExport describeRepositoryModelExport(
+    const std::string& root, const std::string& id, ModelConfig* resolved_model = nullptr);
 
 // Parse config.yaml → AppConfig. Throws std::runtime_error on invalid config.
 AppConfig loadConfig(const std::string& yaml_path);

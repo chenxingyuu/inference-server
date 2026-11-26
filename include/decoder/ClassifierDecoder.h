@@ -32,9 +32,12 @@ public:
         float             nms_thresh,
         size_t            output_count = 0) override;
 
+    std::vector<Detection> rank(const float* scores, size_t count, float threshold, size_t limit) const;
+
     YOLOVersion version() const override { return YOLOVersion::Unknown; }
 
 private:
+    Detection prediction(int class_id, float score) const;
     int                      num_classes_{1};
     std::vector<std::string> class_names_;
 };

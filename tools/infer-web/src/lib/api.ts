@@ -1,6 +1,6 @@
 import type {
   SourceInfo, SourceCreate, PipelineInfo, PipelineCreate,
-  ModelInfo, ModelLoad, RepositoryModel, TaskInfo, TaskCreate, OkResponse, ArchiveAnalysis,
+  ModelInfo, ModelLoad, RepositoryModel, ModelDetail, ModelTestResult, TaskInfo, TaskCreate, OkResponse, ArchiveAnalysis,
 } from '../types'
 
 export const serverUrl = {
@@ -36,7 +36,7 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(buildApiUrl(path), {
     ...init,
     headers: {
-      'Content-Type': 'application/json',
+      ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       ...(key ? { Authorization: `Bearer ${key}` } : {}),
       ...init?.headers,
     },
@@ -89,6 +89,13 @@ export const api = {
 
   models: {
     list: () => req<ModelInfo[]>('/models'),
+    detail: (id: string, signal?: AbortSignal) =>
+      req<ModelDetail>(`/models/detail/${encodeURIComponent(id)}`, { signal }),
+    test: (id: string, image: File) => {
+      const body = new FormData()
+      body.set('image', image)
+      return req<ModelTestResult>(`/models/test/${encodeURIComponent(id)}`, { method: 'POST', body })
+    },
     load: (body: ModelLoad) => req<OkResponse>('/models', { method: 'POST', body: json(body) }),
     unload: (id: string) => req<OkResponse>(`/models/${id}`, { method: 'DELETE' }),
     listRepository: () => req<RepositoryModel[]>('/models/repository'),

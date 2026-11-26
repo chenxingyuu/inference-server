@@ -91,12 +91,13 @@ void interpolatePipelineForTask(PipelineConfig& runtime_cfg, const TaskConfig& t
 TaskManager::TaskManager(AppConfig cfg,
                          std::string config_path,
                          std::unordered_map<std::string, IPublisher*> publishers,
-                         std::shared_ptr<FrameArchiver> frame_archiver, ModelProbe model_probe)
+                         std::shared_ptr<FrameArchiver> frame_archiver, ModelProbe model_probe, ModelTest model_test)
     : cfg_(std::move(cfg))
     , config_path_(std::move(config_path))
     , publishers_(std::move(publishers))
     , frame_archiver_(std::move(frame_archiver))
     , model_probe_(std::move(model_probe))
+    , model_test_(std::move(model_test))
 {
     runtime_state_ = loadRuntimeState(runtimeStatePath(config_path_));
     applyRuntimeState(cfg_, runtime_state_);
@@ -303,33 +304,129 @@ std::vector<PipelineInfo> TaskManager::listPipelines() const {
     return out;
 }
 
+namespace {
+
+ModelInfo toModelInfo(const ModelConfig& m) {
+    const auto& s = m.input_shape;
+    std::string shape = std::to_string(s.channels) + "x"
+                      + std::to_string(s.height)   + "x"
+                      + std::to_string(s.width);
+    ModelInfo info;
+    info.id                     = m.id;
+    info.backend                = deviceTypeToStr(m.backend);
+    info.version                = yoloVersionStr(m.version);
+    info.input_shape            = std::move(shape);
+    info.batch_size             = m.batch_size;
+    info.instance_count         = m.instance_count;
+    info.model_type             = (m.model_type == ModelType::Classifier) ? "classifier" : "detector";
+    info.num_classes            = m.num_classes;
+    info.conf_thresh            = m.conf_thresh;
+    info.nms_thresh             = m.nms_thresh;
+    info.device_id              = m.device_id;
+    info.preferred_batch_sizes  = m.preferred_batch_sizes;
+    info.max_queue_delay_us     = m.max_queue_delay_us;
+    info.class_names            = m.class_names;
+    return info;
+}
+
+const std::string* inferModelId(const StageConfig& node) {
+    if (node.type != "infer.engine") return nullptr;
+    const auto it = node.with.find("model_id");
+    return it == node.with.end() ? nullptr : &it->second;
+}
+
+} // namespace
+
 std::vector<ModelInfo> TaskManager::listModels() const {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::lock_guard lock(mu_);
     std::vector<ModelInfo> out;
     out.reserve(cfg_.models.size());
-    for (const auto& m : cfg_.models) {
-        const auto& s = m.input_shape;
-        std::string shape = std::to_string(s.channels) + "x"
-                          + std::to_string(s.height)   + "x"
-                          + std::to_string(s.width);
-        ModelInfo info;
-        info.id                     = m.id;
-        info.backend                = deviceTypeToStr(m.backend);
-        info.version                = yoloVersionStr(m.version);
-        info.input_shape            = std::move(shape);
-        info.batch_size             = m.batch_size;
-        info.instance_count         = m.instance_count;
-        info.model_type             = (m.model_type == ModelType::Classifier) ? "classifier" : "detector";
-        info.num_classes            = m.num_classes;
-        info.conf_thresh            = m.conf_thresh;
-        info.nms_thresh             = m.nms_thresh;
-        info.device_id              = m.device_id;
-        info.preferred_batch_sizes  = m.preferred_batch_sizes;
-        info.max_queue_delay_us     = m.max_queue_delay_us;
-        info.class_names            = m.class_names;
-        out.push_back(std::move(info));
-    }
+    for (const auto& model : cfg_.models) out.push_back(toModelInfo(model));
     return out;
+}
+
+ModelReferences TaskManager::modelReferences(const std::string& id) const {
+    ModelReferences references;
+    for (const auto& model : cfg_.models) {
+        if (model.id != id && std::any_of(model.cascade.begin(), model.cascade.end(),
+                [&](const auto& child) { return child.model_id == id; })) {
+            references.cascade_parents.push_back(model.id);
+        }
+    }
+    for (const auto& pipeline : cfg_.pipelines) {
+        for (const auto& node : pipeline.nodes) {
+            const auto* model_id = inferModelId(node);
+            if (!model_id) continue;
+            if (*model_id == id) {
+                references.pipelines[pipeline.id].direct_nodes.push_back(node.id);
+            } else if (std::find(references.cascade_parents.begin(), references.cascade_parents.end(),
+                                 *model_id) != references.cascade_parents.end()) {
+                references.pipelines[pipeline.id].cascade_nodes.push_back(node.id);
+            }
+        }
+    }
+    return references;
+}
+
+ModelDetail TaskManager::describeModel(const std::string& id) const {
+    ModelConfig repository_model;
+    ModelDetail detail;
+    detail.repository = describeRepositoryModelExport(cfg_.server.model_repository, id, &repository_model);
+    bool has_repository_model = detail.repository.code.empty();
+    if (detail.repository.code == "model_not_exportable") {
+        try {
+            repository_model = loadRepositoryModel(std::filesystem::path(cfg_.server.model_repository) / id);
+            has_repository_model = true;
+        } catch (const std::exception&) {
+            // A model can still be registered even when its repository entry is unreadable.
+        }
+    }
+    std::lock_guard lock(mu_);
+    if (const auto* model = cfg_.findModel(id)) {
+        detail.model = toModelInfo(*model);
+        detail.registered = true;
+        detail.cascade_children = model->cascade;
+    } else if (has_repository_model) {
+        detail.model = toModelInfo(repository_model);
+        detail.cascade_children = repository_model.cascade;
+    }
+    if (!detail.model) return detail;
+
+    detail.references = modelReferences(id);
+    for (const auto& task : cfg_.tasks) {
+        if (detail.references.pipelines.count(task.pipeline_id) == 0) continue;
+        const auto entry = entries_.find(task.id);
+        const bool running = entry != entries_.end() && entry->second.state == State::Running;
+        detail.tasks_by_pipeline[task.pipeline_id].emplace_back(task.id, running);
+    }
+    return detail;
+}
+
+nlohmann::json TaskManager::testModel(const std::string& id, const std::string& image) {
+    const auto fail = [](const char* code, const char* message) {
+        return nlohmann::json{{"status", "error"}, {"code", code}, {"message", message}};
+    };
+    if (!model_test_) return fail("model_test_unavailable", "model testing is unavailable");
+
+    ModelConfig model;
+    {
+        std::lock_guard lock(mu_);
+        const auto* registered = cfg_.findModel(id);
+        if (!registered) return fail("model_not_registered", "register the model before testing");
+        model = *registered;
+    }
+    std::unique_lock check_lock(model_check_mu_, std::try_to_lock);
+    if (!check_lock.owns_lock()) return fail("model_test_busy", "another model is being checked");
+    return model_test_(model, image);
+}
+
+bool TaskManager::referencesUnregisteredModel(const PipelineConfig& pipeline) const {
+    const auto& removed_ids = runtime_state_.removed_model_ids;
+    return std::any_of(pipeline.nodes.begin(), pipeline.nodes.end(), [&](const auto& node) {
+        const auto* id = inferModelId(node);
+        return id && !cfg_.findModel(*id) &&
+               std::find(removed_ids.begin(), removed_ids.end(), *id) != removed_ids.end();
+    });
 }
 
 // ── Mutation helpers ──────────────────────────────────────────────────────────
@@ -371,7 +468,7 @@ bool TaskManager::removeSource(const std::string& id) {
 
 bool TaskManager::addPipeline(const PipelineConfig& pipeline) {
     std::lock_guard<std::mutex> lock(mu_);
-    if (cfg_.findPipeline(pipeline.id)) return false;
+    if (cfg_.findPipeline(pipeline.id) || referencesUnregisteredModel(pipeline)) return false;
     cfg_.pipelines.push_back(pipeline);
     auto& removed = runtime_state_.removed_pipeline_ids;
     removed.erase(std::remove(removed.begin(), removed.end(), pipeline.id), removed.end());
@@ -398,7 +495,7 @@ bool TaskManager::removePipeline(const std::string& id) {
 bool TaskManager::updatePipeline(const PipelineConfig& pipeline) {
     std::lock_guard<std::mutex> lock(mu_);
     const auto* old_ptr = cfg_.findPipeline(pipeline.id);
-    if (!old_ptr) return false;
+    if (!old_ptr || referencesUnregisteredModel(pipeline)) return false;
 
     // Block only while a task is actually running this pipeline; stopped tasks keep a
     // snapshot GraphExecutor and must be rebuilt after the template changes.
@@ -497,7 +594,9 @@ bool TaskManager::removeTask(const std::string& id) {
 
 bool TaskManager::loadModel(const ModelConfig& model) {
     std::lock_guard<std::mutex> lock(mu_);
-    if (cfg_.findModel(model.id)) return false;
+    if (cfg_.findModel(model.id) ||
+        std::any_of(model.cascade.begin(), model.cascade.end(),
+                    [&](const auto& child) { return !cfg_.findModel(child.model_id); })) return false;
     cfg_.models.push_back(model);
     auto& removed = runtime_state_.removed_model_ids;
     removed.erase(std::remove(removed.begin(), removed.end(), model.id), removed.end());
@@ -506,18 +605,10 @@ bool TaskManager::loadModel(const ModelConfig& model) {
     return true;
 }
 
-bool TaskManager::unloadModel(const std::string& id) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (!cfg_.findModel(id)) return false;
-    // Check no running task uses this model (via pipeline infer.engine node).
-    for (const auto& [tid, entry] : entries_) {
-        if (entry.state != State::Running) continue;
-        const auto* task = cfg_.findTask(tid);
-        if (!task) continue;
-        const auto* pl = cfg_.findPipeline(task->pipeline_id);
-        if (!pl) continue;
-        if (findInferModelId(*pl) == id) return false;
-    }
+TaskManager::UnregisterResult TaskManager::unloadModel(const std::string& id) {
+    std::lock_guard lock(mu_);
+    if (!cfg_.findModel(id)) return UnregisterResult::NotFound;
+    if (!modelReferences(id).empty()) return UnregisterResult::InUse;
     cfg_.models.erase(std::remove_if(cfg_.models.begin(), cfg_.models.end(),
         [&](const auto& m){ return m.id == id; }), cfg_.models.end());
     auto& added = runtime_state_.added_models;
@@ -525,7 +616,7 @@ bool TaskManager::unloadModel(const std::string& id) {
         [&](const auto& m){ return m.id == id; }), added.end());
     runtime_state_.removed_model_ids.push_back(id);
     persist();
-    return true;
+    return UnregisterResult::Removed;
 }
 
 std::vector<RepositoryModelInfo> TaskManager::listRepositoryModels() const {
@@ -586,7 +677,7 @@ ModelPublishResult TaskManager::publishModel(const std::string& id, const std::s
     if (cfg_.server.model_repository.empty() || !model_probe_) {
         return {"publish_unavailable", "model publication is unavailable"};
     }
-    std::unique_lock publication_lock(publication_mu_, std::try_to_lock);
+    std::unique_lock publication_lock(model_check_mu_, std::try_to_lock);
     if (!publication_lock.owns_lock()) {
         return {"publish_busy", "another model is being checked, retry shortly"};
     }

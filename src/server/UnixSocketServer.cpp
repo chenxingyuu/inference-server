@@ -4,6 +4,7 @@
 #include "common/Logger.h"
 
 #include <nlohmann/json.hpp>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -19,6 +20,39 @@ namespace infer {
 
 using json = nlohmann::json;
 
+namespace {
+
+constexpr size_t kMaxRequestBytes = 12 * 1024 * 1024;
+
+json modelInfoJson(const ModelInfo& model) {
+    return {{"id", model.id}, {"backend", model.backend}, {"version", model.version},
+            {"input_shape", model.input_shape}, {"batch_size", model.batch_size},
+            {"instance_count", model.instance_count}, {"model_type", model.model_type},
+            {"num_classes", model.num_classes}, {"conf_thresh", model.conf_thresh},
+            {"nms_thresh", model.nms_thresh}, {"device_id", model.device_id},
+            {"preferred_batch_sizes", model.preferred_batch_sizes},
+            {"max_queue_delay_us", model.max_queue_delay_us},
+            {"class_names", model.class_names}};
+}
+
+bool sendAll(int fd, const std::string& response) {
+#ifdef MSG_NOSIGNAL
+    constexpr int flags = MSG_NOSIGNAL;
+#else
+    constexpr int flags = 0;
+#endif
+    size_t sent = 0;
+    while (sent < response.size()) {
+        const auto n = ::send(fd, response.data() + sent, response.size() - sent, flags);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return false;
+        sent += static_cast<size_t>(n);
+    }
+    return true;
+}
+
+} // namespace
+
 UnixSocketServer::UnixSocketServer(std::string socket_path, ITaskManager& task_manager)
     : path_(std::move(socket_path))
     , task_manager_(task_manager) {}
@@ -33,6 +67,8 @@ void UnixSocketServer::start() {
     server_fd_ = ::socket(AF_UNIX, SOCK_STREAM, 0);
     if (server_fd_ < 0)
         throw std::runtime_error(std::string("UnixSocketServer: socket() failed: ") + std::strerror(errno));
+
+    ::fcntl(server_fd_, F_SETFD, FD_CLOEXEC);
 
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
@@ -84,6 +120,11 @@ void UnixSocketServer::acceptLoop() {
     while (running_) {
         int client_fd = ::accept(server_fd_, nullptr, nullptr);
         if (client_fd < 0) break;
+        ::fcntl(client_fd, F_SETFD, FD_CLOEXEC);
+#ifdef SO_NOSIGPIPE
+        const int no_sigpipe = 1;
+        ::setsockopt(client_fd, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
+#endif
 
         std::lock_guard<std::mutex> lock(clients_mu_);
         client_threads_.emplace_back([this, client_fd] {
@@ -97,18 +138,25 @@ void UnixSocketServer::handleClient(int fd) {
     char buf[4096];
     std::string data;
     while (true) {
-        ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
-        if (n <= 0) break;
+        const auto n = ::recv(fd, buf, sizeof(buf), 0);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return;
+        const auto previous_size = data.size();
         data.append(buf, static_cast<size_t>(n));
-
-        auto pos = data.find('\n');
+        const auto pos = data.find('\n', previous_size);
+        if ((pos == std::string::npos ? data.size() : pos) > kMaxRequestBytes) {
+            sendAll(fd, "{\"status\":\"error\",\"code\":\"request_too_large\"}\n");
+            return;
+        }
         if (pos == std::string::npos) continue;
-
-        std::string line = data.substr(0, pos);
-        data.erase(0, pos + 1);
-
-        std::string response = dispatch(line) + '\n';
-        ::send(fd, response.data(), response.size(), 0);
+        try {
+            sendAll(fd, dispatch(data.substr(0, pos)) + '\n');
+        } catch (const std::exception& e) {
+            LOG_ERROR("UnixSocketServer: command failed: {}", e.what());
+            sendAll(fd, "{\"status\":\"error\",\"code\":\"internal_error\","
+                        "\"message\":\"engine command failed\"}\n");
+        }
+        return;
     }
 }
 
@@ -188,14 +236,7 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
     if (cmd == "list_models") {
         json arr = json::array();
         for (const auto& m : task_manager_.listModels()) {
-            arr.push_back({{"id", m.id}, {"backend", m.backend}, {"version", m.version},
-                           {"input_shape", m.input_shape}, {"batch_size", m.batch_size},
-                           {"instance_count", m.instance_count}, {"model_type", m.model_type},
-                           {"num_classes", m.num_classes}, {"conf_thresh", m.conf_thresh},
-                           {"nms_thresh", m.nms_thresh}, {"device_id", m.device_id},
-                           {"preferred_batch_sizes", m.preferred_batch_sizes},
-                           {"max_queue_delay_us", m.max_queue_delay_us},
-                           {"class_names", m.class_names}});
+            arr.push_back(modelInfoJson(m));
         }
         return json({{"status", "ok"}, {"data", arr}}).dump();
     }
@@ -210,6 +251,55 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
                            {"loaded", m.loaded}});
         }
         return json({{"status", "ok"}, {"data", arr}}).dump();
+    }
+
+    if (cmd == "describe_model" || cmd == "test_model") {
+        if (!req.contains("id") || !req["id"].is_string() || req["id"].get_ref<const std::string&>().empty()) {
+            return json({{"status", "error"}, {"code", "invalid_model_id"}, {"message", "invalid model ID"}}).dump();
+        }
+        const auto& id = req["id"].get_ref<const std::string&>();
+        if (cmd == "test_model") {
+            if (!req.contains("image") || !req["image"].is_string()) {
+                return json({{"status", "error"}, {"code", "invalid_image"}, {"message", "missing image"}}).dump();
+            }
+            return task_manager_.testModel(id, req["image"].get_ref<const std::string&>()).dump();
+        }
+
+        const auto detail = task_manager_.describeModel(id);
+        const auto& repo = detail.repository;
+        const bool repo_absent = repo.code == "no_repository" || repo.code == "model_not_found" ||
+                                 repo.code == "invalid_model_id";
+        const bool repo_error = !repo.code.empty() && !repo_absent;
+        if (!detail.model) {
+            return json({{"status", "error"},
+                         {"code", repo_error ? "model_repository_unavailable" : "model_not_found"},
+                         {"message", repo_error ? "could not read the model repository" : "model not found"}}).dump();
+        }
+
+        auto pipelines = json::array();
+        for (const auto& [pipeline_id, nodes] : detail.references.pipelines) {
+            auto tasks = json::array();
+            const auto related = detail.tasks_by_pipeline.find(pipeline_id);
+            if (related != detail.tasks_by_pipeline.end()) {
+                for (const auto& [task_id, running] : related->second)
+                    tasks.push_back({{"id", task_id}, {"state", running ? "running" : "stopped"}});
+            }
+            pipelines.push_back({{"id", pipeline_id}, {"nodes", nodes.direct_nodes},
+                                 {"cascade_nodes", nodes.cascade_nodes}, {"tasks", std::move(tasks)}});
+        }
+        auto cascade = json::array();
+        for (const auto& child : detail.cascade_children) {
+            cascade.push_back({{"model_id", child.model_id}, {"attribute_key", child.attribute_key},
+                               {"trigger_classes", child.trigger_classes}, {"crop_expand", child.crop_expand}});
+        }
+        json repository = nullptr;
+        if (repo.code.empty()) repository = {{"version", repo.version}, {"weight_paths", repo.weight_paths}};
+        return json({{"status", "ok"}, {"data", {
+            {"model", modelInfoJson(*detail.model)}, {"registered", detail.registered},
+            {"repository", repository}, {"repository_error", repo_error},
+            {"pipelines", pipelines}, {"cascade_parents", detail.references.cascade_parents},
+            {"cascade_children", cascade}
+        }}}).dump();
     }
 
     if (cmd == "describe_model_export") {
@@ -315,7 +405,8 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         }
         if (cmd == "add_pipeline") {
             if (!task_manager_.addPipeline(p))
-                return json({{"status", "error"}, {"message", "already exists: " + id}}).dump();
+                return json({{"status", "error"}, {"code", "invalid_pipeline"},
+                             {"message", "pipeline already exists or references a model that was unregistered: " + id}}).dump();
             return json({{"status", "ok"}, {"id", id}}).dump();
         }
         const auto pipes = task_manager_.listPipelines();
@@ -430,11 +521,12 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
 
     if (cmd == "unload_model") {
         const auto id = req.value("id", std::string{});
-        const auto models = task_manager_.listModels();
-        if (std::none_of(models.begin(), models.end(), [&](const auto& m){ return m.id == id; }))
+        const auto result = task_manager_.unloadModel(id);
+        if (result == ITaskManager::UnregisterResult::NotFound)
             return json({{"status", "error"}, {"code", "not_found"}, {"message", "not found: " + id}}).dump();
-        if (!task_manager_.unloadModel(id))
-            return json({{"status", "error"}, {"code", "in_use"}, {"message", "model in use by a running task: " + id}}).dump();
+        if (result == ITaskManager::UnregisterResult::InUse)
+            return json({{"status", "error"}, {"code", "in_use"},
+                         {"message", "model is referenced by a pipeline or registered model: " + id}}).dump();
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 

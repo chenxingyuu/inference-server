@@ -18,6 +18,7 @@ class TaskManager : public ITaskManager {
 public:
     using State = ITaskManager::State;
     using ModelProbe = std::function<void(const std::filesystem::path&)>;
+    using ModelTest = std::function<nlohmann::json(const ModelConfig&, const std::string&)>;
 
     // config_path is stored for runtime-state persistence (sidecar JSON).
     // publishers is a non-owning registry: callers must ensure all pointed-to
@@ -25,7 +26,8 @@ public:
     TaskManager(AppConfig cfg,
                 std::string config_path,
                 std::unordered_map<std::string, IPublisher*> publishers,
-                std::shared_ptr<FrameArchiver> frame_archiver, ModelProbe model_probe = {});
+                std::shared_ptr<FrameArchiver> frame_archiver, ModelProbe model_probe = {},
+                ModelTest model_test = {});
 
     void loadAll();
     void startAll();
@@ -47,7 +49,9 @@ public:
     bool updateTask(const TaskConfig& task)          override;
     bool removeTask(const std::string& id)           override;
     bool loadModel(const ModelConfig& model)         override;
-    bool unloadModel(const std::string& id)          override;
+    UnregisterResult unloadModel(const std::string& id) override;
+    ModelDetail describeModel(const std::string& id) const override;
+    nlohmann::json testModel(const std::string& id, const std::string& image) override;
     std::vector<RepositoryModelInfo> listRepositoryModels() const override;
     bool loadFromRepository(const std::string& id)   override;
     RepositoryModelExport describeModelExport(const std::string& id) const override;
@@ -67,6 +71,8 @@ private:
 
     // Persist current runtime mutations to the sidecar JSON file.
     void persist();
+    ModelReferences modelReferences(const std::string& id) const;
+    bool referencesUnregisteredModel(const PipelineConfig& pipeline) const;
 
     AppConfig    cfg_;
     std::string  config_path_;
@@ -75,7 +81,8 @@ private:
     std::unordered_map<std::string, IPublisher*> publishers_;
     std::shared_ptr<FrameArchiver> frame_archiver_;
     ModelProbe model_probe_;
-    std::mutex publication_mu_;
+    ModelTest model_test_;
+    std::mutex model_check_mu_;
     mutable std::mutex mu_;
     std::unordered_map<std::string, Entry> entries_;
 };

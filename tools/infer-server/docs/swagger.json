@@ -151,6 +151,63 @@
                 }
             }
         },
+        "/models/detail/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "Describe a model, its repository version, and references",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ModelDetail"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/models/repository": {
             "get": {
                 "security": [
@@ -312,6 +369,91 @@
                         "description": "engine unreachable",
                         "schema": {
                             "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/test/{id}": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "Run single-image inference with a registered model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "One JPEG or PNG, at most 8 MiB and 4096 pixels per side",
+                        "name": "image",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ModelTestResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "Gateway Timeout",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
                     }
                 }
@@ -630,7 +772,7 @@
                         }
                     },
                     "409": {
-                        "description": "model is in use by a running task",
+                        "description": "model is in use by a pipeline or registered model",
                         "schema": {
                             "$ref": "#/definitions/infer-server.ErrorResponse"
                         }
@@ -1415,6 +1557,92 @@
                 }
             }
         },
+        "infer-server.ModelBox": {
+            "type": "object",
+            "properties": {
+                "x1": {
+                    "type": "number"
+                },
+                "x2": {
+                    "type": "number"
+                },
+                "y1": {
+                    "type": "number"
+                },
+                "y2": {
+                    "type": "number"
+                }
+            }
+        },
+        "infer-server.ModelCascadeRef": {
+            "type": "object",
+            "properties": {
+                "attribute_key": {
+                    "type": "string"
+                },
+                "crop_expand": {
+                    "type": "number"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "trigger_classes": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "infer-server.ModelDetail": {
+            "type": "object",
+            "properties": {
+                "cascade_children": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/infer-server.ModelCascadeRef"
+                    }
+                },
+                "cascade_parents": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "model": {
+                    "$ref": "#/definitions/infer-server.ModelInfo"
+                },
+                "pipelines": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/infer-server.ModelPipelineRef"
+                    }
+                },
+                "registered": {
+                    "type": "boolean"
+                },
+                "repository": {
+                    "$ref": "#/definitions/infer-server.ModelDetailRepository"
+                },
+                "repository_error": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "infer-server.ModelDetailRepository": {
+            "type": "object",
+            "properties": {
+                "version": {
+                    "type": "string"
+                },
+                "weight_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "infer-server.ModelInfo": {
             "type": "object",
             "properties": {
@@ -1553,6 +1781,96 @@
                         "v11",
                         "v26"
                     ]
+                }
+            }
+        },
+        "infer-server.ModelPipelineRef": {
+            "type": "object",
+            "properties": {
+                "cascade_nodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/infer-server.ModelPipelineTaskRef"
+                    }
+                }
+            }
+        },
+        "infer-server.ModelPipelineTaskRef": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string",
+                    "enum": [
+                        "running",
+                        "stopped"
+                    ]
+                }
+            }
+        },
+        "infer-server.ModelPrediction": {
+            "type": "object",
+            "properties": {
+                "bbox": {
+                    "$ref": "#/definitions/infer-server.ModelBox"
+                },
+                "class_id": {
+                    "type": "integer"
+                },
+                "class_name": {
+                    "type": "string"
+                },
+                "confidence": {
+                    "type": "number"
+                }
+            }
+        },
+        "infer-server.ModelTestResult": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "type": "string"
+                },
+                "conf_thresh": {
+                    "type": "number"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "model_type": {
+                    "type": "string"
+                },
+                "nms_thresh": {
+                    "type": "number"
+                },
+                "preview_jpeg": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/infer-server.ModelPrediction"
+                    }
+                },
+                "width": {
+                    "type": "integer"
                 }
             }
         },

@@ -447,3 +447,7 @@ if(BUILD_GRPC_PUBLISHER)
     add_test(NAME test_grpc_publisher COMMAND test_grpc_publisher
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 endif()
+
+add_executable(test_model_preview test_model_preview.cpp)
+target_link_libraries(test_model_preview PRIVATE infer_core GTest::gtest_main)
+add_test(NAME test_model_preview COMMAND test_model_preview)

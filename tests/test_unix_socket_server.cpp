@@ -8,6 +8,9 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cerrno>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -57,6 +60,13 @@ struct FakeTaskManager : ITaskManager {
     std::vector<SourceInfo>      sources;
     std::vector<PipelineInfo>    pipelines;
     std::vector<ModelInfo>       models;
+    size_t test_reply_bytes{0};
+
+    nlohmann::json testModel(const std::string& id, const std::string& image) override {
+        return {{"status", "ok"}, {"data", {{"id", id}, {"bytes", image.size()},
+                                          {"preview", std::string(test_reply_bytes, 'A')}}}};
+    }
+
     bool start_result{true};
     bool stop_result{true};
 
@@ -88,7 +98,11 @@ struct FakeTaskManager : ITaskManager {
     bool updateTask(const TaskConfig&)           override { return update_task_result; }
     bool removeTask(const std::string&)          override { return remove_task_result; }
     bool loadModel(const ModelConfig&)           override { return load_model_result; }
-    bool unloadModel(const std::string&)         override { return unload_model_result; }
+    UnregisterResult unloadModel(const std::string& id) override {
+        if (std::none_of(models.begin(), models.end(), [&](const auto& model) { return model.id == id; }))
+            return UnregisterResult::NotFound;
+        return unload_model_result ? UnregisterResult::Removed : UnregisterResult::InUse;
+    }
 
     std::vector<RepositoryModelInfo> listRepositoryModels() const override { return {}; }
     bool loadFromRepository(const std::string&) override { return true; }
@@ -118,15 +132,29 @@ protected:
         ::strncpy(addr.sun_path, path_.c_str(), sizeof(addr.sun_path) - 1);
         ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
 
-        std::string msg = req.dump() + "\n";
-        ::send(fd, msg.data(), msg.size(), 0);
+        const std::string message = req.dump() + "\n";
+        size_t sent = 0;
+        while (sent < message.size()) {
+            const auto n = ::send(fd, message.data() + sent,
+                                  std::min<size_t>(1024, message.size() - sent), 0);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) {
+                ::close(fd);
+                throw std::runtime_error("could not send test request");
+            }
+            sent += static_cast<size_t>(n);
+        }
 
-        std::string buf(4096, '\0');
-        ssize_t n = ::recv(fd, buf.data(), buf.size(), 0);
+        std::string response;
+        char buffer[4096];
+        while (true) {
+            const auto n = ::recv(fd, buffer, sizeof(buffer), 0);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) break;
+            response.append(buffer, static_cast<size_t>(n));
+        }
         ::close(fd);
-
-        buf.resize(n > 0 ? static_cast<size_t>(n) : 0);
-        return json::parse(buf);
+        return json::parse(response);
     }
 
     std::string path_;
@@ -139,6 +167,20 @@ protected:
 TEST_F(UnixSocketServerTest, HealthReturnsOk) {
     auto resp = roundtrip({{"cmd", "health"}});
     EXPECT_EQ(resp["status"], "ok");
+}
+
+TEST_F(UnixSocketServerTest, SingleImageCommandHandlesFragmentedRequestAndLargeResponse) {
+    constexpr size_t request_bytes = 256 * 1024;
+    fake_tm_.test_reply_bytes = 512 * 1024;
+    const auto response = roundtrip({{"cmd", "test_model"}, {"id", "sample"},
+                                     {"image", std::string(request_bytes, 'B')}});
+    EXPECT_EQ(response["status"], "ok");
+    EXPECT_EQ(response["data"]["id"], "sample");
+    EXPECT_EQ(response["data"]["bytes"], request_bytes);
+    EXPECT_EQ(response["data"]["preview"].get_ref<const std::string&>().size(), fake_tm_.test_reply_bytes);
+
+    const auto bad_request = roundtrip({{"cmd", "test_model"}, {"id", "sample"}});
+    EXPECT_EQ(bad_request["code"], "invalid_image");
 }
 
 TEST_F(UnixSocketServerTest, ListTasksEmpty) {

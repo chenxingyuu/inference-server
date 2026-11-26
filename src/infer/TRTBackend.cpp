@@ -7,7 +7,9 @@
 
 #include <NvInfer.h>
 #include <cuda_runtime_api.h>
+#include <algorithm>
 #include <chrono>
+#include <limits>
 #include <fstream>
 #include <stdexcept>
 #include <opencv2/imgproc.hpp>
@@ -16,12 +18,6 @@
 namespace infer {
 
 namespace {
-int yoloAnchorCount(int h, int w) {
-    return (h / 8) * (w / 8) +
-           (h / 16) * (w / 16) +
-           (h / 32) * (w / 32);
-}
-
 class TRTLogger : public nvinfer1::ILogger {
     void log(Severity severity, const char* msg) noexcept override {
         if (severity <= Severity::kWARNING)
@@ -51,7 +47,6 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
     max_batch_size_ = cfg.batch_size;
     input_h_        = cfg.input_shape.height;
     input_w_        = cfg.input_shape.width;
-    num_classes_    = cfg.num_classes;
     if (input_h_ <= 0 || input_w_ <= 0 || input_h_ > 4096 || input_w_ > 4096) {
         throw std::runtime_error("TRTBackend: input resolution must be in range (0, 4096]");
     }
@@ -106,10 +101,31 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
     input_shape_dynamic_ = hasDynamicDims(in_dims.nbDims, in_dims.d);
     LOG_DEBUG("TRTBackend: input shape dynamic={} nbDims={}", input_shape_dynamic_, in_dims.nbDims);
 
-    // Pre-compute buffer sizes
-    input_bytes_  = max_batch_size_ * 3 * input_h_ * input_w_ * sizeof(float);
-    const int anchors = yoloAnchorCount(input_h_, input_w_);
-    output_bytes_ = max_batch_size_ * (4 + num_classes_) * anchors * sizeof(float);
+    if (io_tensors != 2 || in_dims.nbDims != 4 ||
+        engine_->getTensorDataType(input_tensor_name_.c_str()) != nvinfer1::DataType::kFLOAT ||
+        engine_->getTensorDataType(output_tensor_name_.c_str()) != nvinfer1::DataType::kFLOAT ||
+        engine_->getTensorFormat(input_tensor_name_.c_str()) != nvinfer1::TensorFormat::kLINEAR ||
+        engine_->getTensorFormat(output_tensor_name_.c_str()) != nvinfer1::TensorFormat::kLINEAR ||
+        engine_->getTensorLocation(input_tensor_name_.c_str()) != nvinfer1::TensorLocation::kDEVICE ||
+        engine_->getTensorLocation(output_tensor_name_.c_str()) != nvinfer1::TensorLocation::kDEVICE)
+        throw std::invalid_argument("TensorRT model must have one linear FP32 input and output");
+
+    const auto min_shape = input_shape_dynamic_
+        ? engine_->getProfileShape(input_tensor_name_.c_str(), 0, nvinfer1::OptProfileSelector::kMIN) : in_dims;
+    const auto max_shape = input_shape_dynamic_
+        ? engine_->getProfileShape(input_tensor_name_.c_str(), 0, nvinfer1::OptProfileSelector::kMAX) : in_dims;
+    if (min_shape.nbDims != 4 || max_shape.nbDims != 4 || min_shape.d[0] < 1 ||
+        max_shape.d[0] < min_shape.d[0] || max_shape.d[0] > std::numeric_limits<int>::max()) {
+        throw std::invalid_argument("TensorRT model has an invalid batch profile");
+    }
+    min_batch_size_ = static_cast<int>(min_shape.d[0]);
+    max_batch_size_ = std::clamp(max_batch_size_, min_batch_size_, static_cast<int>(max_shape.d[0]));
+
+    const size_t frame_bytes = static_cast<size_t>(3) * input_h_ * input_w_ * sizeof(float);
+    if (static_cast<size_t>(max_batch_size_) > std::numeric_limits<size_t>::max() / frame_bytes)
+        throw std::runtime_error("TensorRT input is too large");
+    input_bytes_ = static_cast<size_t>(max_batch_size_) * frame_bytes;
+    output_bytes_ = resolveOutputBytes(max_batch_size_);
 
     // Initialize pre-allocated GPU buffer pool (Phase 7a-2)
     const int pool_size = (cfg.buffer_pool_size > 0) ? cfg.buffer_pool_size : 4;
@@ -117,7 +133,6 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
 
     // CPU-path staging buffers
     input_staging_.resize(input_bytes_ / sizeof(float));
-    output_staging_.resize(output_bytes_ / sizeof(float));
 
     // Two CUDA streams for the async double-buffered pipeline (Phase 7a-1).
     // preprocess_stream_: NV12→CHW kernel
@@ -133,6 +148,31 @@ void TRTBackend::loadModel(const ModelConfig& cfg) {
     loaded_ = true;
     LOG_INFO("TRTBackend: loaded engine={} device={} batch={} input={}x{}x{}x{} pool={}",
              cfg.engine_path, device_id_, max_batch_size_, max_batch_size_, 3, input_h_, input_w_, pool_size);
+}
+
+size_t TRTBackend::resolveOutputBytes(int batch_size) {
+    const nvinfer1::Dims4 shape{batch_size, 3, input_h_, input_w_};
+    if (!context_->setInputShape(input_tensor_name_.c_str(), shape)) {
+        throw std::invalid_argument("TensorRT model does not accept the configured input shape");
+    }
+    const auto output_shape = context_->getTensorShape(output_tensor_name_.c_str());
+    size_t bytes = sizeof(float);
+    if (output_shape.nbDims < 1)
+        throw std::invalid_argument("TensorRT output shape could not be resolved");
+    for (int i = 0; i < output_shape.nbDims; ++i) {
+        const auto dimension = output_shape.d[i];
+        if (dimension < 1 || static_cast<size_t>(dimension) > std::numeric_limits<size_t>::max() / bytes)
+            throw std::invalid_argument("TensorRT output shape is unsupported");
+        bytes *= static_cast<size_t>(dimension);
+    }
+    return bytes;
+}
+
+void TRTBackend::bindTensors(PooledBuffer* slot) {
+    if (!context_->setTensorAddress(input_tensor_name_.c_str(), slot->input_device) ||
+        !context_->setTensorAddress(output_tensor_name_.c_str(), slot->output_device)) {
+        throw std::runtime_error("TensorRT could not bind inference buffers");
+    }
 }
 
 void TRTBackend::preprocessCPU(const Batch& input, float* dst,
@@ -190,6 +230,9 @@ void TRTBackend::inferGPU(const Batch& input, std::vector<float>& output) {
             "TRTBackend: gpu_frames.size() != metas.size() — heterogeneous batch");
     }
 
+    const auto out_bytes = resolveOutputBytes(bs);
+    if (out_bytes > output_bytes_) throw std::runtime_error("TensorRT output exceeds the allocated buffer");
+
     // Acquire a pre-allocated buffer slot from the pool (Phase 7a-2).
     PooledBuffer* slot = buffer_pool_.acquire();
     if (!slot) {
@@ -205,26 +248,11 @@ void TRTBackend::inferGPU(const Batch& input, std::vector<float>& output) {
         // setup work while infer_stream_ is scheduling TRT work.
         CUDA_CHECK(cudaStreamWaitEvent(infer_stream_, preprocess_done_, 0));
 
-        // Always set input shape: no-op on static engines, required for dynamic.
-        context_->setInputShape(input_tensor_name_.c_str(),
-                                nvinfer1::Dims4{bs, 3, input_h_, input_w_});
+        bindTensors(slot);
+        if (!context_->enqueueV3(infer_stream_))
+            throw std::runtime_error("TensorRT inference failed (GPU path)");
 
-        // Use enqueueV3 (TRT 8.5+) for full async dispatch on infer_stream_.
-        // Falls back to executeV2 if enqueueV3 is not available at link time.
-#if NV_TENSORRT_MAJOR >= 8 && NV_TENSORRT_MINOR >= 5
-        context_->setTensorAddress(input_tensor_name_.c_str(), slot->input_device);
-        context_->setTensorAddress(output_tensor_name_.c_str(), slot->output_device);
-        bool ok = context_->enqueueV3(infer_stream_);
-        if (!ok) throw std::runtime_error("TRTBackend: enqueueV3 failed");
-#else
-        void* bindings[2] = {slot->input_device, slot->output_device};
-        bool ok = context_->executeV2(bindings);
-        if (!ok) throw std::runtime_error("TRTBackend: executeV2 failed (GPU path)");
-#endif
-
-        // Stage 3: async D2H copy on infer_stream_ (follows inference in stream order).
-        const int anchors = yoloAnchorCount(input_h_, input_w_);
-        size_t out_bytes = bs * (4 + num_classes_) * anchors * sizeof(float);
+        // Copy the actual output tensor back on the inference stream.
         output.resize(out_bytes / sizeof(float));
         CUDA_CHECK(cudaMemcpyAsync(output.data(), slot->output_device,
                                    out_bytes, cudaMemcpyDeviceToHost, infer_stream_));
@@ -244,8 +272,8 @@ void TRTBackend::inferGPU(const Batch& input, std::vector<float>& output) {
 void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
     if (!loaded_) throw std::runtime_error("TRTBackend: model not loaded");
     const int bs = input.size();
-    if (bs > max_batch_size_) {
-        throw std::runtime_error("TRTBackend: batch size exceeds max");
+    if (bs < min_batch_size_ || bs > max_batch_size_) {
+        throw std::runtime_error("TRTBackend: batch size is outside the engine profile");
     }
 
     CUDA_CHECK(cudaSetDevice(device_id_));
@@ -258,6 +286,11 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
         checkInferTimeout(infer_start);
         return;
     }
+
+    if (input.frames.size() != static_cast<size_t>(bs))
+        throw std::runtime_error("TRTBackend: CPU frames do not match the batch");
+    const auto out_bytes = resolveOutputBytes(bs);
+    if (out_bytes > output_bytes_) throw std::runtime_error("TensorRT output exceeds the allocated buffer");
 
     // CPU path: host preprocessing → H2D → inference → D2H (synchronous)
     LOG_WARN("TRTBackend: using CPU preprocess path (is_gpu=false, hwdec not active) bs={}", bs);
@@ -277,17 +310,11 @@ void TRTBackend::infer(const Batch& input, std::vector<float>& output) {
         CUDA_CHECK(cudaMemcpy(slot->input_device, input_staging_.data(),
                               in_bytes, cudaMemcpyHostToDevice));
 
-        // Always set input shape: no-op on static engines, required for dynamic.
-        context_->setInputShape(input_tensor_name_.c_str(),
-                                nvinfer1::Dims4{bs, 3, input_h_, input_w_});
-        context_->setTensorAddress(input_tensor_name_.c_str(),  slot->input_device);
-        context_->setTensorAddress(output_tensor_name_.c_str(), slot->output_device);
-        void* bindings[2] = {slot->input_device, slot->output_device};
-        bool ok = context_->executeV2(bindings);
-        if (!ok) throw std::runtime_error("TRTBackend: executeV2 failed");
+        bindTensors(slot);
+        if (!context_->enqueueV3(infer_stream_))
+            throw std::runtime_error("TensorRT inference failed (CPU input)");
+        CUDA_CHECK(cudaStreamSynchronize(infer_stream_));
 
-        const int anchors = yoloAnchorCount(input_h_, input_w_);
-        size_t out_bytes = bs * (4 + num_classes_) * anchors * sizeof(float);
         output.resize(out_bytes / sizeof(float));
         CUDA_CHECK(cudaMemcpy(output.data(), slot->output_device,
                               out_bytes, cudaMemcpyDeviceToHost));

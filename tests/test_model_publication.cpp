@@ -7,6 +7,7 @@
 #include <fstream>
 #include <future>
 #include <stdexcept>
+#include <unistd.h>
 
 namespace infer {
 namespace {
@@ -191,6 +192,115 @@ TEST_F(ModelPublicationTest, ConcurrentUploadsCannotOverwriteSameModel) {
     EXPECT_TRUE(first.get().code.empty());
     EXPECT_EQ(tm->publishModel("vehicle", kOtherToken, kAttempt).code, "already_exists");
     EXPECT_EQ(tm->listModels().size(), 1u);
+}
+
+TEST_F(ModelPublicationTest, DetailsSeparateRepositoryVersionFromRegisteredConfig) {
+    auto tm = manager({});
+    fs::rename(stage("vehicle"), root_ / "vehicle");
+
+    const auto repo_only = tm->describeModel("vehicle");
+    ASSERT_TRUE(repo_only.model);
+    EXPECT_FALSE(repo_only.registered);
+    EXPECT_EQ(repo_only.repository.version, "1");
+    EXPECT_EQ(repo_only.repository.weight_paths, std::vector<std::string>{"weight.onnx"});
+
+    ASSERT_TRUE(tm->loadFromRepository("vehicle"));
+    EXPECT_TRUE(tm->describeModel("vehicle").registered);
+    ASSERT_EQ(tm->unloadModel("vehicle"), ITaskManager::UnregisterResult::Removed);
+    EXPECT_FALSE(tm->describeModel("vehicle").registered);
+    EXPECT_TRUE(fs::exists(root_ / "vehicle" / "1" / "weight.onnx"));
+
+    ModelConfig config_only;
+    config_only.id = "config_only";
+    ASSERT_TRUE(tm->loadModel(config_only));
+    EXPECT_TRUE(tm->describeModel("config_only").registered);
+    EXPECT_EQ(tm->describeModel("config_only").repository.code, "model_not_found");
+    EXPECT_FALSE(tm->describeModel("unknown").model);
+}
+
+TEST_F(ModelPublicationTest, DetailsCanDescribeRepositoryModelWhenExportIsUnavailable) {
+    auto tm = manager({});
+    fs::create_directory_symlink(stage("linked"), root_ / "linked");
+    const auto detail = tm->describeModel("linked");
+    ASSERT_TRUE(detail.model);
+    EXPECT_EQ(detail.model->id, "linked");
+    EXPECT_FALSE(detail.registered);
+    EXPECT_EQ(detail.repository.code, "model_not_exportable");
+}
+
+TEST_F(ModelPublicationTest, ReferencesProtectStoppedTasksAndCascadeChildren) {
+    AppConfig config;
+    ModelConfig child;
+    child.id = "child";
+    ModelConfig parent;
+    parent.id = "parent";
+    parent.cascade.push_back({"child", {1}, 0.f, "color"});
+    config.models = {child, parent};
+    config.pipelines = {{"pipeline", {
+        {"first", "infer.engine", {{"model_id", "parent"}}},
+        {"second", "infer.engine", {{"model_id", "child"}}},
+        {"third", "infer.engine", {{"model_id", "child"}}},
+    }, {}}};
+    config.tasks.push_back({"stopped", "source", "pipeline"});
+    TaskManager tm(config, configPath(), {}, nullptr);
+
+    const auto detail = tm.describeModel("child");
+    EXPECT_EQ(detail.references.cascade_parents, std::vector<std::string>{"parent"});
+    const auto& refs = detail.references.pipelines.at("pipeline");
+    EXPECT_EQ(refs.direct_nodes, (std::vector<std::string>{"second", "third"}));
+    EXPECT_EQ(refs.cascade_nodes, std::vector<std::string>{"first"});
+    EXPECT_EQ(detail.tasks_by_pipeline.at("pipeline"), (std::vector<std::pair<std::string, bool>>{{"stopped", false}}));
+    EXPECT_EQ(tm.unloadModel("child"), ITaskManager::UnregisterResult::InUse);
+    EXPECT_EQ(tm.unloadModel("parent"), ITaskManager::UnregisterResult::InUse);
+}
+
+TEST_F(ModelPublicationTest, RetiredModelCannotAcquireNewReferences) {
+    auto tm = manager({});
+    ModelConfig child;
+    child.id = "child";
+    ASSERT_TRUE(tm->loadModel(child));
+    ASSERT_EQ(tm->unloadModel("child"), ITaskManager::UnregisterResult::Removed);
+
+    PipelineConfig pipeline{"new", {{"node", "infer.engine", {{"model_id", "child"}}}}, {}};
+    EXPECT_FALSE(tm->addPipeline(pipeline));
+    ASSERT_TRUE(tm->addPipeline({"editable", {}, {}}));
+    pipeline.id = "editable";
+    EXPECT_FALSE(tm->updatePipeline(pipeline));
+
+    ModelConfig parent;
+    parent.id = "parent";
+    parent.cascade.push_back({"child", {}, 0.f, "attr"});
+    EXPECT_FALSE(tm->loadModel(parent));
+    ASSERT_TRUE(tm->loadModel(child));
+    EXPECT_TRUE(tm->updatePipeline(pipeline));
+    EXPECT_TRUE(tm->loadModel(parent));
+    EXPECT_EQ(tm->unloadModel("child"), ITaskManager::UnregisterResult::InUse);
+}
+
+TEST_F(ModelPublicationTest, PreviewUsesRegisteredSnapshotAndRejectsConcurrentChecks) {
+    auto config = loadConfig(configPath());
+    std::promise<void> entered;
+    std::promise<void> release;
+    auto entered_future = entered.get_future();
+    auto release_future = release.get_future();
+    TaskManager tm(config, configPath(), {}, nullptr, [](const auto&) {},
+                   [&](const ModelConfig& model, const std::string& image) {
+                       EXPECT_EQ(model.id, "active");
+                       EXPECT_EQ(image, "sample");
+                       entered.set_value();
+                       release_future.wait();
+                       return nlohmann::json{{"status", "ok"}};
+                   });
+    auto model = ModelConfig{};
+    model.id = "active";
+    ASSERT_TRUE(tm.loadModel(model));
+    EXPECT_EQ(tm.testModel("missing", "sample")["code"], "model_not_registered");
+    auto test = std::async(std::launch::async, [&] { return tm.testModel("active", "sample"); });
+    entered_future.wait();
+    EXPECT_EQ(tm.testModel("active", "sample")["code"], "model_test_busy");
+    EXPECT_EQ(tm.publishModel("unrelated", kToken, kAttempt).code, "publish_busy");
+    release.set_value();
+    EXPECT_EQ(test.get()["status"], "ok");
 }
 
 } // namespace

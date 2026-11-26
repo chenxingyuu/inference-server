@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/Config.h"
+#include <nlohmann/json.hpp>
 
 #include <string>
 #include <utility>
@@ -64,6 +65,27 @@ struct RepositoryModelInfo {
     bool        loaded{false};
 };
 
+struct PipelineModelReferences {
+    std::vector<std::string> direct_nodes;
+    std::vector<std::string> cascade_nodes;
+};
+
+struct ModelReferences {
+    std::map<std::string, PipelineModelReferences> pipelines;
+    std::vector<std::string> cascade_parents;
+
+    bool empty() const { return pipelines.empty() && cascade_parents.empty(); }
+};
+
+struct ModelDetail {
+    std::optional<ModelInfo> model;
+    bool registered{false};
+    RepositoryModelExport repository;
+    ModelReferences references;
+    std::vector<CascadeConfig> cascade_children;
+    std::map<std::string, std::vector<std::pair<std::string, bool>>> tasks_by_pipeline;
+};
+
 struct ModelPublishResult {
     std::string code;
     std::string message;
@@ -72,6 +94,7 @@ struct ModelPublishResult {
 class ITaskManager {
 public:
     enum class State { Stopped, Running };
+    enum class UnregisterResult { Removed, NotFound, InUse };
 
     struct TaskRuntimeInfo {
         TaskConfig config;
@@ -99,7 +122,12 @@ public:
     virtual bool removeTask(const std::string& id) = 0;
 
     virtual bool loadModel(const ModelConfig& model) = 0;
-    virtual bool unloadModel(const std::string& id) = 0;
+    virtual UnregisterResult unloadModel(const std::string& id) = 0;
+    virtual ModelDetail describeModel(const std::string&) const { return {}; }
+    virtual nlohmann::json testModel(const std::string&, const std::string&) {
+        return {{"status", "error"}, {"code", "model_test_unavailable"},
+                {"message", "model testing is unavailable"}};
+    }
 
     // Repository operations — require model_repository to be configured.
     // Returns empty vector if repository path is unset or unreadable.

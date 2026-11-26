@@ -13,6 +13,7 @@
 #endif
 #include "server/UnixSocketServer.h"
 #include "server/ModelProbe.h"
+#include "server/ModelTest.h"
 #include "archive/FrameArchiver.h"
 #include "archive/FrameRetentionGc.h"
 #include <csignal>
@@ -85,6 +86,10 @@ int main(int argc, char* argv[]) {
         infer::initLogger("warning");
         return infer::runModelProbe(argv[2]);
     }
+    if (argc == 3 && std::string(argv[1]) == "--test-model") {
+        infer::initLogger("warning");
+        return infer::runModelTest(argv[2]);
+    }
     const std::string config_path = (argc > 1) ? argv[1] : "/config/config.yaml";
 
     // ── Init logging ──────────────────────────────────────────────────────────
@@ -144,6 +149,9 @@ int main(int argc, char* argv[]) {
         std::move(cfg), config_path, std::move(publisher_registry), frame_archiver,
         [executable = std::string(argv[0])](const auto& dir) {
             infer::probeModelInChild(executable, dir);
+        },
+        [executable = std::string(argv[0])](const auto& model, const auto& image) {
+            return infer::testModelInChild(executable, model, image);
         });
     task_manager.loadAll();
     task_manager.startAll();

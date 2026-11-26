@@ -548,7 +548,8 @@ ModelConfig loadRepositoryModel(const fs::path& model_dir) {
     return resolveRepositoryModel(model_dir);
 }
 
-RepositoryModelExport describeRepositoryModelExport(const std::string& root, const std::string& id) {
+RepositoryModelExport describeRepositoryModelExport(
+        const std::string& root, const std::string& id, ModelConfig* resolved_model) {
     RepositoryModelExport result;
     auto fail = [](const char* code, const char* message) {
         return RepositoryModelExport{code, message, {}, {}, {}, {}};
@@ -620,6 +621,7 @@ RepositoryModelExport describeRepositoryModelExport(const std::string& root, con
 
         result.config_yaml = std::move(source.config_yaml);
         result.overrides_yaml = YAML::Dump(overrides);
+        if (resolved_model) *resolved_model = model;
         return result;
     } catch (const std::exception&) {
         return fail("model_not_exportable", "could not resolve exportable weights and config from the active version");

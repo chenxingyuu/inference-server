@@ -22,6 +22,7 @@ public:
     // Release GPU/NPU resources
     virtual void unloadModel() = 0;
 
+    virtual int          minBatchSize() const { return 1; }
     virtual int          maxBatchSize() const = 0;
     virtual DeviceType   deviceType()   const = 0;
     virtual bool         isLoaded()     const = 0;
