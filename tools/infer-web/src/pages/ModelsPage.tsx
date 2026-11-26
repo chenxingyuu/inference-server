@@ -1,10 +1,11 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { useModels, useUnloadModel, useRepositoryModels, useLoadFromRepository } from '../hooks/queries'
 import { ModelUploadModal } from '../components/ModelUploadModal'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
 import { useT } from '../lib/i18n'
 import { api } from '../lib/api'
+import type { ModelInfo, RepositoryModel } from '../types'
 
 function Tag({ children }: { children: string }) {
   return (
@@ -14,17 +15,15 @@ function Tag({ children }: { children: string }) {
   )
 }
 
-function StatusBadge({ loaded }: { loaded: boolean }) {
+function StatusBadge({ registered }: { registered: boolean | undefined }) {
   const { t } = useT()
-  return loaded ? (
-    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success">
-      <span className="w-1.5 h-1.5 rounded-full bg-success inline-block" />
-      {t('models.status.loaded')}
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-muted">
-      <span className="w-1.5 h-1.5 rounded-full bg-ink-muted/40 inline-block" />
-      {t('models.status.available')}
+  const label = registered === undefined ? 'models.status.unknown'
+    : registered ? 'models.status.registered' : 'models.status.unregistered'
+
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-medium ${registered ? 'text-success' : 'text-ink-muted'}`}>
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+      {t(label)}
     </span>
   )
 }
@@ -49,17 +48,27 @@ function formatThreshold(value?: number) {
 }
 
 export function ModelsPage() {
-  const { data: models = [], isLoading, refetch: refetchModels } = useModels()
-  const { data: repoModels = [], isLoading: repoLoading, refetch: refetchRepo } = useRepositoryModels()
-  const unload = useUnloadModel()
-  const loadFromRepo = useLoadFromRepository()
+  const { data: registeredModels, isLoading: modelsLoading, isError: modelsError, refetch: refetchModels } = useModels()
+  const { data: repositoryModels, isLoading: repoLoading, isError: repoError, refetch: refetchRepo } = useRepositoryModels()
+  const unregister = useUnloadModel()
+  const register = useLoadFromRepository()
   const { t } = useT()
 
   const [uploadOpen, setUploadOpen] = useState(false)
-  const [expandedLoaded, setExpandedLoaded] = useState<string | null>(null)
-  const [expandedRepo, setExpandedRepo] = useState<string | null>(null)
+  const [expandedID, setExpandedID] = useState<string | null>(null)
   const [exportingID, setExportingID] = useState<string | null>(null)
-  const repoById = useMemo(() => new Map(repoModels.map((m) => [m.id, m])), [repoModels])
+  const modelsByID = new Map<string, { registered?: ModelInfo; repository?: RepositoryModel }>()
+  for (const model of registeredModels ?? []) {
+    modelsByID.set(model.id, { registered: model })
+  }
+  for (const model of repositoryModels ?? []) {
+    modelsByID.set(model.id, { ...modelsByID.get(model.id), repository: model })
+  }
+  const rows = Array.from(modelsByID).sort(([firstID], [secondID]) => firstID.localeCompare(secondID))
+
+  const isLoading = modelsLoading || repoLoading
+  const hasListError = modelsError || repoError
+  const registrationPending = register.isPending || unregister.isPending
 
   async function exportModel(id: string) {
     setExportingID(id)
@@ -84,7 +93,6 @@ export function ModelsPage() {
     <div>
       <PageHeader
         title={t('models.title')}
-        subtitle={t('models.subtitle')}
         action={
           <button onClick={() => setUploadOpen(true)} className="btn-primary">
             {t('models.upload')}
@@ -92,98 +100,10 @@ export function ModelsPage() {
         }
       />
 
-      {/* Loaded Models */}
       <div className="section">
-        <div className="card overflow-hidden">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t('common.id')}</th>
-                <th>{t('models.col.backend')}</th>
-                <th>{t('models.col.version')}</th>
-                <th>{t('models.col.summary')}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && <LoadingRows cols={5} />}
-              {!isLoading && models.length === 0 && (
-                <EmptyState message={t('models.empty')} />
-              )}
-              {models.map((m) => {
-                const repo = repoById.get(m.id)
-                const modelType = m.model_type ?? repo?.model_type
-                const numClasses = m.num_classes ?? repo?.num_classes
-                const confThresh = m.conf_thresh ?? repo?.conf_thresh
-                const nmsThresh = m.nms_thresh ?? repo?.nms_thresh
-                const batchSize = m.batch_size ?? repo?.batch_size
-                const instanceCount = m.instance_count ?? repo?.instance_count
-
-                return (
-                  <Fragment key={m.id}>
-                    <tr
-                      className="cursor-pointer"
-                      onClick={() => setExpandedLoaded(expandedLoaded === m.id ? null : m.id)}
-                    >
-                      <td className="font-mono text-[12px] text-ink-primary font-medium">
-                        <span className="mr-2 text-ink-muted">{expandedLoaded === m.id ? '▼' : '▶'}</span>
-                        {m.id}
-                      </td>
-                      <td><Tag>{m.backend || repo?.backend || '—'}</Tag></td>
-                      <td><Tag>{m.version || repo?.version || '—'}</Tag></td>
-                      <td className="font-mono text-[12px] text-ink-secondary">
-                        {modelType ? `${modelType} · ` : ''}
-                        {m.input_shape || '—'}
-                        <span className="text-ink-muted">
-                          {' · '}
-                          {t('models.col.batch')} {batchSize}
-                          {' · '}
-                          {t('models.col.instances')} {instanceCount}
-                        </span>
-                      </td>
-                      <td className="text-right pr-2" onClick={(e) => e.stopPropagation()}>
-                        <DeleteButton
-                          loading={unload.isPending}
-                          onClick={() => unload.mutate(m.id)}
-                        />
-                      </td>
-                    </tr>
-                    {expandedLoaded === m.id && (
-                      <tr>
-                        <td colSpan={5} className="bg-bg-overlay px-6 py-3">
-                          <div className="label mb-2">{t('models.section.details')}</div>
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                            <DetailItem label={t('models.field.model_type')} value={modelType} />
-                            <DetailItem label={t('models.col.input_shape')} value={m.input_shape} />
-                            <DetailItem label={t('models.field.batch_size')} value={batchSize} />
-                            <DetailItem label={t('models.field.instances')} value={instanceCount} />
-                            <DetailItem label={t('models.field.num_classes')} value={numClasses} />
-                            <DetailItem label={t('models.field.conf_thresh')} value={formatThreshold(confThresh)} />
-                            <DetailItem label={t('models.field.nms_thresh')} value={formatThreshold(nmsThresh)} />
-                            <DetailItem label={t('models.field.device_id')} value={m.device_id} />
-                            <DetailItem label={t('models.field.preferred_batch_sizes')} value={formatList(m.preferred_batch_sizes)} />
-                            <DetailItem label={t('models.field.max_queue_delay_us')} value={m.max_queue_delay_us} />
-                            <DetailItem label={t('models.field.class_names')} value={formatList(m.class_names)} />
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Model Repository */}
-      <div className="section">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-sm font-semibold text-ink-primary">{t('models.repo_title')}</h2>
-            <p className="text-xs text-ink-muted mt-0.5">{t('models.repo_subtitle')}</p>
-          </div>
-        </div>
+        {hasListError && (
+          <p className="mb-3 text-xs text-danger" role="alert">{t('models.list_error')}</p>
+        )}
         <div className="card overflow-x-auto">
           <table className="data-table">
             <thead>
@@ -192,84 +112,123 @@ export function ModelsPage() {
                 <th>{t('models.col.backend')}</th>
                 <th>{t('models.col.version')}</th>
                 <th>{t('common.state')}</th>
-                <th />
+                <th>{t('models.col.summary')}</th>
+                <th className="text-right">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
-              {repoLoading && <LoadingRows cols={5} />}
-              {!repoLoading && repoModels.length === 0 && (
-                <EmptyState message={t('models.repo_empty')} />
+              {isLoading && <LoadingRows cols={6} />}
+              {!isLoading && !hasListError && rows.length === 0 && (
+                <EmptyState message={t('models.empty')} />
               )}
-              {repoModels.map((m) => (
-                <Fragment key={m.id}>
-                  <tr
-                    className="cursor-pointer"
-                    onClick={() => setExpandedRepo(expandedRepo === m.id ? null : m.id)}
-                  >
-                    <td className="font-mono text-[12px] text-ink-primary font-medium">
-                      <span className="mr-2 text-ink-muted">{expandedRepo === m.id ? '▼' : '▶'}</span>
-                      {m.id}
-                    </td>
-                    <td><Tag>{m.backend}</Tag></td>
-                    <td><Tag>{m.version}</Tag></td>
-                    <td><StatusBadge loaded={m.loaded} /></td>
-                    <td className="w-px" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-3 whitespace-nowrap">
-                        {!m.loaded && (
-                          <button
-                            onClick={() => loadFromRepo.mutate(m.id)}
-                            disabled={loadFromRepo.isPending}
-                            className="text-xs text-accent hover:underline disabled:opacity-50"
-                          >
-                            {loadFromRepo.isPending ? t('models.repo_loading') : t('models.repo_load')}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => void exportModel(m.id)}
-                          disabled={exportingID !== null}
-                          aria-busy={exportingID === m.id}
-                          className="btn-ghost px-2 py-1 text-xs enabled:hover:bg-bg-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent aria-busy:disabled:cursor-wait aria-busy:disabled:opacity-100 disabled:active:scale-100"
-                        >
-                          {exportingID === m.id ? (
-                            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin">
-                              <circle cx="8" cy="8" r="5.5" opacity=".25" />
-                              <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" />
-                            </svg>
-                          ) : (
-                            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
-                              <path d="M8 2v8m-3-3 3 3 3-3M2.5 11v2.5h11V11" />
-                            </svg>
-                          )}
-                          <span className="grid text-center">
-                            <span className={exportingID === m.id ? 'invisible col-start-1 row-start-1' : 'col-start-1 row-start-1'}>
-                              {t('models.repo_export')}
-                            </span>
-                            {exportingID === m.id && (
-                              <span className="col-start-1 row-start-1">{t('models.repo_exporting')}</span>
-                            )}
-                          </span>
+              {!isLoading && rows.map(([id, { registered, repository }]) => {
+                const isRegistered = registeredModels === undefined ? undefined : !!registered
+                const expanded = expandedID === id
+                const modelType = registered?.model_type ?? repository?.model_type
+                const batchSize = registered?.batch_size ?? repository?.batch_size
+                const instanceCount = registered?.instance_count ?? repository?.instance_count
+                const summary = [
+                  modelType,
+                  registered?.input_shape,
+                  batchSize === undefined ? undefined : `${t('models.col.batch')} ${batchSize}`,
+                  instanceCount === undefined ? undefined : `${t('models.col.instances')} ${instanceCount}`,
+                ].filter(Boolean).join(' · ')
+
+                return (
+                  <Fragment key={id}>
+                    <tr className="cursor-pointer" onClick={() => setExpandedID(expanded ? null : id)}>
+                      <td className="font-mono text-[12px] font-medium text-ink-primary">
+                        <button type="button" aria-expanded={expanded} className="rounded text-left hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+                          <span aria-hidden="true" className="mr-2 text-ink-muted">{expanded ? '▼' : '▶'}</span>
+                          {id}
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                  {expandedRepo === m.id && (
-                    <tr>
-                      <td colSpan={5} className="bg-bg-overlay px-6 py-3">
-                        <div className="label mb-2">{t('models.section.details')}</div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                          <DetailItem label={t('models.field.model_type')} value={m.model_type} />
-                          <DetailItem label={t('models.field.batch_size')} value={m.batch_size} />
-                          <DetailItem label={t('models.field.instances')} value={m.instance_count} />
-                          <DetailItem label={t('models.field.num_classes')} value={m.num_classes} />
-                          <DetailItem label={t('models.field.conf_thresh')} value={formatThreshold(m.conf_thresh)} />
-                          <DetailItem label={t('models.field.nms_thresh')} value={formatThreshold(m.nms_thresh)} />
+                      </td>
+                      <td><Tag>{registered?.backend || repository?.backend || '—'}</Tag></td>
+                      <td><Tag>{registered?.version || repository?.version || '—'}</Tag></td>
+                      <td><StatusBadge registered={isRegistered} /></td>
+                      <td className="font-mono text-[12px] text-ink-secondary">{summary || '—'}</td>
+                      <td className="w-px" onClick={(event) => event.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-3 whitespace-nowrap">
+                          {isRegistered && (
+                            <DeleteButton
+                              label={t('models.unregister')}
+                              loading={registrationPending}
+                              onClick={() => unregister.mutate(id)}
+                            />
+                          )}
+                          {isRegistered === false && repository && (
+                            <button
+                              type="button"
+                              onClick={() => register.mutate(id)}
+                              disabled={registrationPending}
+                              className="text-xs text-accent hover:underline disabled:opacity-50"
+                            >
+                              {register.isPending && register.variables === id ? t('models.repo_loading') : t('models.repo_load')}
+                            </button>
+                          )}
+                          {repository && (
+                            <button
+                              type="button"
+                              onClick={() => void exportModel(id)}
+                              disabled={exportingID !== null}
+                              aria-busy={exportingID === id}
+                              className="btn-ghost px-2 py-1 text-xs enabled:hover:bg-bg-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent aria-busy:disabled:cursor-wait aria-busy:disabled:opacity-100 disabled:active:scale-100"
+                            >
+                              {exportingID === id ? (
+                                <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin">
+                                  <circle cx="8" cy="8" r="5.5" opacity=".25" />
+                                  <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" />
+                                </svg>
+                              ) : (
+                                <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
+                                  <path d="M8 2v8m-3-3 3 3 3-3M2.5 11v2.5h11V11" />
+                                </svg>
+                              )}
+                              <span className="grid text-center">
+                                <span className={exportingID === id ? 'invisible col-start-1 row-start-1' : 'col-start-1 row-start-1'}>
+                                  {t('models.repo_export')}
+                                </span>
+                                {exportingID === id && (
+                                  <span className="col-start-1 row-start-1">{t('models.repo_exporting')}</span>
+                                )}
+                              </span>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
-                  )}
-                </Fragment>
-              ))}
+                    {expanded && (
+                      <tr>
+                        <td colSpan={6} className="bg-bg-overlay px-6 py-3">
+                          <div className="label mb-2">{t('models.section.details')}</div>
+                          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                            <DetailItem
+                              label={t('models.field.source')}
+                              value={repository ? t('models.source.repository')
+                                : repositoryModels && t('models.source.outside_repository')}
+                            />
+                            <DetailItem label={t('models.field.model_type')} value={modelType} />
+                            <DetailItem label={t('models.field.batch_size')} value={batchSize} />
+                            <DetailItem label={t('models.field.instances')} value={instanceCount} />
+                            <DetailItem label={t('models.field.num_classes')} value={registered?.num_classes ?? repository?.num_classes} />
+                            <DetailItem label={t('models.field.conf_thresh')} value={formatThreshold(registered?.conf_thresh ?? repository?.conf_thresh)} />
+                            <DetailItem label={t('models.field.nms_thresh')} value={formatThreshold(registered?.nms_thresh ?? repository?.nms_thresh)} />
+                            {registered && (
+                              <>
+                                <DetailItem label={t('models.col.input_shape')} value={registered.input_shape} />
+                                <DetailItem label={t('models.field.device_id')} value={registered.device_id} />
+                                <DetailItem label={t('models.field.preferred_batch_sizes')} value={formatList(registered.preferred_batch_sizes)} />
+                                <DetailItem label={t('models.field.max_queue_delay_us')} value={registered.max_queue_delay_us} />
+                                <DetailItem label={t('models.field.class_names')} value={formatList(registered.class_names)} />
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>

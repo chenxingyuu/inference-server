@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from '../lib/api'
+import { useT } from '../lib/i18n'
 import type { SourceCreate, PipelineCreate, ModelLoad, TaskCreate } from '../types'
 
 // ─── Health ────────────────────────────────────────────────────────────────
@@ -121,11 +122,12 @@ export const useLoadModel = () => {
 
 export const useLoadFromRepository = () => {
   const qc = useQueryClient()
+  const { t } = useT()
   return useMutation({
     mutationFn: (id: string) => api.models.loadFromRepository(id),
     onSuccess: (_, id) => {
-      toast.success(`Model "${id}" loaded`)
-      qc.invalidateQueries({ queryKey: ['models'] })
+      toast.success(t('models.register_success', { id }))
+      return qc.invalidateQueries({ queryKey: ['models'] })
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -133,11 +135,12 @@ export const useLoadFromRepository = () => {
 
 export const useUnloadModel = () => {
   const qc = useQueryClient()
+  const { t } = useT()
   return useMutation({
     mutationFn: (id: string) => api.models.unload(id),
     onSuccess: (_, id) => {
-      toast.success(`Model "${id}" unloaded`)
-      qc.invalidateQueries({ queryKey: ['models'] })
+      toast.success(t('models.unregister_success', { id }))
+      return qc.invalidateQueries({ queryKey: ['models'] })
     },
     onError: (e: Error) => toast.error(e.message),
   })

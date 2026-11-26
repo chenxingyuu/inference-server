@@ -1,4 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react'
+import { useT } from '../../lib/i18n'
 import { Sidebar } from './Sidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -54,7 +55,8 @@ export function LoadingRows({ cols }: { cols: number }) {
   )
 }
 
-export function DeleteButton({ onClick, loading }: { onClick: () => void; loading?: boolean }) {
+export function DeleteButton({ onClick, loading, label }: { onClick: () => void; loading?: boolean; label?: string }) {
+  const { t } = useT()
   const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
@@ -68,8 +70,9 @@ export function DeleteButton({ onClick, loading }: { onClick: () => void; loadin
       <div className="flex items-center gap-1">
         <button
           onClick={() => { setConfirming(false); onClick() }}
+          disabled={loading}
           className="btn-icon text-danger hover:text-danger bg-danger/10 border border-danger/25 rounded px-1"
-          title="Confirm"
+          title={t('common.confirm')}
         >
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-3 h-3">
             <path d="M2 8l4 4 8-8" />
@@ -78,13 +81,26 @@ export function DeleteButton({ onClick, loading }: { onClick: () => void; loadin
         <button
           onClick={() => setConfirming(false)}
           className="btn-icon text-ink-muted hover:text-ink-secondary"
-          title="Cancel"
+          title={t('common.cancel')}
         >
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3 h-3">
             <path d="M3 3l10 10M13 3L3 13" />
           </svg>
         </button>
       </div>
+    )
+  }
+
+  if (label) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        disabled={loading}
+        className="btn-danger px-2 py-1 text-xs"
+      >
+        {label}
+      </button>
     )
   }
 
