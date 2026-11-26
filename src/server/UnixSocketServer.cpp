@@ -12,7 +12,9 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 
@@ -23,6 +25,58 @@ using json = nlohmann::json;
 namespace {
 
 constexpr size_t kMaxRequestBytes = 12 * 1024 * 1024;
+
+std::string requiredTaskString(const json& request, const char* field) {
+    const auto value = request.find(field);
+    if (value == request.end() || !value->is_string() ||
+        value->get_ref<const std::string&>().empty()) {
+        throw std::runtime_error(std::string(field) + " must be a non-empty string");
+    }
+    return value->get<std::string>();
+}
+
+bool taskBoolean(const json& request, const char* field, bool fallback) {
+    const auto value = request.find(field);
+    if (value == request.end()) return fallback;
+    if (!value->is_boolean()) {
+        throw std::runtime_error(std::string(field) + " must be a boolean");
+    }
+    return value->get<bool>();
+}
+
+int taskInteger(const json& request, const char* field, int fallback, int minimum) {
+    const auto value = request.find(field);
+    if (value == request.end()) return fallback;
+    if (value->is_number()) {
+        const auto number = value->get<double>();
+        if (number >= minimum && number <= std::numeric_limits<int>::max() &&
+            std::trunc(number) == number) {
+            return static_cast<int>(number);
+        }
+    }
+    throw std::runtime_error(std::string(field) + " must be an integer between " +
+                             std::to_string(minimum) + " and " +
+                             std::to_string(std::numeric_limits<int>::max()));
+}
+
+TaskConfig parseTaskConfig(const json& request) {
+    TaskConfig task;
+    task.id = requiredTaskString(request, "id");
+    task.source_id = requiredTaskString(request, "source_id");
+    task.pipeline_id = requiredTaskString(request, "pipeline_id");
+    task.sample_fps = taskInteger(request, "sample_fps", task.sample_fps, 1);
+    const auto sampling_mode = request.find("sampling_mode");
+    if (sampling_mode != request.end()) {
+        if (!sampling_mode->is_string()) {
+            throw std::runtime_error("sampling_mode must be a string");
+        }
+        task.sampling_mode = parseSamplingMode(sampling_mode->get_ref<const std::string&>());
+    }
+    task.use_hwdec = taskBoolean(request, "use_hwdec", task.use_hwdec);
+    task.use_ascend_dvpp = taskBoolean(request, "use_ascend_dvpp", task.use_ascend_dvpp);
+    task.ascend_device_id = taskInteger(request, "ascend_device_id", task.ascend_device_id, 0);
+    return task;
+}
 
 json modelInfoJson(const ModelInfo& model) {
     return {{"id", model.id}, {"backend", model.backend}, {"version", model.version},
@@ -440,40 +494,24 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         return json({{"status", "ok"}, {"id", id}}).dump();
     }
 
-    if (cmd == "add_task") {
-        const auto id          = req.value("id",          std::string{});
-        const auto source_id   = req.value("source_id",   std::string{});
-        const auto pipeline_id = req.value("pipeline_id", std::string{});
-        if (id.empty() || source_id.empty() || pipeline_id.empty())
-            return json({{"status", "error"}, {"message", "missing required fields: id, source_id, pipeline_id"}}).dump();
-        TaskConfig t;
-        t.id          = id;
-        t.source_id   = source_id;
-        t.pipeline_id = pipeline_id;
-        t.sample_fps  = req.value("sample_fps", t.sample_fps);
-        const bool autostart = req.value("autostart", true);
-        if (!task_manager_.addTask(t, autostart))
-            return json({{"status", "error"}, {"message", "failed to add task: " + id}}).dump();
-        return json({{"status", "ok"}, {"id", id}}).dump();
-    }
+    if (cmd == "add_task" || cmd == "update_task") {
+        const bool adding = cmd == "add_task";
+        TaskConfig task;
+        bool autostart = true;
+        try {
+            task = parseTaskConfig(req);
+            if (adding) autostart = taskBoolean(req, "autostart", true);
+        } catch (const std::runtime_error& error) {
+            return json({{"status", "error"}, {"code", "invalid_argument"}, {"message", error.what()}}).dump();
+        }
 
-    if (cmd == "update_task") {
-        const auto id          = req.value("id",          std::string{});
-        const auto source_id   = req.value("source_id",   std::string{});
-        const auto pipeline_id = req.value("pipeline_id", std::string{});
-        if (id.empty() || source_id.empty() || pipeline_id.empty())
-            return json({{"status", "error"}, {"message", "missing required fields: id, source_id, pipeline_id"}}).dump();
-        TaskConfig t;
-        t.id               = id;
-        t.source_id        = source_id;
-        t.pipeline_id      = pipeline_id;
-        t.sample_fps       = req.value("sample_fps",      t.sample_fps);
-        t.use_hwdec        = req.value("use_hwdec",        t.use_hwdec);
-        t.use_ascend_dvpp  = req.value("use_ascend_dvpp",  t.use_ascend_dvpp);
-        t.ascend_device_id = req.value("ascend_device_id", t.ascend_device_id);
-        if (!task_manager_.updateTask(t))
-            return json({{"status", "error"}, {"message", "not found, running, or invalid deps: " + id}}).dump();
-        return json({{"status", "ok"}, {"id", id}}).dump();
+        if (adding) {
+            if (!task_manager_.addTask(task, autostart))
+                return json({{"status", "error"}, {"message", "failed to add task: " + task.id}}).dump();
+        } else if (!task_manager_.updateTask(task)) {
+            return json({{"status", "error"}, {"message", "not found, running, or invalid deps: " + task.id}}).dump();
+        }
+        return json({{"status", "ok"}, {"id", task.id}}).dump();
     }
 
     if (cmd == "remove_task") {

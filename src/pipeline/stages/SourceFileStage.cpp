@@ -14,7 +14,7 @@ SourceFileStage::SourceFileStage(std::string id, const PipelineSourceConfig& src
     , sampling_mode_(sampling_mode)
     , use_hwdec_(use_hwdec)
     , loop_(loop)
-    , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps * 2))) {}
+    , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps) * 2)) {}
 
 std::string SourceFileStage::id() const { return id_; }
 

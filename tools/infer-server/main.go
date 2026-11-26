@@ -16,6 +16,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -50,7 +51,7 @@ func envOr(key, def string) string {
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		c.Header("Access-Control-Expose-Headers", "Content-Disposition")
 		if c.Request.Method == http.MethodOptions {
@@ -486,6 +487,19 @@ func handleListTasks(c *gin.Context) {
 	c.JSON(http.StatusOK, resp["data"])
 }
 
+func taskBodyError(c *gin.Context, err error) {
+	message := err.Error()
+	var fieldError *json.UnmarshalTypeError
+	if errors.As(err, &fieldError) && fieldError.Field != "" {
+		message = fmt.Sprintf("%s must be of type %s", fieldError.Field, fieldError.Type)
+	}
+	c.JSON(http.StatusBadRequest, ErrorResponse{
+		Status:  "error",
+		Code:    "invalid_argument",
+		Message: message,
+	})
+}
+
 // handleAddTask godoc
 //
 //	@Summary		Add a task
@@ -503,7 +517,7 @@ func handleListTasks(c *gin.Context) {
 func handleAddTask(c *gin.Context) {
 	var body TaskCreate
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.String(http.StatusBadRequest, "invalid JSON body")
+		taskBodyError(c, err)
 		return
 	}
 	m := mustToMap(body)
@@ -543,7 +557,7 @@ func handleUpdateTask(c *gin.Context) {
 	id := c.Param("id")
 	var body TaskCreate
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.String(http.StatusBadRequest, "invalid JSON body")
+		taskBodyError(c, err)
 		return
 	}
 	body.ID = id

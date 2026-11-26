@@ -168,7 +168,24 @@ echo '{"cmd":"stop_task","id":"task_cam_001"}' | socat - UNIX-CONNECT:./infer.so
 每条 `tasks` 可单独设置 **`sample_fps`**（默认 `5`，须 ≥ 1）与 **`use_hwdec`**（默认 `false`）；二者已从 `sources` 迁出，若在 `sources` 下仍写 `sample_fps` / `use_hwdec`，加载配置时会报错提示迁移到对应 task。
 示例见 `config/config.yaml`。
 
-常见 stage：
+### 任务管理 API
+
+使用 `POST /tasks` 创建任务，或用 `PUT /tasks/{id}` 替换已停止任务的配置。两种请求都提交 `id`、`source_id` 和 `pipeline_id`，编辑时以路径中的任务 ID 为准。省略可选参数时，引擎使用以下默认值。
+
+| 参数 | 默认值 | 取值 |
+| --- | --- | --- |
+| `sample_fps` | `5` | 大于等于 `1` 的整数 |
+| `sampling_mode` | `frame_count` | `frame_count` 或 `time_based` |
+| `use_hwdec` | `false` | 布尔值 |
+| `use_ascend_dvpp` | `false` | 布尔值 |
+| `ascend_device_id` | `0` | 非负整数 |
+
+保存后可用 `GET /tasks` 查询任务配置。参数无效时，API 返回 HTTP 400、`invalid_argument` 和字段错误说明。
+
+管理页面使用相同的采样帧率默认值，并在提交前校验帧率和启用 DVPP 时的设备编号。保存失败时，表单会保留输入并显示错误。
+
+### 常见 stage
+
 - `source.rtsp`：RTSP 输入（内部使用 `FFmpegDecoder`；Ascend 可选 `use_ascend_dvpp` 走 DVPP 硬解）
 - `source.file`：本地视频文件输入
 - `archive.raw`：原图归档（复用 `FrameArchiver`，支持 `use_hwdec=true` 的 GPU 帧，默认开启）。须放在 `infer.engine` 下游，将 `frame_local_path`（本机绝对路径）与 `frame_url`（完整可访问 URL）写回 `InferResult` 后由 `sink.publish` 发出。

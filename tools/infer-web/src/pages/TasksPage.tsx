@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import {
   useTasks, useAddTask, useUpdateTask, useRemoveTask, useStartTask, useStopTask,
   useSources, usePipelines,
@@ -10,15 +10,22 @@ import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components
 import { useT } from '../lib/i18n'
 import type { TaskCreate, TaskInfo, SamplingMode } from '../types'
 
-const DEFAULTS: TaskCreate = {
+type TaskForm = Omit<TaskCreate, 'sample_fps' | 'ascend_device_id'> & {
+  sample_fps: string
+  ascend_device_id: string
+}
+
+const TASK_INTEGER_MAX = 2_147_483_647
+
+const DEFAULTS: TaskForm = {
   id: '',
   source_id: '',
   pipeline_id: '',
-  sample_fps: 25,
+  sample_fps: '5',
   sampling_mode: 'frame_count',
   use_hwdec: false,
   use_ascend_dvpp: false,
-  ascend_device_id: 0,
+  ascend_device_id: '0',
 }
 
 function PlayIcon() {
@@ -51,31 +58,42 @@ export function TasksPage() {
 
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState<TaskCreate>(DEFAULTS)
+  const [form, setForm] = useState<TaskForm>(DEFAULTS)
   const [expanded, setExpanded] = useState<string | null>(null)
 
   const isEditing = editingId !== null
+  const isSaving = add.isPending || update.isPending
+  const saveError = isEditing ? update.error : add.error
+  const sampleFps = Number(form.sample_fps)
+  const ascendDeviceId = Number(form.ascend_device_id)
+  const sampleFpsValid = Number.isInteger(sampleFps) && sampleFps >= 1 && sampleFps <= TASK_INTEGER_MAX
+  const ascendDeviceValid = form.ascend_device_id !== '' && Number.isInteger(ascendDeviceId) &&
+    ascendDeviceId >= 0 && ascendDeviceId <= TASK_INTEGER_MAX
+  const canSave = !isSaving && !!form.id.trim() && !!form.source_id && !!form.pipeline_id &&
+    sampleFpsValid && (!form.use_ascend_dvpp || ascendDeviceValid)
 
-  const set = <K extends keyof TaskCreate>(k: K, v: TaskCreate[K]) =>
+  const set = <K extends keyof TaskForm>(k: K, v: TaskForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }))
 
   const openAdd = () => {
+    add.reset()
     setEditingId(null)
     setForm(DEFAULTS)
     setOpen(true)
   }
 
   const openEdit = (tk: TaskInfo) => {
+    update.reset()
     setEditingId(tk.id)
     setForm({
       id: tk.id,
       source_id: tk.source_id ?? '',
       pipeline_id: tk.pipeline_id ?? '',
-      sample_fps: tk.sample_fps ?? 25,
+      sample_fps: tk.sample_fps?.toString() ?? DEFAULTS.sample_fps,
       sampling_mode: tk.sampling_mode ?? 'frame_count',
       use_hwdec: tk.use_hwdec ?? false,
       use_ascend_dvpp: tk.use_ascend_dvpp ?? false,
-      ascend_device_id: tk.ascend_device_id ?? 0,
+      ascend_device_id: tk.ascend_device_id?.toString() ?? DEFAULTS.ascend_device_id,
     })
     setOpen(true)
   }
@@ -86,12 +104,18 @@ export function TasksPage() {
     setForm(DEFAULTS)
   }
 
-  const submit = () => {
-    if (!form.id || !form.source_id || !form.pipeline_id) return
-    if (isEditing) {
-      update.mutate({ id: editingId!, body: form }, { onSuccess: closeModal })
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!canSave) return
+    const body: TaskCreate = {
+      ...form,
+      sample_fps: sampleFps,
+      ascend_device_id: ascendDeviceValid ? ascendDeviceId : 0,
+    }
+    if (editingId !== null) {
+      update.mutate({ id: editingId, body }, { onSuccess: closeModal })
     } else {
-      add.mutate(form, { onSuccess: closeModal })
+      add.mutate(body, { onSuccess: closeModal })
     }
   }
 
@@ -232,10 +256,15 @@ export function TasksPage() {
         </div>
       </div>
 
-      <Modal open={open} onClose={closeModal} title={isEditing ? t('tasks.modal_edit_title') : t('tasks.modal_title')}>
-        <div className="space-y-4">
+      <Modal
+        open={open}
+        onClose={() => { if (!isSaving) closeModal() }}
+        title={isEditing ? t('tasks.modal_edit_title') : t('tasks.modal_title')}
+      >
+        <form className="space-y-4" onSubmit={submit} noValidate>
           <Field label={t('tasks.field.id')}>
             <Input
+              aria-label={t('tasks.field.id')}
               placeholder="task-cam01-detect"
               value={form.id}
               onChange={(e) => set('id', e.target.value)}
@@ -247,6 +276,7 @@ export function TasksPage() {
           <div className="grid grid-cols-2 gap-4">
             <Field label={t('tasks.field.source')} hint={t('tasks.field.source_hint')}>
               <Select
+                aria-label={t('tasks.field.source')}
                 value={form.source_id}
                 onChange={(e) => set('source_id', e.target.value)}
               >
@@ -260,6 +290,7 @@ export function TasksPage() {
             </Field>
             <Field label={t('tasks.field.pipeline')} hint={t('tasks.field.pipeline_hint')}>
               <Select
+                aria-label={t('tasks.field.pipeline')}
                 value={form.pipeline_id}
                 onChange={(e) => set('pipeline_id', e.target.value)}
               >
@@ -276,15 +307,25 @@ export function TasksPage() {
           <div className="grid grid-cols-2 gap-4">
             <Field label={t('tasks.field.sample_fps')}>
               <Input
+                aria-label={t('tasks.field.sample_fps')}
+                aria-invalid={!sampleFpsValid}
+                aria-describedby={sampleFpsValid ? undefined : 'task-sample-fps-error'}
                 type="number"
                 min={1}
-                max={120}
+                max={TASK_INTEGER_MAX}
+                step={1}
                 value={form.sample_fps}
-                onChange={(e) => set('sample_fps', +e.target.value)}
+                onChange={(e) => set('sample_fps', e.target.value)}
               />
+              {!sampleFpsValid && (
+                <p id="task-sample-fps-error" className="mt-1 text-[11px] text-danger">
+                  {t('tasks.field.sample_fps_invalid', { max: TASK_INTEGER_MAX })}
+                </p>
+              )}
             </Field>
             <Field label={t('tasks.field.sampling')}>
               <Select
+                aria-label={t('tasks.field.sampling')}
                 value={form.sampling_mode}
                 onChange={(e) => set('sampling_mode', e.target.value as SamplingMode)}
               >
@@ -318,20 +359,34 @@ export function TasksPage() {
           {form.use_ascend_dvpp && (
             <Field label={t('tasks.field.ascend_device')}>
               <Input
+                aria-label={t('tasks.field.ascend_device')}
+                aria-invalid={!ascendDeviceValid}
+                aria-describedby={ascendDeviceValid ? undefined : 'task-ascend-device-error'}
                 type="number"
                 min={0}
+                max={TASK_INTEGER_MAX}
+                step={1}
                 value={form.ascend_device_id}
-                onChange={(e) => set('ascend_device_id', +e.target.value)}
+                onChange={(e) => set('ascend_device_id', e.target.value)}
                 className="w-32"
               />
+              {!ascendDeviceValid && (
+                <p id="task-ascend-device-error" className="mt-1 text-[11px] text-danger">
+                  {t('tasks.field.ascend_device_invalid', { max: TASK_INTEGER_MAX })}
+                </p>
+              )}
             </Field>
           )}
 
+          {saveError && <p role="alert" className="text-xs text-danger">{saveError.message}</p>}
+
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={closeModal} className="btn-ghost">{t('common.cancel')}</button>
+            <button type="button" onClick={closeModal} disabled={isSaving} className="btn-ghost">
+              {t('common.cancel')}
+            </button>
             <button
-              onClick={submit}
-              disabled={!form.id || !form.source_id || !form.pipeline_id || add.isPending || update.isPending}
+              type="submit"
+              disabled={!canSave}
               className="btn-primary"
             >
               {isEditing
@@ -339,7 +394,7 @@ export function TasksPage() {
                 : (add.isPending ? t('tasks.creating') : t('tasks.add'))}
             </button>
           </div>
-        </div>
+        </form>
       </Modal>
     </div>
   )

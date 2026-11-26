@@ -173,7 +173,6 @@ export const useAddTask = () => {
       toast.success(`Task "${v.id}" created`)
       qc.invalidateQueries({ queryKey: ['tasks'] })
     },
-    onError: (e: Error) => toast.error(e.message),
   })
 }
 
@@ -185,7 +184,6 @@ export const useUpdateTask = () => {
       toast.success(`Task "${id}" updated`)
       qc.invalidateQueries({ queryKey: ['tasks'] })
     },
-    onError: (e: Error) => toast.error(e.message),
   })
 }
 

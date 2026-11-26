@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -56,6 +58,7 @@ ModelInfo modelInfo(std::string id, std::string backend, std::string version,
 // ── Fake TaskManager ──────────────────────────────────────────────────────────
 
 struct FakeTaskManager : ITaskManager {
+    mutable std::mutex tasks_mu;
     std::vector<TaskRuntimeInfo> tasks;
     std::vector<SourceInfo>      sources;
     std::vector<PipelineInfo>    pipelines;
@@ -82,7 +85,10 @@ struct FakeTaskManager : ITaskManager {
     bool load_model_result{true};
     bool unload_model_result{true};
 
-    std::vector<TaskRuntimeInfo> listTasks()    const override { return tasks; }
+    std::vector<TaskRuntimeInfo> listTasks() const override {
+        std::lock_guard lock(tasks_mu);
+        return tasks;
+    }
     std::vector<SourceInfo>      listSources()  const override { return sources; }
     std::vector<PipelineInfo>    listPipelines()const override { return pipelines; }
     std::vector<ModelInfo>       listModels()   const override { return models; }
@@ -94,8 +100,21 @@ struct FakeTaskManager : ITaskManager {
     bool addPipeline(const PipelineConfig&)     override { return add_pipeline_result; }
     bool removePipeline(const std::string&)     override { return remove_pipeline_result; }
     bool updatePipeline(const PipelineConfig&)  override { return update_pipeline_result; }
-    bool addTask(const TaskConfig&, bool = true) override { return add_task_result; }
-    bool updateTask(const TaskConfig&)           override { return update_task_result; }
+    bool addTask(const TaskConfig& task, bool autostart = true) override {
+        if (!add_task_result) return false;
+        std::lock_guard lock(tasks_mu);
+        tasks.push_back({task, autostart ? State::Running : State::Stopped});
+        return true;
+    }
+    bool updateTask(const TaskConfig& task) override {
+        if (!update_task_result) return false;
+        std::lock_guard lock(tasks_mu);
+        auto item = std::find_if(tasks.begin(), tasks.end(),
+                                 [&](const auto& entry) { return entry.config.id == task.id; });
+        if (item == tasks.end() || item->state != State::Stopped) return false;
+        item->config = task;
+        return true;
+    }
     bool removeTask(const std::string&)          override { return remove_task_result; }
     bool loadModel(const ModelConfig&)           override { return load_model_result; }
     UnregisterResult unloadModel(const std::string& id) override {
@@ -536,13 +555,93 @@ TEST_F(UnixSocketServerTest, AddTaskSuccess) {
     });
     EXPECT_EQ(resp["status"], "ok");
     EXPECT_EQ(resp["id"],     "task_new");
+    const auto listed = roundtrip({{"cmd", "list_tasks"}});
+    ASSERT_EQ(listed["data"].size(), 1u);
+    const auto& task = listed["data"][0];
+    EXPECT_EQ(task["state"], "running");
+    EXPECT_EQ(task["sample_fps"], 5);
+    EXPECT_EQ(task["sampling_mode"], "frame_count");
+    EXPECT_EQ(task["use_hwdec"], false);
+    EXPECT_EQ(task["use_ascend_dvpp"], false);
+    EXPECT_EQ(task["ascend_device_id"], 0);
 }
 
 TEST_F(UnixSocketServerTest, AddTaskMissingFields) {
     // Dispatch-layer validation catches missing source_id/pipeline_id before reaching task_manager.
     auto resp = roundtrip({{"cmd", "add_task"}, {"id", "task_bad"}});
     EXPECT_EQ(resp["status"], "error");
-    EXPECT_TRUE(resp.contains("message"));
+    EXPECT_EQ(resp["code"], "invalid_argument");
+    EXPECT_NE(resp["message"].get<std::string>().find("source_id"), std::string::npos);
+}
+
+TEST_F(UnixSocketServerTest, TaskParametersRoundTripOnCreateAndUpdate) {
+    json request = {
+        {"cmd", "add_task"}, {"id", "task"}, {"source_id", "cam"}, {"pipeline_id", "graph"},
+        {"sample_fps", 12.0}, {"sampling_mode", "time_based"}, {"use_hwdec", true},
+        {"use_ascend_dvpp", true}, {"ascend_device_id", 2}, {"autostart", false},
+    };
+    ASSERT_EQ(roundtrip(request)["status"], "ok");
+    json expected = request;
+    expected.erase("cmd");
+    expected.erase("autostart");
+    expected["state"] = "stopped";
+    EXPECT_EQ(roundtrip({{"cmd", "list_tasks"}})["data"], json::array({expected}));
+
+    request["cmd"] = "update_task";
+    request.erase("autostart");
+    request["source_id"] = "cam2";
+    request["pipeline_id"] = "graph2";
+    request["sample_fps"] = 8;
+    request["ascend_device_id"] = 3;
+    ASSERT_EQ(roundtrip(request)["status"], "ok");
+    expected = request;
+    expected.erase("cmd");
+    expected["state"] = "stopped";
+    EXPECT_EQ(roundtrip({{"cmd", "list_tasks"}})["data"], json::array({expected}));
+
+    ASSERT_EQ(roundtrip({{"cmd", "update_task"}, {"id", "task"}, {"source_id", "cam2"},
+                         {"pipeline_id", "graph2"}})["status"], "ok");
+    expected["sample_fps"] = 5;
+    expected["sampling_mode"] = "frame_count";
+    expected["use_hwdec"] = false;
+    expected["use_ascend_dvpp"] = false;
+    expected["ascend_device_id"] = 0;
+    EXPECT_EQ(roundtrip({{"cmd", "list_tasks"}})["data"], json::array({expected}));
+}
+
+TEST_F(UnixSocketServerTest, TaskValidationRejectsInvalidParametersBeforeMutation) {
+    const json base = {
+        {"cmd", "add_task"}, {"id", "task"}, {"source_id", "cam"}, {"pipeline_id", "graph"},
+        {"autostart", false},
+    };
+    ASSERT_EQ(roundtrip(base)["status"], "ok");
+    const json initial = roundtrip({{"cmd", "list_tasks"}})["data"];
+    const std::pair<const char*, json> invalid_fields[] = {
+        {"source_id", 1},
+        {"pipeline_id", ""},
+        {"sample_fps", 0},
+        {"sample_fps", 2.5},
+        {"sample_fps", static_cast<long long>(std::numeric_limits<int>::max()) + 1},
+        {"sampling_mode", "unknown"},
+        {"sampling_mode", false},
+        {"use_hwdec", "true"},
+        {"use_ascend_dvpp", 1},
+        {"ascend_device_id", -1},
+    };
+    for (const char* command : {"add_task", "update_task"}) {
+        for (const auto& [field, value] : invalid_fields) {
+            SCOPED_TRACE(std::string(command) + " " + field + "=" + value.dump());
+            json request = base;
+            request["cmd"] = command;
+            request["sample_fps"] = 8;
+            request[field] = value;
+            const auto resp = roundtrip(request);
+            EXPECT_EQ(resp["status"], "error");
+            EXPECT_EQ(resp["code"], "invalid_argument");
+            EXPECT_NE(resp["message"].get<std::string>().find(field), std::string::npos);
+        }
+    }
+    EXPECT_EQ(roundtrip({{"cmd", "list_tasks"}})["data"], initial);
 }
 
 TEST_F(UnixSocketServerTest, RemoveTaskSuccess) {

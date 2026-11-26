@@ -19,7 +19,7 @@ SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src
     , sampling_mode_(sampling_mode)
     , use_hwdec_(use_hwdec)
     , gpu_alloc_(std::move(gpu_alloc))
-    , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps * 2)))
+    , max_queue_size_(std::max(std::size_t{32}, static_cast<std::size_t>(sample_fps) * 2))
 #ifdef BUILD_ASCEND_BACKEND
     , use_ascend_dvpp_(use_ascend_dvpp)
     , ascend_device_id_(ascend_device_id)
