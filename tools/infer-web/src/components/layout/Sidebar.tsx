@@ -208,7 +208,7 @@ export function Sidebar() {
             aria-label={languageLabel}
             title={languageLabel}
           >
-            {nextLang === 'zh' ? '简体中文' : 'English'}
+            {nextLang === 'zh' ? '中' : 'EN'}
           </button>
           <ThemeToggle />
         </div>
