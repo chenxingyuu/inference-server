@@ -18,10 +18,10 @@ type TaskEntry struct {
 
 // AppState is the full persisted state written to disk.
 type AppState struct {
-	Models    map[string]ModelLoad     `json:"models"`
-	Sources   map[string]SourceCreate  `json:"sources"`
+	Models    map[string]ModelLoad      `json:"models"`
+	Sources   map[string]SourceCreate   `json:"sources"`
 	Pipelines map[string]PipelineCreate `json:"pipelines"`
-	Tasks     map[string]TaskEntry     `json:"tasks"`
+	Tasks     map[string]TaskEntry      `json:"tasks"`
 }
 
 // Store serialises AppState to a JSON file on every mutation.
@@ -182,13 +182,18 @@ func (s *Store) DeleteTask(id string) error {
 	return s.save()
 }
 
-// SetTaskRunning updates the running state of a task. No-op if task not found.
+// SetTaskRunning updates the desired running state of a task.
+// Starting a task that was never stored is a no-op. Stopping one records the
+// id so a task that lives only in the engine config stays stopped after restart.
 func (s *Store) SetTaskRunning(id string, running bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.state.Tasks[id]
 	if !ok {
-		return nil
+		if running {
+			return nil
+		}
+		entry = TaskEntry{Create: TaskCreate{ID: id}}
 	}
 	entry.Running = running
 	s.state.Tasks[id] = entry
@@ -251,6 +256,11 @@ func replayOnce(state AppState, callFn func(map[string]any) (map[string]any, err
 		}
 	}
 	for _, entry := range state.Tasks {
+		// A stop recorded for an engine-config task has no source or pipeline.
+		// The definition is already loaded; only the desired run state is replayed.
+		if entry.Create.SourceID == "" || entry.Create.PipelineID == "" {
+			continue
+		}
 		cmd := mustToMap(entry.Create)
 		cmd["cmd"] = "add_task"
 		cmd["autostart"] = false
@@ -259,10 +269,13 @@ func replayOnce(state AppState, callFn func(map[string]any) (map[string]any, err
 		}
 	}
 	for id, entry := range state.Tasks {
+		cmd := "stop_task"
 		if entry.Running {
-			if _, err := callFn(map[string]any{"cmd": "start_task", "id": id}); err != nil {
-				return err
-			}
+			cmd = "start_task"
+		}
+		// stop_task covers tasks the engine already started from config or runtime state.
+		if _, err := callFn(map[string]any{"cmd": cmd, "id": id}); err != nil {
+			return err
 		}
 	}
 	return nil

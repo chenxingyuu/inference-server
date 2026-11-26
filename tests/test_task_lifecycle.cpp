@@ -217,6 +217,44 @@ TEST_F(TaskLifecycleTest, DeletedTaskStaysHiddenUntilItsIdCanBeReused) {
     EXPECT_EQ(task().state, TaskState::Stopped);
 }
 
+TEST_F(TaskLifecycleTest, ManualStopStaysStoppedUntilStartedAgain) {
+    init();
+    first_.emit_frame = true;
+    ASSERT_TRUE(manager_->start("one"));
+    ASSERT_TRUE(waitFor([&] { return task("one").state == TaskState::Running; }));
+    ASSERT_TRUE(manager_->stop("one"));
+    ASSERT_TRUE(waitFor([&] { return task("one").state == TaskState::Stopped && !task("one").cleanup_pending; }));
+    first_.emit_frame = false;
+
+    manager_.reset();
+    init();
+    manager_->startAll();
+    EXPECT_EQ(task("one").state, TaskState::Stopped);
+    EXPECT_EQ(task("two").state, TaskState::Starting);
+
+    ASSERT_TRUE(manager_->start("one"));
+    EXPECT_EQ(task("one").state, TaskState::Starting);
+    manager_.reset();
+    init();
+    manager_->startAll();
+    EXPECT_EQ(task("one").state, TaskState::Starting);
+}
+
+TEST_F(TaskLifecycleTest, NaturalCompletionStillRestartsOnBoot) {
+    init();
+    first_.emit_frame = true;
+    first_.eof = true;
+    ASSERT_TRUE(manager_->start("one"));
+    ASSERT_TRUE(waitFor([&] { return task("one").state == TaskState::Stopped && !task("one").cleanup_pending; }));
+    first_.emit_frame = false;
+    first_.eof = false;
+
+    manager_.reset();
+    init();
+    manager_->startAll();
+    EXPECT_EQ(task("one").state, TaskState::Starting);
+}
+
 TEST_F(TaskLifecycleTest, FinishesTailBeforeStopping) {
     init();
     first_.allow_output = false;

@@ -72,6 +72,23 @@ std::string interpolateOutputUrlPlaceholders(
     return out;
 }
 
+void rememberStoppedTask(RuntimeState& state, const std::string& id) {
+    auto& ids = state.stopped_task_ids;
+    if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
+}
+
+bool forgetStoppedTask(RuntimeState& state, const std::string& id) {
+    auto& ids = state.stopped_task_ids;
+    const auto before = ids.size();
+    ids.erase(std::remove(ids.begin(), ids.end(), id), ids.end());
+    return ids.size() != before;
+}
+
+bool taskWasManuallyStopped(const RuntimeState& state, const std::string& id) {
+    const auto& ids = state.stopped_task_ids;
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
+}
+
 void interpolatePipelineForTask(PipelineConfig& runtime_cfg, const TaskConfig& task, const std::string& pipeline_id) {
     for (auto& node : runtime_cfg.nodes) {
         if (node.type != "sink.stream") continue;
@@ -182,7 +199,9 @@ std::unique_ptr<GraphExecutor> TaskManager::buildGraph(const AppConfig& cfg, con
 void TaskManager::startAll() {
     std::lock_guard lock(mu_);
     for (const auto& [id, entry] : entries_) {
-        if (!entry.removed) startLocked(id);
+        // Desired running state survives restart. Explicit stop is recorded in
+        // runtime state; failure and natural EOF leave the previous desire intact.
+        if (!entry.removed && !taskWasManuallyStopped(runtime_state_, id)) startLocked(id);
     }
 }
 
@@ -232,7 +251,9 @@ ITaskManager::ActionResult TaskManager::startLocked(const std::string& task_id) 
 
 ITaskManager::ActionResult TaskManager::requestStart(const std::string& task_id) {
     std::lock_guard lock(mu_);
-    return startLocked(task_id);
+    const auto result = startLocked(task_id);
+    if (result == ActionResult::Accepted && forgetStoppedTask(runtime_state_, task_id)) persist();
+    return result;
 }
 
 bool TaskManager::start(const std::string& task_id) {
@@ -243,6 +264,8 @@ bool TaskManager::stop(const std::string& task_id) {
     std::lock_guard lock(mu_);
     const auto it = entries_.find(task_id);
     if (it == entries_.end() || it->second.removed) return false;
+    rememberStoppedTask(runtime_state_, task_id);
+    persist();
     auto& entry = it->second;
     if (entry.run) {
         entry.run->stop_requested = true;
@@ -647,6 +670,8 @@ bool TaskManager::addTask(const TaskConfig& task, bool autostart) {
     auto& removed = runtime_state_.removed_task_ids;
     removed.erase(std::remove(removed.begin(), removed.end(), task.id), removed.end());
     runtime_state_.added_tasks.push_back(task);
+    if (autostart) forgetStoppedTask(runtime_state_, task.id);
+    else rememberStoppedTask(runtime_state_, task.id);
     persist();
     if (autostart) startLocked(task.id);
     return true;
@@ -669,6 +694,7 @@ bool TaskManager::removeTask(const std::string& id) {
     added.erase(std::remove_if(added.begin(), added.end(),
         [&](const auto& t){ return t.id == id; }), added.end());
     runtime_state_.removed_task_ids.push_back(id);
+    forgetStoppedTask(runtime_state_, id);
     persist();
     return true;
 }

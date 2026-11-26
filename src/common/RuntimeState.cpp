@@ -251,6 +251,7 @@ RuntimeState loadRuntimeState(const std::string& path) {
     for (const auto& v : j.value("removed_pipeline_ids",json::array())) s.removed_pipeline_ids.push_back(v.get<std::string>());
     for (const auto& v : j.value("added_tasks",      json::array())) s.added_tasks.push_back(taskFromJson(v));
     for (const auto& v : j.value("removed_task_ids", json::array())) s.removed_task_ids.push_back(v.get<std::string>());
+    for (const auto& v : j.value("stopped_task_ids", json::array())) s.stopped_task_ids.push_back(v.get<std::string>());
     for (const auto& v : j.value("added_models",     json::array())) s.added_models.push_back(modelFromJson(v));
     for (const auto& v : j.value("removed_model_ids",json::array())) s.removed_model_ids.push_back(v.get<std::string>());
     return s;
@@ -273,6 +274,8 @@ void saveRuntimeState(const RuntimeState& state, const std::string& path) {
     for (const auto& v : state.added_tasks) at.push_back(toJson(v));
     auto& rt = j["removed_task_ids"] = json::array();
     for (const auto& v : state.removed_task_ids) rt.push_back(v);
+    auto& st = j["stopped_task_ids"] = json::array();
+    for (const auto& v : state.stopped_task_ids) st.push_back(v);
 
     auto& am = j["added_models"] = json::array();
     for (const auto& v : state.added_models) am.push_back(toJson(v));

@@ -375,24 +375,97 @@ func TestReplayState_DependencyOrder(t *testing.T) {
 	}
 }
 
-func TestReplayState_DoesNotStartStoppedTasks(t *testing.T) {
+func TestSetTaskRunning_RecordsStopForUnknownTask(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, _ := NewStore(path)
+	if err := s.SetTaskRunning("from-config", false); err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := s.Snapshot().Tasks["from-config"]
+	if !ok || entry.Running || entry.Create.ID != "from-config" {
+		t.Fatalf("manual stop was not recorded: ok=%v entry=%+v", ok, entry)
+	}
+	s2, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s2.Snapshot().Tasks["from-config"].Running {
+		t.Fatal("recorded stop was not persisted")
+	}
+}
+
+func TestReplayState_ReconcilesDesiredRunningState(t *testing.T) {
 	state := AppState{
 		Models:    map[string]ModelLoad{},
 		Sources:   map[string]SourceCreate{},
 		Pipelines: map[string]PipelineCreate{},
 		Tasks: map[string]TaskEntry{
-			"t1": {Create: TaskCreate{ID: "t1"}, Running: false},
+			"keep-stopped": {Create: TaskCreate{ID: "keep-stopped", SourceID: "s1", PipelineID: "p1"}, Running: false},
+			"bring-back":   {Create: TaskCreate{ID: "bring-back", SourceID: "s1", PipelineID: "p1"}, Running: true},
+			"yaml-only":    {Create: TaskCreate{ID: "yaml-only"}, Running: false},
 		},
 	}
 
-	rec := &callRecord{}
-	replayState(state, rec.fn, 1, 0)
+	var cmds []map[string]any
+	fakeFn := func(cmd map[string]any) (map[string]any, error) {
+		copied := map[string]any{}
+		for k, v := range cmd {
+			copied[k] = v
+		}
+		cmds = append(cmds, copied)
+		return map[string]any{"status": "ok"}, nil
+	}
+	if err := replayState(state, fakeFn, 1, 0); err != nil {
+		t.Fatal(err)
+	}
 
-	for _, cmd := range rec.ordered() {
-		if cmd == "start_task" {
-			t.Error("start_task should not be called for stopped tasks")
+	var addIDs, startIDs, stopIDs []string
+	phase := "add"
+	for _, cmd := range cmds {
+		name, _ := cmd["cmd"].(string)
+		id, _ := cmd["id"].(string)
+		switch name {
+		case "add_task":
+			if phase != "add" {
+				t.Fatalf("add_task after reconciliation: %#v", cmds)
+			}
+			if cmd["autostart"] != false {
+				t.Fatalf("replay add_task must not autostart: %#v", cmd)
+			}
+			addIDs = append(addIDs, id)
+		case "start_task":
+			phase = "run"
+			startIDs = append(startIDs, id)
+		case "stop_task":
+			phase = "run"
+			stopIDs = append(stopIDs, id)
+		default:
+			t.Fatalf("unexpected command %#v", cmd)
 		}
 	}
+	if !slicesEqual(addIDs, []string{"keep-stopped", "bring-back"}) &&
+		!slicesEqual(addIDs, []string{"bring-back", "keep-stopped"}) {
+		t.Fatalf("add_task ids = %v", addIDs)
+	}
+	if !slicesEqual(startIDs, []string{"bring-back"}) {
+		t.Fatalf("start_task ids = %v", startIDs)
+	}
+	if !slicesEqual(stopIDs, []string{"keep-stopped", "yaml-only"}) &&
+		!slicesEqual(stopIDs, []string{"yaml-only", "keep-stopped"}) {
+		t.Fatalf("stop_task ids = %v", stopIDs)
+	}
+}
+
+func slicesEqual(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestReplayState_RetriesOnSocketError(t *testing.T) {

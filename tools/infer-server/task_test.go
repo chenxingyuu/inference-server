@@ -13,6 +13,39 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestStopRecordsDesiredStateBeforeRestart(t *testing.T) {
+	state, err := NewStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SaveTask(TaskCreate{ID: "created", SourceID: "camera", PipelineID: "graph"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SetTaskRunning("created", true); err != nil {
+		t.Fatal(err)
+	}
+	oldStore, oldCall := store, callFn
+	t.Cleanup(func() { store, callFn = oldStore, oldCall })
+	store = state
+	callFn = func(map[string]any) (map[string]any, error) {
+		return map[string]any{"status": "ok"}, nil
+	}
+	router := gin.New()
+	router.POST("/tasks/:id/:action", handleTaskAction)
+
+	for _, id := range []string{"created", "from-config"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/tasks/"+id+"/stop", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("stop %s returned %d: %s", id, rec.Code, rec.Body)
+		}
+		entry, ok := store.Snapshot().Tasks[id]
+		if !ok || entry.Running {
+			t.Fatalf("stop %s did not persist running=false: ok=%v entry=%+v", id, ok, entry)
+		}
+	}
+}
+
 func TestUpdateTaskAllowsCrossOriginPreflight(t *testing.T) {
 	router := gin.New()
 	router.Use(corsMiddleware())

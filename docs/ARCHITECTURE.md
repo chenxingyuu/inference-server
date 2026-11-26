@@ -41,7 +41,7 @@ inferenced (C++)  --NDJSON on server.socket_path-->  infer-server (Go) --HTTP-->
 ```
 
 - **`UnixSocketServer`** (`src/server/UnixSocketServer.cpp`): newline-delimited JSON request/response (`list_tasks`, `start_task`, `stop_task`, `update_task`, `update_pipeline`, repository load, etc.).
-- **`tools/infer-server`**: HTTP reverse proxy to the socket (`GET /healthz`, `GET /metrics`, `GET/POST /tasks`, model repository REST, Swagger).
+- **`tools/infer-server`**: HTTP reverse proxy to the socket (`GET /healthz`, `GET /metrics`, `GET/POST /tasks`, model repository REST, Swagger). Its `state.json` stores each task's desired running state. Process start restores definitions, then starts only tasks whose desired state is running and stops the rest. An explicit stop is remembered across restart; a runtime failure or a file reaching EOF is not.
 - **`tools/infer-ctl`**: CLI for the same commands; `INFER_SOCKET` overrides the socket path.
 
 Legacy references to `ManagementServer` (cpp-httplib) are removed.

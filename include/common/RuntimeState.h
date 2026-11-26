@@ -18,6 +18,9 @@ struct RuntimeState {
 
     std::vector<TaskConfig>           added_tasks;
     std::vector<std::string>          removed_task_ids;
+    // Tasks the operator explicitly stopped. Boot recovery skips these.
+    // A runtime failure or a file reaching EOF does not add an id here.
+    std::vector<std::string>          stopped_task_ids;
 
     std::vector<ModelConfig>          added_models;
     std::vector<std::string>          removed_model_ids;
