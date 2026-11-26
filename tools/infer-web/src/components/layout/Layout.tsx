@@ -29,10 +29,10 @@ export function PageHeader({ title, subtitle, action }: PageHeaderProps) {
   )
 }
 
-export function EmptyState({ message }: { message: string }) {
+export function EmptyState({ message, cols = 99 }: { message: string; cols?: number }) {
   return (
     <tr>
-      <td colSpan={99} className="text-center py-12 text-ink-muted text-sm">
+      <td colSpan={cols} className="text-center py-12 text-ink-muted text-sm">
         {message}
       </td>
     </tr>

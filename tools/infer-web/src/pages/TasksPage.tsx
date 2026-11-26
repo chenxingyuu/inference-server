@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { Fragment, useState, type FormEvent } from 'react'
 import {
   useTasks, useAddTask, useUpdateTask, useRemoveTask, useStartTask, useStopTask,
   useSources, usePipelines,
@@ -16,6 +16,7 @@ type TaskForm = Omit<TaskCreate, 'sample_fps' | 'ascend_device_id'> & {
 }
 
 const TASK_INTEGER_MAX = 2_147_483_647
+const TASK_COLUMN_COUNT = 5
 
 const DEFAULTS: TaskForm = {
   id: '',
@@ -120,6 +121,7 @@ export function TasksPage() {
   }
 
   const runningCount = tasks.filter((tk) => tk.state === 'running').length
+  const sourceStates = new Map(sources.map((source) => [source.id, source.state]))
 
   return (
     <div>
@@ -138,119 +140,125 @@ export function TasksPage() {
       />
 
       <div className="section">
-        <div className="card overflow-hidden">
+        <div className="card overflow-x-auto">
           <table className="data-table">
             <thead>
               <tr>
-                <th>{t('common.id')}</th>
-                <th>{t('common.state')}</th>
+                <th>{t('tasks.field.id')}</th>
+                <th>{t('tasks.col.state')}</th>
+                <th>{t('tasks.col.source')}</th>
+                <th>{t('tasks.col.pipeline')}</th>
                 <th className="text-right pr-4">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
-              {isLoading && <LoadingRows cols={3} />}
+              {isLoading && <LoadingRows cols={TASK_COLUMN_COUNT} />}
               {!isLoading && tasks.length === 0 && (
-                <EmptyState message={t('tasks.empty')} />
+                <EmptyState message={t('tasks.empty')} cols={TASK_COLUMN_COUNT} />
               )}
-              {tasks.map((tk) => (
-                <>
-                  <tr
-                    key={tk.id}
-                    className="cursor-pointer"
-                    onClick={() => setExpanded(expanded === tk.id ? null : tk.id)}
-                  >
-                    <td className="font-mono text-[12px] text-ink-primary font-medium">
-                      <span className="mr-2 text-ink-muted">{expanded === tk.id ? '▼' : '▶'}</span>
-                      {tk.id}
-                    </td>
-                    <td><StatusBadge status={tk.state} /></td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1 pr-2">
-                        {tk.state === 'stopped' ? (
-                          <>
+              {tasks.map((tk) => {
+                const isExpanded = expanded === tk.id
+                const sourceState = tk.source_id ? sourceStates.get(tk.source_id) : undefined
+                const showSourceWarning = tk.state === 'running' &&
+                  (sourceState === 'RECONNECTING' || sourceState === 'DEGRADED')
+                const toggleDetails = () => setExpanded((current) => current === tk.id ? null : tk.id)
+
+                return (
+                  <Fragment key={tk.id}>
+                    <tr className="cursor-pointer" onClick={toggleDetails}>
+                      <td>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-2 text-left font-mono text-[12px] font-medium text-ink-primary"
+                          aria-expanded={isExpanded}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            toggleDetails()
+                          }}
+                        >
+                          <span className="text-ink-muted" aria-hidden="true">{isExpanded ? '▼' : '▶'}</span>
+                          {tk.id}
+                        </button>
+                      </td>
+                      <td><StatusBadge status={tk.state} label={t(`tasks.state.${tk.state}`)} /></td>
+                      <td>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="font-mono text-[12px] text-ink-secondary">{tk.source_id || '—'}</span>
+                          {showSourceWarning && (
+                            <span className="whitespace-nowrap text-[11px] text-warning">
+                              {t(sourceState === 'RECONNECTING' ? 'tasks.source.reconnecting' : 'tasks.source.degraded')}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="font-mono text-[12px] text-ink-secondary">{tk.pipeline_id || '—'}</td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1 pr-2">
+                          {tk.state === 'stopped' ? (
+                            <>
+                              <button
+                                onClick={() => openEdit(tk)}
+                                className="btn-icon text-ink-muted hover:text-accent"
+                                title={t('tasks.edit')}
+                              >
+                                ✎
+                              </button>
+                              <button
+                                onClick={() => start.mutate(tk.id)}
+                                disabled={start.isPending}
+                                title="Start"
+                                className="btn-icon text-success/60 hover:text-success"
+                              >
+                                <PlayIcon />
+                              </button>
+                            </>
+                          ) : (
                             <button
-                              onClick={() => openEdit(tk)}
-                              className="btn-icon text-ink-muted hover:text-accent"
-                              title={t('tasks.edit')}
+                              onClick={() => stop.mutate(tk.id)}
+                              disabled={stop.isPending}
+                              title="Stop"
+                              className="btn-icon text-warning/60 hover:text-warning"
                             >
-                              ✎
+                              <StopIcon />
                             </button>
-                            <button
-                              onClick={() => start.mutate(tk.id)}
-                              disabled={start.isPending}
-                              title="Start"
-                              className="btn-icon text-success/60 hover:text-success"
-                            >
-                              <PlayIcon />
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            onClick={() => stop.mutate(tk.id)}
-                            disabled={stop.isPending}
-                            title="Stop"
-                            className="btn-icon text-warning/60 hover:text-warning"
-                          >
-                            <StopIcon />
-                          </button>
-                        )}
-                        <DeleteButton
-                          loading={remove.isPending}
-                          onClick={() => remove.mutate(tk.id)}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                  {expanded === tk.id && (
-                    <tr key={`${tk.id}-detail`}>
-                      <td colSpan={3} className="bg-bg-overlay px-6 py-3">
-                        <div className="grid grid-cols-2 gap-6">
-                          <div>
-                            <div className="label mb-2">{t('tasks.section.binding')}</div>
-                            <div className="space-y-1">
-                              <div className="flex gap-2 items-center text-[12px]">
-                                <span className="text-ink-muted w-20 flex-none">{t('tasks.field.source')}</span>
-                                <span className="font-mono text-accent">{tk.source_id ?? '—'}</span>
-                              </div>
-                              <div className="flex gap-2 items-center text-[12px]">
-                                <span className="text-ink-muted w-20 flex-none">{t('tasks.field.pipeline')}</span>
-                                <span className="font-mono text-accent">{tk.pipeline_id ?? '—'}</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div>
-                            <div className="label mb-2">{t('tasks.section.settings')}</div>
-                            <div className="space-y-1">
-                              <div className="flex gap-2 items-center text-[12px]">
-                                <span className="text-ink-muted w-24 flex-none">{t('tasks.field.sample_fps')}</span>
-                                <span className="font-mono text-ink-secondary">{tk.sample_fps ?? '—'}</span>
-                              </div>
-                              <div className="flex gap-2 items-center text-[12px]">
-                                <span className="text-ink-muted w-24 flex-none">{t('tasks.field.sampling')}</span>
-                                <span className="font-mono text-ink-secondary">{tk.sampling_mode ?? '—'}</span>
-                              </div>
-                              {(tk.use_hwdec || tk.use_ascend_dvpp) && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {tk.use_hwdec && (
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-overlay border border-border text-[10px] font-mono text-ink-muted">
-                                      hwdec
-                                    </span>
-                                  )}
-                                  {tk.use_ascend_dvpp && (
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-overlay border border-border text-[10px] font-mono text-ink-muted">
-                                      dvpp · device {tk.ascend_device_id ?? 0}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
+                          )}
+                          <DeleteButton
+                            loading={remove.isPending}
+                            onClick={() => remove.mutate(tk.id)}
+                          />
                         </div>
                       </td>
                     </tr>
-                  )}
-                </>
-              ))}
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan={TASK_COLUMN_COUNT} className="bg-bg-overlay px-6 py-3">
+                          <div className="label mb-2">{t('tasks.section.settings')}</div>
+                          <dl className="grid w-fit grid-cols-[auto_auto] gap-x-4 gap-y-1 text-[12px]">
+                            <dt className="text-ink-muted">{t('tasks.field.sample_fps')}</dt>
+                            <dd className="font-mono text-ink-secondary">{tk.sample_fps ?? '—'}</dd>
+                            <dt className="text-ink-muted">{t('tasks.field.sampling')}</dt>
+                            <dd className="font-mono text-ink-secondary">{tk.sampling_mode ?? '—'}</dd>
+                          </dl>
+                          {(tk.use_hwdec || tk.use_ascend_dvpp) && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {tk.use_hwdec && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-overlay border border-border text-[10px] font-mono text-ink-muted">
+                                  hwdec
+                                </span>
+                              )}
+                              {tk.use_ascend_dvpp && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-overlay border border-border text-[10px] font-mono text-ink-muted">
+                                  dvpp · device {tk.ascend_device_id ?? 0}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>

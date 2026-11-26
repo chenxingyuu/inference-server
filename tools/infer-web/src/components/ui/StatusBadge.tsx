@@ -12,12 +12,12 @@ const cfg: Record<Status, { dot: string; text: string; pulse: boolean; label: st
   stopped:      { dot: 'bg-ink-muted',text: 'text-ink-muted',pulse: false, label: 'stopped'      },
 }
 
-export function StatusBadge({ status }: { status: Status }) {
+export function StatusBadge({ status, label }: { status: Status; label?: string }) {
   const c = cfg[status] ?? cfg.STOPPED
   return (
     <span className={`inline-flex items-center gap-1.5 font-mono text-[11px] font-medium ${c.text}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${c.dot} ${c.pulse ? 'led-pulse' : ''}`} />
-      {c.label}
+      {label ?? c.label}
     </span>
   )
 }
