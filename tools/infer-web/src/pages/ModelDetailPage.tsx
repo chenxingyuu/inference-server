@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/layout/Layout'
@@ -8,6 +8,14 @@ import { useT } from '../lib/i18n'
 import type { ModelDetail, ModelTestResult } from '../types'
 
 const maxImageBytes = 8 * 1024 * 1024
+const minImageZoom = 50
+const maxImageZoom = 300
+const imageZoomStep = 25
+
+type SelectedImage = { file: File; url: string }
+type PreviewZoomAnchor = { x: number; y: number; clientX: number; clientY: number }
+type PreviewPointer = { clientX?: number; clientY?: number }
+type SafariGestureEvent = Event & PreviewPointer & { scale: number }
 
 function DetailItem({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -142,64 +150,221 @@ function ModelRepository({ detail }: { detail: ModelDetail }) {
   )
 }
 
-function ModelTestPreview({ result }: { result: ModelTestResult }) {
+function confidencePercent(score: number) {
+  return `${(score * 100).toFixed(1)}%`
+}
+
+function ModelTestResultImage({ result }: { result: ModelTestResult }) {
   const { t } = useT()
   const fontSize = result.width / 48
-  const percentage = (score: number) => `${(score * 100).toFixed(1)}%`
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-      <div className="relative self-start overflow-hidden rounded bg-bg-base" style={{ aspectRatio: result.width / result.height }}>
-        <img className="absolute h-full w-full" src={`data:image/jpeg;base64,${result.preview_jpeg}`} alt={t('models.test.preview')} />
-        {result.model_type === 'detector' && (
-          <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${result.width} ${result.height}`} aria-hidden="true">
-            {result.results.map(({ bbox, class_id, class_name, confidence }, index) => bbox && (
-              <g key={index}>
-                <rect x={bbox.x1} y={bbox.y1} width={bbox.x2 - bbox.x1} height={bbox.y2 - bbox.y1}
-                  className="fill-none stroke-green-400" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-                <text x={bbox.x1} y={Math.max(fontSize, bbox.y1 - fontSize / 4)} fontSize={fontSize}
-                  stroke="#121714" strokeWidth={fontSize / 5} paintOrder="stroke" fill="#dcfce7">
-                  {class_name || class_id} {percentage(confidence)}
-                </text>
-              </g>
-            ))}
-          </svg>
-        )}
+    <svg className="absolute inset-0 block h-full w-full" viewBox={`0 0 ${result.width} ${result.height}`} role="img" aria-label={t('models.test.preview')}>
+      <image href={`data:image/jpeg;base64,${result.preview_jpeg}`} width={result.width} height={result.height} preserveAspectRatio="none" />
+      {result.model_type === 'detector' && result.results.map(({ bbox, class_id, class_name, confidence }, index) => bbox && (
+        <g key={index}>
+          <rect x={bbox.x1} y={bbox.y1} width={bbox.x2 - bbox.x1} height={bbox.y2 - bbox.y1}
+            className="fill-none stroke-green-400" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+          <text x={bbox.x1} y={Math.max(fontSize, bbox.y1 - fontSize / 4)} fontSize={fontSize}
+            stroke="#121714" strokeWidth={fontSize / 5} paintOrder="stroke" fill="#dcfce7">
+            {class_name || class_id} {confidencePercent(confidence)}
+          </text>
+        </g>
+      ))}
+    </svg>
+  )
+}
+
+function ModelTestResults({ result }: { result: ModelTestResult }) {
+  const { t } = useT()
+
+  return (
+    <div className="min-w-0 space-y-3 xl:pt-11">
+      <dl className="grid grid-cols-2 gap-3">
+        <DetailItem label={t('models.col.backend')}>{result.backend}</DetailItem>
+        <DetailItem label={t('models.field.conf_thresh')}>{result.conf_thresh.toFixed(3)}</DetailItem>
+        {result.nms_thresh !== null && <DetailItem label={t('models.field.nms_thresh')}>{result.nms_thresh.toFixed(3)}</DetailItem>}
+      </dl>
+      {result.results.length ? (
+        <ul className="max-h-80 divide-y divide-border overflow-auto rounded border border-border">
+          {result.results.map(({ class_id, class_name, confidence }, index) => (
+            <li className="flex justify-between gap-3 px-3 py-2 text-xs text-ink-secondary" key={index}>
+              <span className="break-all">{class_name || class_id}</span>
+              <span className="font-mono text-ink-primary">{confidencePercent(confidence)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p role="status" className="text-xs text-ink-muted">
+          {t(result.model_type === 'detector' ? 'models.test.no_detections' : 'models.test.no_classes')}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function ModelTestImagePreview({ image, result }: { image: SelectedImage | null; result?: ModelTestResult }) {
+  const { t } = useT()
+  const [previewFailed, setPreviewFailed] = useState(false)
+  const [originalAspect, setOriginalAspect] = useState<number>()
+  const [zoom, setZoom] = useState(100)
+  const currentZoom = useRef(zoom)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const imageSurfaceRef = useRef<HTMLDivElement>(null)
+  const zoomAnchor = useRef<PreviewZoomAnchor | null>(null)
+  const title = t(result ? 'models.test.preview' : 'models.test.original_preview')
+  const canZoom = !!result || (!!image && !previewFailed)
+  const imageAspect = result ? result.width / result.height : originalAspect
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    const anchor = zoomAnchor.current
+    const bounds = imageSurfaceRef.current?.getBoundingClientRect()
+    zoomAnchor.current = null
+    if (!viewport || !anchor || !bounds) return
+
+    viewport.scrollLeft += bounds.left + anchor.x * bounds.width - anchor.clientX
+    viewport.scrollTop += bounds.top + anchor.y * bounds.height - anchor.clientY
+  }, [zoom])
+
+  const changeZoom = useCallback((requestedZoom: number, pointer?: PreviewPointer) => {
+    const nextZoom = Math.min(maxImageZoom, Math.max(minImageZoom, requestedZoom))
+    if (!Number.isFinite(nextZoom) || nextZoom === currentZoom.current) return
+
+    const viewport = viewportRef.current
+    const surface = imageSurfaceRef.current?.getBoundingClientRect()
+    if (!viewport || !surface?.width || !surface.height) return
+
+    const bounds = viewport.getBoundingClientRect()
+    const clientX = pointer?.clientX ?? bounds.left + viewport.clientLeft + viewport.clientWidth / 2
+    const clientY = pointer?.clientY ?? bounds.top + viewport.clientTop + viewport.clientHeight / 2
+    zoomAnchor.current = {
+      x: (clientX - surface.left) / surface.width,
+      y: (clientY - surface.top) / surface.height,
+      clientX,
+      clientY,
+    }
+    currentZoom.current = nextZoom
+    setZoom(nextZoom)
+  }, [])
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport || !canZoom) return
+
+    let safariStartZoom: number | null = null
+
+    function handleWheel(event: WheelEvent) {
+      if (!event.ctrlKey) return
+      event.preventDefault()
+      if (safariStartZoom !== null) return
+
+      const units = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1
+      changeZoom(currentZoom.current * Math.exp(-event.deltaY * units * 0.01), event)
+    }
+
+    // Safari sends gesture events for trackpad pinches instead of Ctrl-wheel.
+    function handleGestureStart(event: Event) {
+      event.preventDefault()
+      safariStartZoom = currentZoom.current
+    }
+
+    function handleGestureChange(event: Event) {
+      if (safariStartZoom === null) return
+      event.preventDefault()
+      const gesture = event as SafariGestureEvent
+      changeZoom(safariStartZoom * gesture.scale, gesture)
+    }
+
+    function handleGestureEnd(event: Event) {
+      if (safariStartZoom === null) return
+      event.preventDefault()
+      safariStartZoom = null
+    }
+
+    viewport.addEventListener('wheel', handleWheel, { passive: false })
+    viewport.addEventListener('gesturestart', handleGestureStart, { passive: false })
+    viewport.addEventListener('gesturechange', handleGestureChange, { passive: false })
+    viewport.addEventListener('gestureend', handleGestureEnd, { passive: false })
+    return () => {
+      viewport.removeEventListener('wheel', handleWheel)
+      viewport.removeEventListener('gesturestart', handleGestureStart)
+      viewport.removeEventListener('gesturechange', handleGestureChange)
+      viewport.removeEventListener('gestureend', handleGestureEnd)
+    }
+  }, [canZoom, changeZoom])
+
+  function handlePreviewKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!canZoom || event.altKey || event.ctrlKey || event.metaKey) return
+
+    switch (event.key) {
+      case '+':
+      case '=':
+        changeZoom(currentZoom.current + imageZoomStep)
+        break
+      case '-':
+        changeZoom(currentZoom.current - imageZoomStep)
+        break
+      case '0':
+        changeZoom(100)
+        break
+      default:
+        return
+    }
+    event.preventDefault()
+  }
+
+  return (
+    <div className="min-w-0 space-y-2">
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-medium text-ink-secondary">{title}</h3>
+        {canZoom && <span className="font-mono text-xs tabular-nums text-ink-secondary">{Math.round(zoom)}%</span>}
       </div>
-      <div className="min-w-0 space-y-3">
-        <dl className="grid grid-cols-2 gap-3">
-          <DetailItem label={t('models.col.backend')}>{result.backend}</DetailItem>
-          <DetailItem label={t('models.field.conf_thresh')}>{result.conf_thresh.toFixed(3)}</DetailItem>
-          {result.nms_thresh !== null && <DetailItem label={t('models.field.nms_thresh')}>{result.nms_thresh.toFixed(3)}</DetailItem>}
-        </dl>
-        {result.results.length ? (
-          <ul className="max-h-80 divide-y divide-border overflow-auto rounded border border-border">
-            {result.results.map(({ class_id, class_name, confidence }, index) => (
-              <li className="flex justify-between gap-3 px-3 py-2 text-xs text-ink-secondary" key={index}>
-                <span className="break-all">{class_name || class_id}</span>
-                <span className="font-mono text-ink-primary">{percentage(confidence)}</span>
-              </li>
-            ))}
-          </ul>
+      <div ref={viewportRef}
+        className={`h-80 overflow-auto rounded border border-border bg-bg-base [container-type:size] [overflow-anchor:none] sm:h-96 ${zoom > 100 ? 'overscroll-contain' : ''}`}
+        role="region" aria-label={title} aria-describedby={canZoom ? 'model-test-gesture-help' : undefined}
+        tabIndex={canZoom ? 0 : undefined} onKeyDown={handlePreviewKeyDown}
+        onDoubleClick={canZoom ? () => changeZoom(100) : undefined}>
+        {canZoom ? (
+          <div className="grid h-max min-h-full w-max min-w-full place-items-center">
+            <div ref={imageSurfaceRef} className="relative" style={imageAspect
+              ? { width: `min(${zoom}cqw, ${zoom * imageAspect}cqh)`, aspectRatio: imageAspect }
+              : { width: '100cqw', height: '100cqh' }}>
+              {result ? <ModelTestResultImage result={result} /> : image && (
+                <img className="absolute inset-0 h-full w-full object-contain" src={image.url} alt={image.file.name} draggable={false}
+                  onLoad={event => {
+                    const { naturalWidth, naturalHeight } = event.currentTarget
+                    setOriginalAspect(naturalWidth / naturalHeight)
+                  }}
+                  onError={() => setPreviewFailed(true)} />
+              )}
+            </div>
+          </div>
         ) : (
-          <p role="status" className="text-xs text-ink-muted">
-            {t(result.model_type === 'detector' ? 'models.test.no_detections' : 'models.test.no_classes')}
-          </p>
+          <div className="grid h-full place-items-center px-4 text-center text-xs text-ink-secondary">
+            <p>{t(previewFailed ? 'models.test.preview_unavailable' : 'models.test.preview_empty')}</p>
+          </div>
         )}
       </div>
+      {canZoom && <p id="model-test-gesture-help" className="text-xs text-ink-secondary">{t('models.test.gesture_help')}</p>}
     </div>
   )
 }
 
 function ModelImageTest({ detail }: { detail: ModelDetail }) {
   const { t } = useT()
-  const [image, setImage] = useState<File | null>(null)
+  const [image, setImage] = useState<SelectedImage | null>(null)
   const [invalidFile, setInvalidFile] = useState(false)
   const test = useMutation({ mutationFn: (file: File) => api.models.test(detail.model.id, file) })
 
+  useEffect(() => {
+    if (!image) return
+    return () => URL.revokeObjectURL(image.url)
+  }, [image])
+
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (detail.registered && image && !test.isPending) test.mutate(image)
+    if (detail.registered && image && !test.isPending) test.mutate(image.file)
   }
 
   const errorCode = test.error instanceof ApiError ? test.error.code : undefined
@@ -226,7 +391,7 @@ function ModelImageTest({ detail }: { detail: ModelDetail }) {
               onChange={event => {
                 const selected = event.target.files?.[0] ?? null
                 const invalid = !!selected && (selected.size < 1 || selected.size > maxImageBytes)
-                setImage(invalid ? null : selected)
+                setImage(selected && !invalid ? { file: selected, url: URL.createObjectURL(selected) } : null)
                 setInvalidFile(invalid)
                 test.reset()
               }} />
@@ -238,7 +403,12 @@ function ModelImageTest({ detail }: { detail: ModelDetail }) {
       )}
       {invalidFile && <p role="alert" className="text-xs text-danger">{t('models.test.image_limit')}</p>}
       {test.isError && <p role="alert" className="text-xs text-danger">{errorMessage}</p>}
-      {test.data && <ModelTestPreview result={test.data} />}
+      {detail.registered && (
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <ModelTestImagePreview key={image?.url} image={image} result={test.data} />
+          {test.data && <ModelTestResults result={test.data} />}
+        </div>
+      )}
     </DetailSection>
   )
 }
