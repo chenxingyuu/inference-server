@@ -21,6 +21,7 @@ import { getDragNodeType } from './NodePalette'
 import { pipelineEdgeTypes, pipelineNodeTypes } from './pipelineFlowTypes'
 import { PipelineFlowControls } from './PipelineFlowControls'
 import { useT } from '../../lib/i18n'
+import { useTheme } from '../../lib/theme'
 
 interface PipelineCanvasProps {
   nodes: Node<PipelineNodeData>[]
@@ -60,6 +61,7 @@ export function PipelineCanvas({
   canRedo,
 }: PipelineCanvasProps) {
   const { t } = useT()
+  const { theme } = useTheme()
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const { screenToFlowPosition, fitView } = useReactFlow()
 
@@ -168,9 +170,10 @@ export function PipelineCanvas({
             selEdges.length === 1 ? selEdges[0] : null,
           )
         }}
-        className="pipeline-editor-flow bg-bg-base"
+        className="pipeline-editor-flow"
+        colorMode={theme}
       >
-        <Background gap={16} size={1} color="#1e2d3d" />
+        <Background gap={16} size={1} color="rgb(var(--color-border))" />
         <PipelineFlowControls
           onAutoLayout={onAutoLayout}
           layoutDisabled={nodes.length === 0}
@@ -181,10 +184,10 @@ export function PipelineCanvas({
         />
         <MiniMap
           className="pipeline-flow-minimap"
-          maskColor="rgba(11, 15, 20, 0.72)"
+          maskColor="rgb(var(--color-bg-base) / 0.72)"
           nodeColor={(n) => {
             const d = n.data as PipelineNodeData
-            return d?.stageType?.startsWith('source') ? '#34d399' : '#22d3ee'
+            return d?.stageType?.startsWith('source') ? 'rgb(var(--color-success))' : 'rgb(var(--color-accent))'
           }}
         />
       </ReactFlow>

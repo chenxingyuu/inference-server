@@ -3,6 +3,7 @@ import { useHealth } from '../../hooks/queries'
 import { auth, serverUrl } from '../../lib/api'
 import { useT } from '../../lib/i18n'
 import { useState } from 'react'
+import { ThemeToggle } from './ThemeToggle'
 
 function ConfigRow({
   label,
@@ -75,6 +76,8 @@ function ConfigRow({
 export function Sidebar() {
   const { data: health } = useHealth()
   const { lang, setLang, t } = useT()
+  const nextLang = lang === 'en' ? 'zh' : 'en'
+  const languageLabel = t('sidebar.switch_language')
 
   const dotColor =
     health?.status === 'ok'          ? 'bg-success led-pulse' :
@@ -197,28 +200,17 @@ export function Sidebar() {
           cancelLabel={t('common.cancel')}
         />
 
-        {/* Language toggle */}
-        <div className="flex gap-1 pt-1 px-2">
+        <div className="flex items-center gap-2 pt-1 px-2">
           <button
-            onClick={() => setLang('en')}
-            className={`flex-1 text-[11px] py-1 rounded transition-colors ${
-              lang === 'en'
-                ? 'bg-accent/15 text-accent border border-accent/30'
-                : 'text-ink-muted hover:text-ink-secondary border border-transparent hover:bg-bg-overlay'
-            }`}
+            type="button"
+            onClick={() => setLang(nextLang)}
+            className="btn-ghost h-8 flex-1 justify-center text-[11px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            aria-label={languageLabel}
+            title={languageLabel}
           >
-            EN
+            {nextLang === 'zh' ? '简体中文' : 'English'}
           </button>
-          <button
-            onClick={() => setLang('zh')}
-            className={`flex-1 text-[11px] py-1 rounded transition-colors ${
-              lang === 'zh'
-                ? 'bg-accent/15 text-accent border border-accent/30'
-                : 'text-ink-muted hover:text-ink-secondary border border-transparent hover:bg-bg-overlay'
-            }`}
-          >
-            中
-          </button>
+          <ThemeToggle />
         </div>
       </div>
     </aside>

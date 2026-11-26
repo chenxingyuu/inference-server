@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { I18nProvider } from './lib/i18n'
+import { ThemeProvider } from './lib/theme'
 import App from './App'
 import './styles/global.css'
 
@@ -18,20 +19,26 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <I18nProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <App />
+          <ThemeProvider>
+            <App />
+          </ThemeProvider>
           <Toaster
             position="bottom-right"
             toastOptions={{
               style: {
-                background: '#19212e',
-                color: '#dde5f0',
-                border: '1px solid #1e2d3d',
+                background: 'rgb(var(--color-bg-overlay))',
+                color: 'rgb(var(--color-ink-primary))',
+                border: '1px solid rgb(var(--color-border))',
                 fontFamily: 'Inter, system-ui, sans-serif',
                 fontSize: '13px',
                 borderRadius: '4px',
               },
-              success: { iconTheme: { primary: '#34d399', secondary: '#19212e' } },
-              error: { iconTheme: { primary: '#f87171', secondary: '#19212e' } },
+              success: {
+                iconTheme: { primary: 'rgb(var(--color-success))', secondary: 'rgb(var(--color-bg-overlay))' },
+              },
+              error: {
+                iconTheme: { primary: 'rgb(var(--color-danger))', secondary: 'rgb(var(--color-bg-overlay))' },
+              },
             }}
           />
         </BrowserRouter>

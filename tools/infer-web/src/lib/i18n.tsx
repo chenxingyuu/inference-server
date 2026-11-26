@@ -14,6 +14,10 @@ const en = {
   'sidebar.server':  'Server',
   'sidebar.api_key': 'API Key',
   'sidebar.not_set': 'not set',
+  'sidebar.switch_language': 'Switch to Simplified Chinese',
+
+  'theme.switch_to_light': 'Switch to light theme',
+  'theme.switch_to_dark': 'Switch to dark theme',
 
   'health.ok':          'Engine healthy',
   'health.engine_down': 'C++ engine not connected — Go server is reachable, start the inference engine',
@@ -253,6 +257,10 @@ const zh: Record<keyof typeof en, string> = {
   'sidebar.server':  '服务器',
   'sidebar.api_key': 'API 密钥',
   'sidebar.not_set': '未设置',
+  'sidebar.switch_language': '切换到英文',
+
+  'theme.switch_to_light': '切换到浅色主题',
+  'theme.switch_to_dark': '切换到深色主题',
 
   'health.ok':          '引擎运行正常',
   'health.engine_down': 'C++ 引擎未连接 — Go server 可达，请启动推理引擎',

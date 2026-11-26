@@ -31,7 +31,7 @@ function PipelineEdgeComponent({
         id={id}
         path={edgePath}
         style={{
-          stroke: selected ? '#22d3ee' : '#465669',
+          stroke: selected ? 'rgb(var(--color-accent))' : 'rgb(var(--color-ink-muted))',
           strokeWidth: selected ? 2 : 1.5,
         }}
       />

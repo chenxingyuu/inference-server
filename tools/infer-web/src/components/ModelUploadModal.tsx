@@ -162,7 +162,7 @@ export function ModelUploadModal({ open, onClose, onPublished }: {
     </Field>
   )
   const errorMessage = error && (
-    <p role="alert" className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+    <p role="alert" className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
       {error}
     </p>
   )
@@ -171,8 +171,8 @@ export function ModelUploadModal({ open, onClose, onPublished }: {
     <Modal open={open} onClose={handleClose} title={t('models.upload_modal_title')} width="max-w-xl">
       {publishedID ? (
         <div className="space-y-4">
-          <div role="status" className="rounded border border-emerald-500/30 bg-emerald-500/10 p-4">
-            <p className="font-semibold text-emerald-700 dark:text-emerald-300">{t('models.upload_success')}</p>
+          <div role="status" className="rounded border border-success/30 bg-success/10 p-4">
+            <p className="font-semibold text-success">{t('models.upload_success')}</p>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
               <code className="break-all text-sm text-ink-primary">{publishedID}</code>
               <button type="button" className="btn-ghost" onClick={async () => {

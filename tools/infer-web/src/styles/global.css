@@ -5,6 +5,40 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    color-scheme: dark;
+    --color-bg-base: 11 15 20;
+    --color-bg-surface: 17 23 32;
+    --color-bg-overlay: 25 33 46;
+    --color-bg-elevated: 32 43 58;
+    --color-ink-primary: 221 229 240;
+    --color-ink-secondary: 131 147 168;
+    --color-ink-muted: 70 86 105;
+    --color-accent: 34 211 238;
+    --color-accent-dim: 8 145 178;
+    --color-success: 52 211 153;
+    --color-warning: 251 191 36;
+    --color-danger: 248 113 113;
+    --color-border: 30 45 61;
+  }
+
+  :root[data-theme='light'] {
+    color-scheme: light;
+    --color-bg-base: 244 247 251;
+    --color-bg-surface: 255 255 255;
+    --color-bg-overlay: 238 243 248;
+    --color-bg-elevated: 228 234 242;
+    --color-ink-primary: 21 35 54;
+    --color-ink-secondary: 64 84 107;
+    --color-ink-muted: 83 100 122;
+    --color-accent: 0 108 129;
+    --color-accent-dim: 0 89 109;
+    --color-success: 8 116 75;
+    --color-warning: 133 86 0;
+    --color-danger: 180 35 52;
+    --color-border: 203 214 227;
+  }
+
   body {
     @apply bg-bg-base text-ink-primary font-sans antialiased;
     font-size: 13.5px;
@@ -23,9 +57,13 @@
     height: 100%;
   }
 
+  .pipeline-editor-flow {
+    --xy-background-color: rgb(var(--color-bg-base));
+    --xy-attribution-background-color: rgb(var(--color-bg-surface) / 0.8);
+  }
+
   .pipeline-editor-flow .pipeline-flow-minimap {
-    background-color: #111720;
-    border: 1px solid #1e2d3d;
+    @apply bg-bg-surface border border-border;
     border-radius: 3px;
     box-shadow: none;
     margin: 12px;

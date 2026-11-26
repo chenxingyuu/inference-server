@@ -17,8 +17,8 @@ function Tag({ children }: { children: string }) {
 function StatusBadge({ loaded }: { loaded: boolean }) {
   const { t } = useT()
   return loaded ? (
-    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success">
+      <span className="w-1.5 h-1.5 rounded-full bg-success inline-block" />
       {t('models.status.loaded')}
     </span>
   ) : (
