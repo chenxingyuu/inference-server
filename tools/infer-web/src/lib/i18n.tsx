@@ -68,18 +68,10 @@ const en = {
   'sources.empty':                 'No sources configured. Add one to start streaming.',
   'sources.adding':                'Adding…',
   'sources.col.availability':      'Availability',
+  'sources.col.checked_at':        'Last checked',
   'sources.status.online':         'Online',
   'sources.status.offline':        'Offline',
-  'sources.checked_at':            'Checked at {time}',
   'sources.refresh_failed':        'Could not refresh source availability.',
-  'sources.reason.connection_failed':         'Could not open the RTSP stream',
-  'sources.reason.connection_timeout':        'RTSP connection timed out',
-  'sources.reason.authentication_failed':    'Camera rejected RTSP credentials',
-  'sources.reason.no_video':                  'The stream has no video track',
-  'sources.reason.first_frame_timeout':       'No video frame was decoded before timeout',
-  'sources.reason.decode_failed':             'Video decoding failed',
-  'sources.reason.stream_failed':             'The stream ended or could not be read',
-  'sources.reason.probe_timeout':             'Connection check timed out',
 
   'models.title':                  'Models',
   'models.load':                   '+ Load Model',
@@ -383,18 +375,10 @@ const zh: Record<keyof typeof en, string> = {
   'sources.empty':                 '暂无数据源，添加一个以开始流式传输。',
   'sources.adding':                '添加中…',
   'sources.col.availability':      '在线状态',
+  'sources.col.checked_at':        '更新时间',
   'sources.status.online':         '在线',
   'sources.status.offline':        '离线',
-  'sources.checked_at':            '检测于 {time}',
   'sources.refresh_failed':        '无法刷新数据源在线状态。',
-  'sources.reason.connection_failed':         '无法打开 RTSP 视频流',
-  'sources.reason.connection_timeout':        'RTSP 连接超时',
-  'sources.reason.authentication_failed':    '摄像头拒绝了 RTSP 凭据',
-  'sources.reason.no_video':                  '视频流没有视频轨道',
-  'sources.reason.first_frame_timeout':       '在时限内未能解出视频帧',
-  'sources.reason.decode_failed':             '视频解码失败',
-  'sources.reason.stream_failed':             '视频流已结束或读取失败',
-  'sources.reason.probe_timeout':             '连接检测超时',
 
   'models.title':                  '模型',
   'models.load':                   '+ 加载模型',
@@ -638,12 +622,6 @@ const zh: Record<keyof typeof en, string> = {
 
 export type Key = keyof typeof en
 
-type SourceReasonKey = Extract<Key, `sources.reason.${string}`>
-
-export function sourceReasonKey(code: string): SourceReasonKey {
-  const key = `sources.reason.${code}`
-  return Object.prototype.hasOwnProperty.call(en, key) ? key as SourceReasonKey : 'sources.reason.stream_failed'
-}
 
 interface I18nCtx {
   lang: Lang

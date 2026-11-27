@@ -4,7 +4,7 @@ import { SourceStatusBadge } from '../components/ui/StatusBadge'
 import { Modal } from '../components/ui/Modal'
 import { Field, Input } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
-import { sourceReasonKey, useT } from '../lib/i18n'
+import { useT } from '../lib/i18n'
 import type { SourceCreate, SourceInfo } from '../types'
 
 const DEFAULTS: SourceCreate = {
@@ -22,8 +22,9 @@ function SourceRow({ source, deleting, onDelete }: {
   deleting: boolean
   onDelete: () => void
 }) {
-  const { lang, t } = useT()
+  const { lang } = useT()
   const { availability, last_probe } = source
+  const checkedAt = last_probe ? new Date(last_probe.checked_at_ms) : null
   // Avoid exposing camera credentials on the page while retaining the original API value.
   const displayUrl = source.url.replace(/^(rtsp:\/\/)[^/?#]*@/, '$1')
 
@@ -32,14 +33,9 @@ function SourceRow({ source, deleting, onDelete }: {
       <td className="font-mono text-[12px] text-ink-primary font-medium">{source.id}</td>
       <td>
         <SourceStatusBadge status={availability?.status} />
-        {last_probe && (
-          <div className="text-[11px] text-ink-muted">
-            {t('sources.checked_at', { time: new Date(last_probe.checked_at_ms).toLocaleString(lang) })}
-          </div>
-        )}
-        {availability?.status === 'offline' && availability.reason && (
-          <div className="text-[11px] text-ink-secondary">{t(sourceReasonKey(availability.reason))}</div>
-        )}
+      </td>
+      <td className="whitespace-nowrap font-mono text-[11px] text-ink-muted">
+        {checkedAt ? <time dateTime={checkedAt.toISOString()}>{checkedAt.toLocaleString(lang)}</time> : '—'}
       </td>
       <td className="font-mono text-[11px] text-ink-muted max-w-xs truncate">{displayUrl}</td>
       <td className="text-right pr-2">
@@ -80,20 +76,21 @@ export function SourcesPage() {
 
       <div className="section">
         {isError && <p role="alert" className="mb-2 text-sm text-danger">{t('sources.refresh_failed')}</p>}
-        <div className="card overflow-hidden">
+        <div className="card overflow-x-auto">
           <table className="data-table">
             <thead>
               <tr>
                 <th>{t('common.id')}</th>
                 <th>{t('sources.col.availability')}</th>
+                <th className="whitespace-nowrap">{t('sources.col.checked_at')}</th>
                 <th>{t('sources.col.url')}</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {isLoading && <LoadingRows cols={4} />}
+              {isLoading && <LoadingRows cols={5} />}
               {!isLoading && !isError && sources.length === 0 && (
-                <EmptyState cols={4} message={t('sources.empty')} />
+                <EmptyState cols={5} message={t('sources.empty')} />
               )}
               {sources.map((s) => (
                 <SourceRow key={s.id} source={s} deleting={remove.isPending} onDelete={() => remove.mutate(s.id)} />
