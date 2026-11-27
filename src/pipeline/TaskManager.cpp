@@ -232,6 +232,7 @@ ITaskManager::ActionResult TaskManager::startLocked(const std::string& task_id) 
     const auto* config = cfg_.findTask(task_id);
     if (!config) return ActionResult::NotFound;
     auto run = std::make_shared<Run>();
+    run->source_id = config->source_id;
     run->startup_deadline = std::chrono::steady_clock::now() +
         std::chrono::milliseconds(cfg_.server.task_start_timeout_ms);
     entry.run = run;
@@ -584,6 +585,59 @@ bool TaskManager::addSource(const PipelineSourceConfig& src) {
     return true;
 }
 
+SourceUpdateResult TaskManager::updateSource(const std::string& id, const SourceUpdate& update) {
+    std::lock_guard lock(mu_);
+    const auto source = std::find_if(cfg_.sources.begin(), cfg_.sources.end(),
+        [&](const auto& item) { return item.id == id; });
+    if (source == cfg_.sources.end()) return {SourceUpdateStatus::NotFound};
+    // The run remains attached until cleanup joins the worker, even if the task was deleted.
+    if (std::any_of(entries_.begin(), entries_.end(), [&](const auto& item) {
+        const auto& run = item.second.run;
+        return run && run->source_id == id;
+    })) return {SourceUpdateStatus::Busy};
+
+    if (update.url.find_first_not_of(" \t\r\n") == std::string::npos ||
+        update.url.find('\0') != std::string::npos ||
+        update.reconnect_delay_ms.value_or(0) < 0 || update.max_reconnect_delay_ms.value_or(0) < 0 ||
+        update.max_reconnect_attempts.value_or(0) < 0 || update.degraded_threshold.value_or(1) < 1 ||
+        update.open_timeout_ms.value_or(1) < 1 || update.read_timeout_ms.value_or(1) < 1) {
+        return {SourceUpdateStatus::InvalidArgument};
+    }
+
+    auto updated = *source;
+    updated.url = update.url;
+    if (supportsSourceProbe(updated) != supportsSourceProbe(*source)) {
+        return {SourceUpdateStatus::InvalidArgument};
+    }
+    updated.reconnect_delay_ms = update.reconnect_delay_ms.value_or(source->reconnect_delay_ms);
+    updated.max_reconnect_delay_ms = update.max_reconnect_delay_ms.value_or(source->max_reconnect_delay_ms);
+    updated.degraded_threshold = update.degraded_threshold.value_or(source->degraded_threshold);
+    updated.max_reconnect_attempts = update.max_reconnect_attempts.value_or(source->max_reconnect_attempts);
+    updated.open_timeout_ms = update.open_timeout_ms.value_or(source->open_timeout_ms);
+    updated.read_timeout_ms = update.read_timeout_ms.value_or(source->read_timeout_ms);
+    const bool reprobe = updated.url != source->url || updated.open_timeout_ms != source->open_timeout_ms ||
+                         updated.read_timeout_ms != source->read_timeout_ms;
+
+    auto next_state = runtime_state_;
+    auto& overrides = next_state.updated_sources;
+    const auto existing = std::find_if(overrides.begin(), overrides.end(),
+        [&](const auto& item) { return item.id == id; });
+    if (existing == overrides.end()) overrides.push_back(updated);
+    else *existing = updated;
+    if (!saveRuntimeState(next_state, runtimeStatePath(config_path_))) {
+        return {SourceUpdateStatus::PersistenceFailed};
+    }
+
+    runtime_state_ = std::move(next_state);
+    *source = std::move(updated);
+    if (reprobe) {
+        source_probes_.erase(id);
+        trackSourceProbeLocked(*source);
+        source_probe_cv_.notify_all();
+    }
+    return {SourceUpdateStatus::Updated, sourceInfoLocked(*source)};
+}
+
 bool TaskManager::removeSource(const std::string& id) {
     std::lock_guard<std::mutex> lock(mu_);
     if (!cfg_.findSource(id)) return false;
@@ -598,6 +652,9 @@ bool TaskManager::removeSource(const std::string& id) {
     auto& added = runtime_state_.added_sources;
     added.erase(std::remove_if(added.begin(), added.end(),
         [&](const auto& s){ return s.id == id; }), added.end());
+    auto& overrides = runtime_state_.updated_sources;
+    overrides.erase(std::remove_if(overrides.begin(), overrides.end(),
+        [&](const auto& s) { return s.id == id; }), overrides.end());
     runtime_state_.removed_source_ids.push_back(id);
     persist();
     return true;

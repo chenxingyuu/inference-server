@@ -4,7 +4,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
+#include <unistd.h>
 
 namespace infer {
 
@@ -246,6 +250,7 @@ RuntimeState loadRuntimeState(const std::string& path) {
 
     RuntimeState s;
     for (const auto& v : j.value("added_sources",    json::array())) s.added_sources.push_back(sourceFromJson(v));
+    for (const auto& v : j.value("updated_sources",  json::array())) s.updated_sources.push_back(sourceFromJson(v));
     for (const auto& v : j.value("removed_source_ids",json::array())) s.removed_source_ids.push_back(v.get<std::string>());
     for (const auto& v : j.value("added_pipelines",  json::array())) s.added_pipelines.push_back(pipelineFromJson(v));
     for (const auto& v : j.value("removed_pipeline_ids",json::array())) s.removed_pipeline_ids.push_back(v.get<std::string>());
@@ -257,11 +262,13 @@ RuntimeState loadRuntimeState(const std::string& path) {
     return s;
 }
 
-void saveRuntimeState(const RuntimeState& state, const std::string& path) {
+bool saveRuntimeState(const RuntimeState& state, const std::string& path) {
     json j;
 
     auto& as = j["added_sources"] = json::array();
     for (const auto& v : state.added_sources) as.push_back(toJson(v));
+    auto& us = j["updated_sources"] = json::array();
+    for (const auto& v : state.updated_sources) us.push_back(toJson(v));
     auto& rs = j["removed_source_ids"] = json::array();
     for (const auto& v : state.removed_source_ids) rs.push_back(v);
 
@@ -282,17 +289,27 @@ void saveRuntimeState(const RuntimeState& state, const std::string& path) {
     auto& rm = j["removed_model_ids"] = json::array();
     for (const auto& v : state.removed_model_ids) rm.push_back(v);
 
-    const std::string tmp = path + ".tmp";
-    {
-        std::ofstream f(tmp);
-        if (!f.is_open()) {
-            LOG_ERROR("RuntimeState: cannot write to {}", tmp);
-            return;
-        }
-        f << j.dump(2);
+    const auto data = j.dump(2);
+    // Sources may include RTSP credentials. mkstemp creates the snapshot with mode 0600.
+    std::string tmp = path + ".tmp.XXXXXX";
+    const int fd = mkstemp(tmp.data());
+    if (fd < 0) {
+        LOG_ERROR("RuntimeState: cannot create snapshot for {}", path);
+        return false;
     }
-    if (std::rename(tmp.c_str(), path.c_str()) != 0)
-        LOG_ERROR("RuntimeState: rename {} → {} failed", tmp, path);
+    std::FILE* file = fdopen(fd, "w");
+    if (!file) {
+        close(fd);
+        std::remove(tmp.c_str());
+        LOG_ERROR("RuntimeState: cannot open snapshot for {}", path);
+        return false;
+    }
+    const bool written = std::fwrite(data.data(), 1, data.size(), file) == data.size();
+    const bool closed = std::fclose(file) == 0;
+    if (written && closed && std::rename(tmp.c_str(), path.c_str()) == 0) return true;
+    std::remove(tmp.c_str());
+    LOG_ERROR("RuntimeState: cannot save snapshot for {}", path);
+    return false;
 }
 
 void applyRuntimeState(AppConfig& cfg, const RuntimeState& state) {
@@ -314,6 +331,11 @@ void applyRuntimeState(AppConfig& cfg, const RuntimeState& state) {
 
     for (const auto& s : state.added_sources)
         if (!hasId(cfg.sources, s.id)) cfg.sources.push_back(s);
+    for (const auto& updated : state.updated_sources) {
+        const auto source = std::find_if(cfg.sources.begin(), cfg.sources.end(),
+            [&](const auto& item) { return item.id == updated.id; });
+        if (source != cfg.sources.end()) *source = updated;
+    }
     for (const auto& p : state.added_pipelines)
         if (!hasId(cfg.pipelines, p.id)) cfg.pipelines.push_back(p);
     for (const auto& t : state.added_tasks)

@@ -55,6 +55,21 @@ export function LoadingRows({ cols }: { cols: number }) {
   )
 }
 
+export function EditButton({ onClick, label, disabled }: { onClick: () => void; label: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="btn-icon text-ink-muted hover:text-accent"
+      title={label}
+      aria-label={label}
+    >
+      <span aria-hidden="true">✎</span>
+    </button>
+  )
+}
+
 export function DeleteButton({ onClick, loading, label }: { onClick: () => void; loading?: boolean; label?: string }) {
   const { t } = useT()
   const [confirming, setConfirming] = useState(false)

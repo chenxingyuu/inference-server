@@ -8,10 +8,6 @@ namespace {
 using namespace std::chrono;
 constexpr std::size_t kMaxConcurrentProbes = 2;
 
-bool supportsProbe(const PipelineSourceConfig& source) {
-    return source.url.compare(0, 7, "rtsp://") == 0;
-}
-
 const char* probeReason(SourceProbeCode code) {
     switch (code) {
         case SourceProbeCode::Passed: return "";
@@ -30,8 +26,12 @@ const char* probeReason(SourceProbeCode code) {
 
 } // namespace
 
+bool TaskManager::supportsSourceProbe(const PipelineSourceConfig& source) {
+    return source.url.compare(0, 7, "rtsp://") == 0;
+}
+
 void TaskManager::trackSourceProbeLocked(const PipelineSourceConfig& source) {
-    if (supportsProbe(source)) {
+    if (supportsSourceProbe(source)) {
         source_probes_.emplace(source.id, std::make_shared<SourceProbeRecord>());
     }
 }
@@ -95,6 +95,7 @@ SourceInfo TaskManager::sourceInfoLocked(const PipelineSourceConfig& source) con
     const auto legacy = StreamHealthRegistry::get().getHealth(source.id);
     SourceInfo info{source.id, source.url, streamStateStr(legacy.state),
                     static_cast<int>(legacy.reconnect_count)};
+    info.config = source;
     const auto probe = source_probes_.find(source.id);
     if (probe == source_probes_.end()) {
         info.availability.status = "unsupported";
@@ -111,7 +112,7 @@ SourceProbeResponse TaskManager::probeSource(const std::string& id, const Source
     std::unique_lock lock(mu_);
     const auto* source = cfg_.findSource(id);
     if (!source) return {{}, false, "source_not_found"};
-    if (!supportsProbe(*source)) return {{}, false, "source_probe_unsupported"};
+    if (!supportsSourceProbe(*source)) return {{}, false, "source_probe_unsupported"};
     if (!probe || source_probe_exit_) return {{}, false, "source_probe_unavailable"};
     if (active_source_probes_.count(id)) return {{}, false, "source_probe_in_progress"};
     if (active_source_probes_.size() >= kMaxConcurrentProbes) return {{}, false, "source_probe_busy"};

@@ -1,5 +1,5 @@
 import type {
-  SourceInfo, SourceCreate, PipelineInfo, PipelineCreate,
+  SourceInfo, SourceCreate, SourceUpdate, PipelineInfo, PipelineCreate,
   ModelInfo, ModelLoad, RepositoryModel, ModelDetail, ModelTestResult, TaskInfo, TaskCreate, OkResponse, ArchiveAnalysis,
 } from '../types'
 
@@ -77,6 +77,8 @@ export const api = {
   sources: {
     list: () => req<SourceInfo[]>('/sources'),
     add: (body: SourceCreate) => req<OkResponse>('/sources', { method: 'POST', body: json(body) }),
+    update: (id: string, body: SourceUpdate) =>
+      req<OkResponse & { data: SourceInfo }>(`/sources/${encodeURIComponent(id)}`, { method: 'PUT', body: json(body) }),
     remove: (id: string) => req<OkResponse>(`/sources/${id}`, { method: 'DELETE' }),
   },
 

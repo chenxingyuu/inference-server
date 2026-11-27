@@ -39,6 +39,24 @@ struct SourceInfo {
     int         reconnect_count{0};
     SourceAvailability availability{};
     std::optional<SourceProbeResult> last_probe{};
+    PipelineSourceConfig config{};
+};
+
+struct SourceUpdate {
+    std::string url;
+    std::optional<int> reconnect_delay_ms;
+    std::optional<int> max_reconnect_delay_ms;
+    std::optional<int> degraded_threshold;
+    std::optional<int> max_reconnect_attempts;
+    std::optional<int> open_timeout_ms;
+    std::optional<int> read_timeout_ms;
+};
+
+enum class SourceUpdateStatus { Updated, NotFound, Busy, InvalidArgument, PersistenceFailed };
+
+struct SourceUpdateResult {
+    SourceUpdateStatus status;
+    std::optional<SourceInfo> source{};
 };
 
 struct SourceProbeResponse {
@@ -152,6 +170,9 @@ public:
 
     // Mutations — all return false on conflict (duplicate id or id not found).
     virtual bool addSource(const PipelineSourceConfig& src) = 0;
+    virtual SourceUpdateResult updateSource(const std::string&, const SourceUpdate&) {
+        return {SourceUpdateStatus::NotFound};
+    }
     virtual bool removeSource(const std::string& id) = 0;
 
     virtual bool addPipeline(const PipelineConfig& pipeline) = 0;

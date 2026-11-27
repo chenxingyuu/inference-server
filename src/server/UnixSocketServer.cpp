@@ -104,6 +104,21 @@ json sourceDiagnosticsJson(const SourceInfo& source) {
     return {{"id", source.id}, {"availability", std::move(status)}, {"last_probe", std::move(probe)}};
 }
 
+json sourceInfoJson(const SourceInfo& source) {
+    auto result = sourceDiagnosticsJson(source);
+    result["url"] = source.url;
+    result["state"] = source.state;
+    result["reconnect_count"] = source.reconnect_count;
+    const auto& config = source.config;
+    result["config"] = {{"reconnect_delay_ms", config.reconnect_delay_ms},
+                        {"max_reconnect_delay_ms", config.max_reconnect_delay_ms},
+                        {"degraded_threshold", config.degraded_threshold},
+                        {"max_reconnect_attempts", config.max_reconnect_attempts},
+                        {"open_timeout_ms", config.open_timeout_ms},
+                        {"read_timeout_ms", config.read_timeout_ms}};
+    return result;
+}
+
 bool sendAll(int fd, const std::string& response) {
 #ifdef MSG_NOSIGNAL
     constexpr int flags = MSG_NOSIGNAL;
@@ -290,11 +305,7 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
     if (cmd == "list_sources") {
         json arr = json::array();
         for (const auto& s : task_manager_.listSources()) {
-            auto source = sourceDiagnosticsJson(s);
-            source["url"] = s.url;
-            source["state"] = s.state;
-            source["reconnect_count"] = s.reconnect_count;
-            arr.push_back(std::move(source));
+            arr.push_back(sourceInfoJson(s));
         }
         return json({{"status", "ok"}, {"data", arr}}).dump();
     }
@@ -441,9 +452,49 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
         src.max_reconnect_delay_ms= req.value("max_reconnect_delay_ms",src.max_reconnect_delay_ms);
         src.degraded_threshold    = req.value("degraded_threshold",    src.degraded_threshold);
         src.max_reconnect_attempts= req.value("max_reconnect_attempts",src.max_reconnect_attempts);
+        src.open_timeout_ms       = req.value("open_timeout_ms",       src.open_timeout_ms);
+        src.read_timeout_ms       = req.value("read_timeout_ms",       src.read_timeout_ms);
         if (!task_manager_.addSource(src))
             return json({{"status", "error"}, {"message", "already exists: " + id}}).dump();
         return json({{"status", "ok"}, {"id", id}}).dump();
+    }
+
+    if (cmd == "update_source") {
+        try {
+            const auto id = requiredTaskString(req, "id");
+            const auto setting = [&](const char* field, int minimum) -> std::optional<int> {
+                if (!req.contains(field)) return std::nullopt;
+                return taskInteger(req, field, minimum, minimum);
+            };
+            const SourceUpdate update{requiredTaskString(req, "url"),
+                                      setting("reconnect_delay_ms", 0),
+                                      setting("max_reconnect_delay_ms", 0),
+                                      setting("degraded_threshold", 1),
+                                      setting("max_reconnect_attempts", 0),
+                                      setting("open_timeout_ms", 1),
+                                      setting("read_timeout_ms", 1)};
+            const auto result = task_manager_.updateSource(id, update);
+            switch (result.status) {
+                case SourceUpdateStatus::Updated:
+                    return json({{"status", "ok"}, {"id", id},
+                                 {"data", sourceInfoJson(*result.source)}}).dump();
+                case SourceUpdateStatus::NotFound:
+                    return json({{"status", "error"}, {"code", "not_found"},
+                                 {"message", "source not found"}}).dump();
+                case SourceUpdateStatus::Busy:
+                    return json({{"status", "error"}, {"code", "in_use"},
+                                 {"message", "stop related tasks and wait for cleanup before editing"}}).dump();
+                case SourceUpdateStatus::InvalidArgument:
+                    return json({{"status", "error"}, {"code", "invalid_argument"},
+                                 {"message", "invalid source settings or source type change"}}).dump();
+                case SourceUpdateStatus::PersistenceFailed:
+                    return json({{"status", "error"}, {"code", "persistence_failed"},
+                                 {"message", "could not save the source configuration"}}).dump();
+            }
+        } catch (const std::runtime_error& error) {
+            return json({{"status", "error"}, {"code", "invalid_argument"},
+                         {"message", error.what()}}).dump();
+        }
     }
 
     if (cmd == "remove_source") {

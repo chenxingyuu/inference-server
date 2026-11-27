@@ -141,6 +141,17 @@ func (s *Store) SaveSource(src SourceCreate) error {
 	return s.save()
 }
 
+// UpdateSavedSource refreshes the replay record for a source originally added via HTTP.
+func (s *Store) UpdateSavedSource(src SourceCreate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.state.Sources[src.ID]; !exists {
+		return nil
+	}
+	s.state.Sources[src.ID] = src
+	return s.save()
+}
+
 // DeleteSource removes a source by ID. No-op if absent.
 func (s *Store) DeleteSource(id string) error {
 	s.mu.Lock()

@@ -1111,6 +1111,85 @@ const docTemplate = `{
             }
         },
         "/sources/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sources"
+                ],
+                "summary": "Update a data source while its tasks are inactive",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Source address and optional settings",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.SourceUpdate"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.SourceUpdateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "engine unreachable",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -2157,6 +2236,9 @@ const docTemplate = `{
                 "availability": {
                     "$ref": "#/definitions/infer-server.SourceAvailability"
                 },
+                "config": {
+                    "$ref": "#/definitions/infer-server.SourceSettings"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -2213,6 +2295,72 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "infer-server.SourceSettings": {
+            "type": "object",
+            "properties": {
+                "degraded_threshold": {
+                    "type": "integer"
+                },
+                "max_reconnect_attempts": {
+                    "type": "integer"
+                },
+                "max_reconnect_delay_ms": {
+                    "type": "integer"
+                },
+                "open_timeout_ms": {
+                    "type": "integer"
+                },
+                "read_timeout_ms": {
+                    "type": "integer"
+                },
+                "reconnect_delay_ms": {
+                    "type": "integer"
+                }
+            }
+        },
+        "infer-server.SourceUpdate": {
+            "type": "object",
+            "required": [
+                "url"
+            ],
+            "properties": {
+                "degraded_threshold": {
+                    "type": "integer"
+                },
+                "max_reconnect_attempts": {
+                    "type": "integer"
+                },
+                "max_reconnect_delay_ms": {
+                    "type": "integer"
+                },
+                "open_timeout_ms": {
+                    "type": "integer"
+                },
+                "read_timeout_ms": {
+                    "type": "integer"
+                },
+                "reconnect_delay_ms": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "infer-server.SourceUpdateResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/infer-server.SourceInfo"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }

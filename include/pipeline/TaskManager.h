@@ -51,6 +51,7 @@ public:
     std::vector<ModelInfo>                     listModels()   const override;
 
     bool addSource(const PipelineSourceConfig& src)  override;
+    SourceUpdateResult updateSource(const std::string& id, const SourceUpdate& update) override;
     bool removeSource(const std::string& id)         override;
     bool addPipeline(const PipelineConfig& pipeline)    override;
     bool removePipeline(const std::string& id)          override;
@@ -73,6 +74,7 @@ public:
 private:
     // Each run owns its graph. It remains attached until its worker has been joined.
     struct Run {
+        std::string source_id;
         std::atomic<bool> cancelled{false};
         bool done{false};
         bool stop_requested{false};
@@ -90,6 +92,7 @@ private:
     bool validateTask(const TaskConfig& task) const;
     std::unique_ptr<GraphExecutor> buildGraph(const AppConfig& cfg, const TaskConfig& task);
     SourceInfo sourceInfoLocked(const PipelineSourceConfig& source) const;
+    static bool supportsSourceProbe(const PipelineSourceConfig& source);
     void trackSourceProbeLocked(const PipelineSourceConfig& source);
     SourceProbeResponse runSourceProbeLocked(const PipelineSourceConfig& source, const SourceProbe& probe,
                                              std::unique_lock<std::mutex>& lock);

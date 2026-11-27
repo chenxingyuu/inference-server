@@ -158,6 +158,34 @@ TEST_F(TaskLifecycleTest, WaitsForFirstFrameAndIsolatesTasksWithSameSource) {
     ASSERT_TRUE(waitFor([&] { return task("two").state == TaskState::Running; }));
 }
 
+TEST_F(TaskLifecycleTest, SourceEditsWaitForStartingRunningAndDeletedTaskCleanup) {
+    init(5000);
+    SourceUpdate edit{};
+    edit.url = "/videos/replacement.mp4";
+    first_.slow_start = true;
+    ASSERT_TRUE(manager_->start("one"));
+    ASSERT_TRUE(waitFor([&] { return first_.entered_start.load(); }));
+    EXPECT_EQ(manager_->updateSource("shared-input", edit).status, SourceUpdateStatus::Busy);
+    first_.slow_start = false;
+    first_.emit_frame = true;
+    ASSERT_TRUE(waitFor([&] { return task().state == TaskState::Running; }));
+    EXPECT_EQ(manager_->updateSource("shared-input", edit).status, SourceUpdateStatus::Busy);
+    ASSERT_TRUE(manager_->stop("one"));
+    ASSERT_TRUE(waitFor([&] { return task().state == TaskState::Stopped && !task().cleanup_pending; }));
+
+    second_.slow_start = true;
+    ASSERT_TRUE(manager_->start("two"));
+    ASSERT_TRUE(waitFor([&] { return second_.entered_start.load(); }));
+    ASSERT_TRUE(manager_->removeTask("two"));
+    EXPECT_EQ(manager_->updateSource("shared-input", edit).status, SourceUpdateStatus::Busy);
+    second_.slow_start = false;
+    ASSERT_TRUE(waitFor([&] {
+        return manager_->updateSource("shared-input", edit).status == SourceUpdateStatus::Updated;
+    }));
+    EXPECT_EQ(manager_->listSources().front().url, edit.url);
+    EXPECT_EQ(task().config.source_id, "shared-input");
+}
+
 TEST_F(TaskLifecycleTest, FailedStartupCleansUpAndAllowsRetry) {
     init();
     first_.bad_start = true;

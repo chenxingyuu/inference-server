@@ -8,6 +8,7 @@ type SourceInfo struct {
 	ReconnectCount int                `json:"reconnect_count"`
 	Availability   SourceAvailability `json:"availability"`
 	LastProbe      *SourceProbeResult `json:"last_probe"`
+	Config         *SourceSettings    `json:"config,omitempty"`
 }
 
 type SourceAvailability struct {
@@ -33,14 +34,29 @@ type SourceProbeResponse struct {
 
 // SourceCreate is the request body for POST /sources.
 type SourceCreate struct {
-	ID                   string `json:"id"                              binding:"required"`
-	URL                  string `json:"url"                             binding:"required"`
-	ReconnectDelayMs     int    `json:"reconnect_delay_ms,omitempty"`
-	MaxReconnectDelayMs  int    `json:"max_reconnect_delay_ms,omitempty"`
-	DegradedThreshold    int    `json:"degraded_threshold,omitempty"`
-	MaxReconnectAttempts int    `json:"max_reconnect_attempts,omitempty"`
-	OpenTimeoutMs        int    `json:"open_timeout_ms,omitempty"`
-	ReadTimeoutMs        int    `json:"read_timeout_ms,omitempty"`
+	ID  string `json:"id" binding:"required"`
+	URL string `json:"url" binding:"required"`
+	SourceSettings
+}
+
+type SourceSettings struct {
+	ReconnectDelayMs     *int `json:"reconnect_delay_ms,omitempty"`
+	MaxReconnectDelayMs  *int `json:"max_reconnect_delay_ms,omitempty"`
+	DegradedThreshold    *int `json:"degraded_threshold,omitempty"`
+	MaxReconnectAttempts *int `json:"max_reconnect_attempts,omitempty"`
+	OpenTimeoutMs        *int `json:"open_timeout_ms,omitempty"`
+	ReadTimeoutMs        *int `json:"read_timeout_ms,omitempty"`
+}
+
+type SourceUpdate struct {
+	URL string `json:"url" binding:"required"`
+	SourceSettings
+}
+
+type SourceUpdateResponse struct {
+	Status string     `json:"status"`
+	ID     string     `json:"id"`
+	Data   SourceInfo `json:"data"`
 }
 
 // PipelineEdgeInfo describes a single edge in a pipeline.

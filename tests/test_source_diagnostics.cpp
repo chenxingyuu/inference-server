@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <filesystem>
 #include <future>
 #include <netinet/in.h>
 #include <poll.h>
@@ -55,15 +56,19 @@ bool waitFor(Predicate predicate) {
 
 class SourceDiagnosticsTest : public testing::Test {
 protected:
-    void SetUp() override {
+    AppConfig baseConfig() {
         AppConfig config;
         config.sources = {{"camera", "rtsp://fixture/camera"},
                           {"yard", "rtsp://fixture/yard"},
                           {"lobby", "rtsp://fixture/lobby"},
                           {"recording", "/videos/recording.mp4"}};
+        return config;
+    }
+
+    void SetUp() override {
         path_ = "/tmp/infer-source-diagnostics-" + std::to_string(getpid()) + ".yaml";
         std::remove(runtimeStatePath(path_).c_str());
-        init(std::move(config));
+        init(baseConfig());
     }
 
     void TearDown() override {
@@ -117,6 +122,86 @@ protected:
     std::string path_;
     std::unique_ptr<TaskManager> manager_;
 };
+
+TEST_F(SourceDiagnosticsTest, EditsPersistForConfiguredAndAddedSources) {
+    EXPECT_TRUE(manager_->addSource({"added", "/videos/old.mp4"}));
+    SourceUpdate edit{};
+    edit.url = "rtsp://fixture/new";
+    edit.max_reconnect_attempts = 0;
+    edit.open_timeout_ms = 2345;
+    ASSERT_EQ(manager_->updateSource("camera", edit).status, SourceUpdateStatus::Updated);
+    edit = {};
+    edit.url = "/videos/new.mp4";
+    ASSERT_EQ(manager_->updateSource("added", edit).status, SourceUpdateStatus::Updated);
+    EXPECT_EQ(manager_->updateSource("missing", edit).status, SourceUpdateStatus::NotFound);
+    EXPECT_EQ(manager_->updateSource("camera", edit).status, SourceUpdateStatus::InvalidArgument);
+
+    init(baseConfig());
+    const auto sources = manager_->listSources();
+    EXPECT_EQ(sources.front().url, "rtsp://fixture/new");
+    EXPECT_EQ(sources.front().config.max_reconnect_attempts, 0);
+    EXPECT_EQ(sources.front().config.open_timeout_ms, 2345);
+    EXPECT_EQ(sources.front().config.read_timeout_ms, 5000);
+    EXPECT_EQ(sources.back().url, "/videos/new.mp4");
+    EXPECT_EQ(sources.back().availability.status, "unsupported");
+    ASSERT_TRUE(manager_->removeSource("camera"));
+    ASSERT_TRUE(manager_->removeSource("added"));
+    init(baseConfig());
+    EXPECT_TRUE(sourceStatus("camera").empty());
+    EXPECT_TRUE(sourceStatus("added").empty());
+    ASSERT_TRUE(manager_->addSource({"camera", "rtsp://fixture/re-added"}));
+    EXPECT_EQ(manager_->listSources().back().url, "rtsp://fixture/re-added");
+}
+
+TEST_F(SourceDiagnosticsTest, FailedSavePreservesConfigurationAndAvailability) {
+    const auto probe = manager_->probeSource("camera", [](const auto&) { return SourceProbeCode::Passed; });
+    ASSERT_TRUE(probe.source && probe.source->last_probe);
+    // An existing directory at the destination prevents atomic replacement.
+    ASSERT_TRUE(std::filesystem::create_directory(runtimeStatePath(path_)));
+    SourceUpdate edit{};
+    edit.url = "rtsp://fixture/fail";
+    EXPECT_EQ(manager_->updateSource("camera", edit).status, SourceUpdateStatus::PersistenceFailed);
+    const auto source = manager_->listSources().front();
+    EXPECT_EQ(source.url, probe.source->url);
+    EXPECT_EQ(source.availability.status, "online");
+    ASSERT_TRUE(source.last_probe);
+    EXPECT_EQ(source.last_probe->checked_at_ms, probe.source->last_probe->checked_at_ms);
+}
+
+TEST_F(SourceDiagnosticsTest, EditsResetProbeOnlyWhenItsSettingsChange) {
+    const auto online = manager_->probeSource("camera", [](const auto&) { return SourceProbeCode::Passed; });
+    ASSERT_TRUE(online.source && online.source->last_probe);
+    SourceUpdate edit{};
+    edit.url = online.source->url;
+    edit.reconnect_delay_ms = 42;
+    const auto reconnected = manager_->updateSource("camera", edit);
+    ASSERT_TRUE(reconnected.source && reconnected.source->last_probe);
+    EXPECT_EQ(reconnected.source->last_probe->checked_at_ms, online.source->last_probe->checked_at_ms);
+
+    std::promise<void> started, release;
+    const auto ready = started.get_future();
+    const auto done = release.get_future();
+    auto old_probe = std::async(std::launch::async, [&] {
+        return manager_->probeSource("camera", [&](const auto&) {
+            started.set_value();
+            done.wait_for(2s);
+            return SourceProbeCode::Passed;
+        });
+    });
+    ASSERT_EQ(ready.wait_for(2s), std::future_status::ready);
+    edit.read_timeout_ms = 3456;
+    const auto changed = manager_->updateSource("camera", edit);
+    ASSERT_TRUE(changed.source);
+    EXPECT_EQ(changed.source->availability.status, "unchecked");
+    EXPECT_FALSE(changed.source->last_probe);
+    release.set_value();
+    EXPECT_FALSE(old_probe.get().source);
+    EXPECT_EQ(sourceStatus("camera"), "unchecked");
+    manager_->startSourceMonitoring([](const auto& source) {
+        return source.read_timeout_ms == 3456 ? SourceProbeCode::NoVideo : SourceProbeCode::Passed;
+    });
+    EXPECT_TRUE(waitFor([&] { return sourceStatus("camera") == "offline"; }));
+}
 
 TEST_F(SourceDiagnosticsTest, UsesFirstFrameResultAndPreservesItOnServiceFailure) {
     const ITaskManager::SourceProbe passed = [](const PipelineSourceConfig&) {

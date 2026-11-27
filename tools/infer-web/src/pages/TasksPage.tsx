@@ -6,7 +6,7 @@ import {
 import { TaskStatusBadge } from '../components/ui/StatusBadge'
 import { Modal } from '../components/ui/Modal'
 import { Field, Input, Select } from '../components/ui/Field'
-import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
+import { PageHeader, EmptyState, LoadingRows, DeleteButton, EditButton } from '../components/layout/Layout'
 import { useT } from '../lib/i18n'
 import type { TaskCreate, TaskInfo, SamplingMode } from '../types'
 
@@ -200,14 +200,11 @@ export function TasksPage() {
                         <div className="flex items-center justify-end gap-1 pr-2">
                           {inactive ? (
                             <>
-                              <button
+                              <EditButton
                                 disabled={tk.cleanup_pending}
                                 onClick={() => openEdit(tk)}
-                                className="btn-icon text-ink-muted hover:text-accent"
-                                title={t('tasks.edit')}
-                              >
-                                ✎
-                              </button>
+                                label={t('tasks.edit')}
+                              />
                               <button
                                 onClick={() => start.mutate(tk.id)}
                                 disabled={start.isPending || tk.cleanup_pending}

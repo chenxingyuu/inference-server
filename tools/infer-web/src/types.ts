@@ -27,17 +27,24 @@ export interface SourceInfo {
   reconnect_count: number
   availability?: SourceAvailability
   last_probe?: SourceProbeResult | null
+  config?: SourceSettings
 }
 
-export interface SourceCreate {
-  id: string
-  url: string
+export interface SourceSettings {
   reconnect_delay_ms?: number
   max_reconnect_delay_ms?: number
   degraded_threshold?: number
   max_reconnect_attempts?: number
   open_timeout_ms?: number
   read_timeout_ms?: number
+}
+
+export interface SourceUpdate extends SourceSettings {
+  url: string
+}
+
+export interface SourceCreate extends SourceUpdate {
+  id: string
 }
 
 export interface PipelineNodeInfo {

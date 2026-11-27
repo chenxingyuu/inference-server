@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api, ApiError } from '../lib/api'
 import { useT } from '../lib/i18n'
-import type { SourceCreate, PipelineCreate, ModelLoad, TaskCreate } from '../types'
+import type { SourceCreate, SourceInfo, SourceUpdate, PipelineCreate, ModelLoad, TaskCreate } from '../types'
 
 // ─── Health ────────────────────────────────────────────────────────────────
 
@@ -44,6 +44,20 @@ export const useRemoveSource = () => {
       qc.invalidateQueries({ queryKey: ['sources'] })
     },
     onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+export const useUpdateSource = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: SourceUpdate }) => api.sources.update(id, body),
+    onSuccess: async ({ data }) => {
+      await qc.cancelQueries({ queryKey: ['sources'] })
+      qc.setQueryData<SourceInfo[]>(['sources'], (sources) => sources?.map((source) =>
+        source.id === data.id ? data : source,
+      ))
+      void qc.invalidateQueries({ queryKey: ['sources'] })
+    },
   })
 }
 

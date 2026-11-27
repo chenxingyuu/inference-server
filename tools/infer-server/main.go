@@ -41,6 +41,7 @@ var (
 	modelRepositoryPath = envOr("MODEL_REPOSITORY", "")
 	store               *Store
 	taskWritesMu        sync.Mutex
+	sourceWritesMu      sync.Mutex
 )
 
 func envOr(key, def string) string {
@@ -205,6 +206,8 @@ func handleAddSource(c *gin.Context) {
 		c.String(http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	sourceWritesMu.Lock()
+	defer sourceWritesMu.Unlock()
 	m := mustToMap(body)
 	m["cmd"] = "add_source"
 	resp, err := call(m)
@@ -222,6 +225,65 @@ func handleAddSource(c *gin.Context) {
 	c.JSON(code, resp)
 }
 
+// handleUpdateSource godoc
+//
+//	@Summary	Update a data source while its tasks are inactive
+//	@Tags		sources
+//	@Accept		json
+//	@Produce	json
+//	@Security	ApiKeyAuth
+//	@Param		id	path	string	true	"Source ID"
+//	@Param		body	body	SourceUpdate	true	"Source address and optional settings"
+//	@Success	200	{object}	SourceUpdateResponse
+//	@Failure	400	{object}	ErrorResponse
+//	@Failure	401	{object}	ErrorResponse
+//	@Failure	404	{object}	ErrorResponse
+//	@Failure	409	{object}	ErrorResponse
+//	@Failure	500	{object}	ErrorResponse
+//	@Failure	503	{string}	string	"engine unreachable"
+//	@Router		/sources/{id} [put]
+func handleUpdateSource(c *gin.Context) {
+	var body SourceUpdate
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Status: "error", Code: "invalid_argument", Message: "invalid source settings"})
+		return
+	}
+	sourceWritesMu.Lock()
+	defer sourceWritesMu.Unlock()
+	id := c.Param("id")
+	cmd := mustToMap(body)
+	cmd["cmd"], cmd["id"] = "update_source", id
+	resp, err := call(cmd)
+	if err != nil {
+		engineUnavailable(c, err)
+		return
+	}
+	if resp["status"] != "ok" {
+		code := http.StatusInternalServerError
+		switch resp["code"] {
+		case "invalid_argument":
+			code = http.StatusBadRequest
+		case "not_found":
+			code = http.StatusNotFound
+		case "in_use":
+			code = http.StatusConflict
+		}
+		c.JSON(code, resp)
+		return
+	}
+
+	data, err := json.Marshal(resp["data"])
+	var source SourceInfo
+	if err != nil || json.Unmarshal(data, &source) != nil || source.ID != id || source.Config == nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Status: "error", Code: "invalid_response", Message: "invalid engine response"})
+		return
+	}
+	if err := store.UpdateSavedSource(SourceCreate{ID: id, URL: source.URL, SourceSettings: *source.Config}); err != nil {
+		fmt.Fprintln(os.Stderr, "WARNING: source saved by engine but management replay record could not be saved:", err)
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 // handleRemoveSource godoc
 //
 //	@Summary	Remove a source
@@ -236,6 +298,8 @@ func handleAddSource(c *gin.Context) {
 //	@Failure	503	{string}	string			"engine unreachable"
 //	@Router		/sources/{id} [delete]
 func handleRemoveSource(c *gin.Context) {
+	sourceWritesMu.Lock()
+	defer sourceWritesMu.Unlock()
 	callDelete(c, "remove_source", func(id string) { _ = store.DeleteSource(id) })
 }
 
@@ -711,6 +775,7 @@ func main() {
 
 	api.GET("/sources", handleListSources)
 	api.POST("/sources", handleAddSource)
+	api.PUT("/sources/:id", handleUpdateSource)
 	api.DELETE("/sources/:id", handleRemoveSource)
 
 	api.GET("/pipelines", handleListPipelines)

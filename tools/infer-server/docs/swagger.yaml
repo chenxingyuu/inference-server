@@ -428,6 +428,8 @@ definitions:
     properties:
       availability:
         $ref: '#/definitions/infer-server.SourceAvailability'
+      config:
+        $ref: '#/definitions/infer-server.SourceSettings'
       id:
         type: string
       last_probe:
@@ -467,6 +469,49 @@ definitions:
       passed:
         type: boolean
       reason:
+        type: string
+    type: object
+  infer-server.SourceSettings:
+    properties:
+      degraded_threshold:
+        type: integer
+      max_reconnect_attempts:
+        type: integer
+      max_reconnect_delay_ms:
+        type: integer
+      open_timeout_ms:
+        type: integer
+      read_timeout_ms:
+        type: integer
+      reconnect_delay_ms:
+        type: integer
+    type: object
+  infer-server.SourceUpdate:
+    properties:
+      degraded_threshold:
+        type: integer
+      max_reconnect_attempts:
+        type: integer
+      max_reconnect_delay_ms:
+        type: integer
+      open_timeout_ms:
+        type: integer
+      read_timeout_ms:
+        type: integer
+      reconnect_delay_ms:
+        type: integer
+      url:
+        type: string
+    required:
+    - url
+    type: object
+  infer-server.SourceUpdateResponse:
+    properties:
+      data:
+        $ref: '#/definitions/infer-server.SourceInfo'
+      id:
+        type: string
+      status:
         type: string
     type: object
   infer-server.StageConfig:
@@ -1289,6 +1334,57 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Remove a source
+      tags:
+      - sources
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Source address and optional settings
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/infer-server.SourceUpdate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.SourceUpdateResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: engine unreachable
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: Update a data source while its tasks are inactive
       tags:
       - sources
   /sources/{id}/probe:
