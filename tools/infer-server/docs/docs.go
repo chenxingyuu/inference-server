@@ -1023,6 +1023,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
+                "description": "Returns the latest independent RTSP probe results from the engine cache.",
                 "produces": [
                     "application/json"
                 ],
@@ -1173,7 +1174,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Reuses a recent frame from a running decoder when available. Otherwise opens the configured RTSP stream once. A completed check returns 200 even when the source failed.",
+                "description": "Opens the configured RTSP stream independently of tasks and updates the engine cache. A completed check returns 200 for both online and offline results.",
                 "produces": [
                     "application/json"
                 ],
@@ -2096,7 +2097,6 @@ const docTemplate = `{
                 "basis": {
                     "type": "string",
                     "enum": [
-                        "runtime",
                         "probe",
                         "none"
                     ]
@@ -2111,13 +2111,8 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "online",
-                        "connecting",
-                        "reconnecting",
-                        "unavailable",
-                        "probe_passed",
-                        "probe_failed",
+                        "offline",
                         "unchecked",
-                        "expired",
                         "unsupported"
                     ]
                 }
@@ -2200,6 +2195,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/infer-server.SourceProbeResult"
                 },
                 "reused_runtime": {
+                    "description": "Always false for independent probes.",
                     "type": "boolean"
                 }
             }

@@ -7,9 +7,8 @@ export type DropPolicy = 'block' | 'drop_oldest' | 'drop_newest'
 export type SamplingMode = 'frame_count' | 'time_based'
 
 export interface SourceAvailability {
-  status: 'online' | 'connecting' | 'reconnecting' | 'unavailable' | 'probe_passed' |
-    'probe_failed' | 'unchecked' | 'expired' | 'unsupported'
-  basis: 'runtime' | 'probe' | 'none'
+  status: 'online' | 'offline' | 'unchecked' | 'unsupported'
+  basis: 'probe' | 'none'
   observed_at_ms?: number
   reason?: string
 }
@@ -28,13 +27,6 @@ export interface SourceInfo {
   reconnect_count: number
   availability?: SourceAvailability
   last_probe?: SourceProbeResult | null
-}
-
-export interface SourceProbeResponse {
-  id: string
-  availability: SourceAvailability
-  last_probe: SourceProbeResult | null
-  reused_runtime: boolean
 }
 
 export interface SourceCreate {

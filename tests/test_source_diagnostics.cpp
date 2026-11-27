@@ -2,6 +2,7 @@
 
 #include "pipeline/TaskManager.h"
 
+#include <atomic>
 #include <cstdio>
 #include <future>
 #include <netinet/in.h>
@@ -76,7 +77,7 @@ protected:
             std::unordered_map<std::string, IPublisher*>{}, nullptr);
     }
 
-    void startCamera(uint16_t port) {
+    void configureCamera(uint16_t port) {
         AppConfig config;
         config.server.task_start_timeout_ms = 1000;
         PipelineSourceConfig camera;
@@ -96,7 +97,6 @@ protected:
         config.tasks.push_back(std::move(task));
         init(std::move(config));
         manager_->loadAll();
-        manager_->startAll();
     }
 
     bool startupTimeoutCleanedUp() {
@@ -105,6 +105,13 @@ protected:
         const auto& task = tasks.front();
         return task.state == TaskState::Failed && !task.cleanup_pending &&
             task.failure && task.failure->code == "startup_timeout";
+    }
+
+    std::string sourceStatus(const std::string& id) {
+        for (const auto& source : manager_->listSources()) {
+            if (source.id == id) return source.availability.status;
+        }
+        return {};
     }
 
     std::string path_;
@@ -125,7 +132,8 @@ TEST_F(SourceDiagnosticsTest, UsesFirstFrameResultAndPreservesItOnServiceFailure
     ASSERT_TRUE(success.source);
     ASSERT_TRUE(success.source->last_probe);
     EXPECT_TRUE(success.source->last_probe->passed);
-    EXPECT_EQ(success.source->availability.status, "probe_passed");
+    EXPECT_EQ(success.source->availability.status, "online");
+    EXPECT_FALSE(success.reused_runtime);
     EXPECT_EQ(success.source->availability.basis, "probe");
 
     const auto failure = manager_->probeSource("camera", [](const auto&) {
@@ -141,7 +149,7 @@ TEST_F(SourceDiagnosticsTest, UsesFirstFrameResultAndPreservesItOnServiceFailure
     }).error, "source_probe_unavailable");
     const auto sources = manager_->listSources();
     ASSERT_TRUE(sources.front().last_probe);
-    EXPECT_EQ(sources.front().availability.status, "probe_failed");
+    EXPECT_EQ(sources.front().availability.status, "offline");
     EXPECT_EQ(sources.front().last_probe->checked_at_ms, failure.source->last_probe->checked_at_ms);
     EXPECT_EQ(sources.front().state, "STOPPED");
 }
@@ -185,73 +193,95 @@ TEST_F(SourceDiagnosticsTest, LimitsConcurrentProbesAndDiscardsResultsFromDelete
     EXPECT_FALSE(sources.back().last_probe);
 }
 
-TEST_F(SourceDiagnosticsTest, StartupTimeoutKeepsAnObservedRtspFailureAfterCleanup) {
+TEST_F(SourceDiagnosticsTest, AutomaticallyTracksChangesAndRetriesAfterServiceFailure) {
+    const auto result = std::make_shared<std::atomic<SourceProbeCode>>(SourceProbeCode::Passed);
+    const auto unavailable_checks = std::make_shared<std::atomic<int>>(0);
+    const auto file_checks = std::make_shared<std::atomic<int>>(0);
+    manager_->startSourceMonitoring([result, unavailable_checks, file_checks](const auto& source) {
+        if (source.id == "recording") ++*file_checks;
+        const auto code = result->load();
+        if (source.id == "camera" && code == SourceProbeCode::Unavailable) ++*unavailable_checks;
+        return code;
+    }, 20ms);
+
+    EXPECT_TRUE(manager_->listTasks().empty());
+    ASSERT_TRUE(waitFor([&] { return sourceStatus("camera") == "online"; }));
+    result->store(SourceProbeCode::FirstFrameTimeout);
+    ASSERT_TRUE(waitFor([&] { return sourceStatus("camera") == "offline"; }));
+    const auto failed = manager_->listSources().front();
+    ASSERT_TRUE(failed.last_probe);
+    EXPECT_EQ(failed.availability.reason, "first_frame_timeout");
+
+    result->store(SourceProbeCode::Unavailable);
+    ASSERT_TRUE(waitFor([&] { return unavailable_checks->load() >= 2; }));
+    const auto retained = manager_->listSources().front();
+    ASSERT_TRUE(retained.last_probe);
+    EXPECT_EQ(retained.availability.status, "offline");
+    EXPECT_EQ(retained.availability.reason, "first_frame_timeout");
+
+    result->store(SourceProbeCode::Passed);
+    ASSERT_TRUE(waitFor([&] { return sourceStatus("camera") == "online"; }));
+    EXPECT_EQ(sourceStatus("recording"), "unsupported");
+    manager_->stopSourceMonitoring();
+    EXPECT_EQ(file_checks->load(), 0);
+}
+
+TEST_F(SourceDiagnosticsTest, BackgroundAndManualChecksShareSlotsAndRejectStaleResults) {
+    const auto started = std::make_shared<std::atomic<int>>(0);
+    std::promise<void> release;
+    const auto done = release.get_future().share();
+    manager_->startSourceMonitoring([started, done](const auto& source) {
+        if (source.url == "rtsp://fixture/replacement") return SourceProbeCode::AuthenticationFailed;
+        if (source.id == "camera" || source.id == "yard") {
+            ++*started;
+            done.wait_for(2s);
+        }
+        return SourceProbeCode::Passed;
+    });
+    const bool both_started = waitFor([&] { return started->load() == 2; });
+    if (!both_started) release.set_value();
+    ASSERT_TRUE(both_started);
+    EXPECT_EQ(sourceStatus("camera"), "unchecked");
+
+    const ITaskManager::SourceProbe unexpected = [](const auto&) {
+        ADD_FAILURE() << "Manual probe should not start while background slots are occupied";
+        return SourceProbeCode::Passed;
+    };
+    EXPECT_EQ(manager_->probeSource("camera", unexpected).error, "source_probe_in_progress");
+    EXPECT_EQ(manager_->probeSource("lobby", unexpected).error, "source_probe_busy");
+    EXPECT_TRUE(manager_->removeSource("camera"));
+    EXPECT_TRUE(manager_->addSource({"camera", "rtsp://fixture/replacement"}));
+    EXPECT_EQ(manager_->probeSource("camera", unexpected).error, "source_probe_in_progress");
+    EXPECT_EQ(sourceStatus("camera"), "unchecked");
+    release.set_value();
+
+    ASSERT_TRUE(waitFor([&] { return sourceStatus("camera") == "offline"; }));
+    EXPECT_TRUE(waitFor([&] { return sourceStatus("lobby") == "online"; }));
+    EXPECT_EQ(manager_->listSources().back().availability.reason, "authentication_failed");
+}
+
+TEST_F(SourceDiagnosticsTest, TaskStartFailureAndStopDoNotChangeAvailability) {
     LoopbackSocket socket;
     const auto port = socket.bindPort();
     ASSERT_NE(port, 0);
     ASSERT_EQ(listen(socket.fd, 1), 0);
-    auto dropped = std::async(std::launch::async, [&] { return socket.dropConnection(); });
-    startCamera(port);
-    ASSERT_TRUE(dropped.get());
-    ASSERT_TRUE(waitFor([&] { return startupTimeoutCleanedUp(); }));
-    const auto status = manager_->listSources().front().availability;
-    EXPECT_EQ(status.status, "unavailable");
-    EXPECT_EQ(status.basis, "runtime");
-    EXPECT_EQ(status.reason, "stream_failed");
-    EXPECT_TRUE(status.observed_at_ms);
+    configureCamera(port);
+    manager_->startSourceMonitoring([](const auto&) { return SourceProbeCode::Passed; });
+    ASSERT_TRUE(waitFor([&] { return sourceStatus("camera") == "online"; }));
+    const auto before_task = manager_->listSources().front().last_probe;
+    ASSERT_TRUE(before_task);
 
+    auto dropped = std::async(std::launch::async, [&] { return socket.dropConnection(); });
+    ASSERT_TRUE(manager_->start("live"));
+    ASSERT_TRUE(dropped.get());
+    EXPECT_EQ(sourceStatus("camera"), "online");
+    ASSERT_TRUE(waitFor([&] { return startupTimeoutCleanedUp(); }));
+    EXPECT_EQ(sourceStatus("camera"), "online");
     EXPECT_TRUE(manager_->stop("live"));
-    EXPECT_EQ(manager_->listSources().front().availability.status, "unchecked");
-}
-
-TEST_F(SourceDiagnosticsTest, StartupTimeoutDoesNotBlameAnUnfinishedRtspHandshake) {
-    LoopbackSocket socket;
-    const auto port = socket.bindPort();
-    ASSERT_NE(port, 0);
-    // Leave RTSP unanswered after the TCP listener is ready.
-    ASSERT_EQ(listen(socket.fd, 1), 0);
-    startCamera(port);
-    ASSERT_TRUE(waitFor([&] {
-        return manager_->listSources().front().availability.status == "connecting";
-    }));
-    ASSERT_TRUE(waitFor([&] { return startupTimeoutCleanedUp(); }));
-    EXPECT_EQ(manager_->listSources().front().availability.status, "unchecked");
-}
-
-TEST_F(SourceDiagnosticsTest, NewerProbeTakesPrecedenceOverRetainedStartupFailure) {
-    LoopbackSocket socket;
-    const auto port = socket.bindPort();
-    ASSERT_NE(port, 0);
-    ASSERT_EQ(listen(socket.fd, 1), 0);
-    auto dropped = std::async(std::launch::async, [&] { return socket.dropConnection(); });
-    startCamera(port);
-    ASSERT_TRUE(dropped.get());
-    ASSERT_TRUE(waitFor([&] {
-        return manager_->listSources().front().availability.status == "reconnecting";
-    }));
-    ASSERT_TRUE(manager_->probeSource("camera", [](const auto&) { return SourceProbeCode::Passed; }).source);
-    ASSERT_TRUE(waitFor([&] { return startupTimeoutCleanedUp(); }));
-    EXPECT_EQ(manager_->listSources().front().availability.status, "probe_passed");
-}
-
-TEST(SourceObservationTest, RequiresNewFrameAfterReconnectAndKeepsInstancesIndependent) {
-    using Phase = SourceObservation::Phase;
-    SourceObservation first, second;
-    first.transition(Phase::Connecting);
-    first.transition(Phase::Open);
-    EXPECT_FALSE(first.snapshot().last_frame);
-    first.decoded();
-    second.transition(Phase::Open);
-    second.decoded();
-    ASSERT_TRUE(first.snapshot().last_frame);
-    ASSERT_TRUE(second.snapshot().last_frame);
-    first.transition(Phase::Reconnecting);
-    first.decoded();
-    first.transition(Phase::Open);
-    EXPECT_TRUE(first.snapshot().reconnecting_since);
-    EXPECT_FALSE(first.snapshot().last_frame);
-    first.transition(Phase::Idle);
-    EXPECT_TRUE(second.snapshot().last_frame);
+    const auto after_task = manager_->listSources().front();
+    EXPECT_EQ(after_task.availability.status, "online");
+    ASSERT_TRUE(after_task.last_probe);
+    EXPECT_EQ(after_task.last_probe->checked_at_ms, before_task->checked_at_ms);
 }
 
 } // namespace

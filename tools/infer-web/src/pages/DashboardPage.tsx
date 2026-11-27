@@ -2,8 +2,7 @@ import { useHealth, useSources, useModels, usePipelines, useTasks } from '../hoo
 import { serverUrl } from '../lib/api'
 import { useT } from '../lib/i18n'
 import { PageHeader } from '../components/layout/Layout'
-import type { SourceState } from '../types'
-import { TaskStatusBadge } from '../components/ui/StatusBadge'
+import { SourceStatusBadge, TaskStatusBadge } from '../components/ui/StatusBadge'
 
 function StatCard({
   label, value, sub, color = 'text-ink-primary',
@@ -22,15 +21,6 @@ function StatCard({
   )
 }
 
-const sourceColors: Record<SourceState, string> = {
-  STREAMING: 'text-success',
-  CONNECTING: 'text-accent',
-  RECONNECTING: 'text-warning',
-  DEGRADED: 'text-warning',
-  STOPPED: 'text-ink-muted',
-  FAILED: 'text-danger',
-}
-
 export function DashboardPage() {
   const { data: health } = useHealth()
   const { data: sources = [] } = useSources()
@@ -39,14 +29,14 @@ export function DashboardPage() {
   const { data: tasks = [] } = useTasks()
   const { t } = useT()
 
-  const streaming = sources.filter((s) => s.state === 'STREAMING').length
-  const degraded = sources.filter((s) => s.state === 'DEGRADED' || s.state === 'RECONNECTING').length
+  const online = sources.filter((s) => s.availability?.status === 'online').length
+  const offline = sources.filter((s) => s.availability?.status === 'offline').length
   const running = tasks.filter((t) => t.state === 'running').length
 
   const sourceColor =
     sources.length === 0 ? 'text-ink-muted'
-    : degraded > 0 ? 'text-warning'
-    : streaming === sources.length ? 'text-success'
+    : offline > 0 ? 'text-warning'
+    : online > 0 ? 'text-success'
     : 'text-accent'
 
   return (
@@ -80,7 +70,7 @@ export function DashboardPage() {
           label={t('dashboard.stat.sources')}
           value={sources.length}
           sub={sources.length
-            ? t('dashboard.sources.sub', { streaming, degraded })
+            ? t('dashboard.sources.sub', { online, offline })
             : t('dashboard.sources.empty')}
           color={sourceColor}
         />
@@ -119,8 +109,7 @@ export function DashboardPage() {
               <thead>
                 <tr>
                   <th>{t('common.id')}</th>
-                  <th>{t('common.state')}</th>
-                  <th>{t('sources.col.reconnects')}</th>
+                  <th>{t('sources.col.availability')}</th>
                   <th>{t('sources.col.url')}</th>
                 </tr>
               </thead>
@@ -129,17 +118,14 @@ export function DashboardPage() {
                   <tr key={s.id}>
                     <td className="font-mono text-[12px] text-ink-primary">{s.id}</td>
                     <td>
-                      <span className={`font-mono text-[11px] font-medium ${sourceColors[s.state]}`}>
-                        {s.state}
-                      </span>
+                      <SourceStatusBadge status={s.availability?.status} />
                     </td>
-                    <td className="font-mono text-[12px] text-ink-secondary">{s.reconnect_count}</td>
                     <td className="font-mono text-[11px] text-ink-muted truncate max-w-[220px]">{s.url}</td>
                   </tr>
                 ))}
                 {sources.length > 8 && (
                   <tr>
-                    <td colSpan={4} className="text-center text-[11px] text-ink-muted py-2">
+                    <td colSpan={3} className="text-center text-[11px] text-ink-muted py-2">
                       {t('dashboard.more', { n: sources.length - 8 })}
                     </td>
                   </tr>

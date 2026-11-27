@@ -6,7 +6,6 @@
 #include "stream/DvppOutputPool.h"
 #include "stream/InterruptCtx.h"
 #include "stream/StreamHealthRegistry.h"
-#include "stream/SourceObservation.h"
 #include "stream/StopAwareSleep.h"
 
 #include <acl/acl.h>
@@ -280,9 +279,6 @@ void DVPPDecoder::onDecoded(acldvppStreamDesc* input,
         std::chrono::duration<double, std::milli>(t_cb - fctx->submit_ts).count();
 
     if (output && fctx->slot_yuv_buf && fctx->in_pic_desc) {
-        if (fctx->observation && acldvppGetPicDescRetCode(output) == 0) {
-            fctx->observation->decoded();
-        }
         if (fctx->vpc_enabled && fctx->vpc_pool && fctx->vpc_scaler) {
             DvppOutputPool::Slot* vpc_slot = fctx->vpc_pool->acquire(200);
             if (!vpc_slot) {
@@ -418,7 +414,6 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     auto& health = StreamHealthRegistry::get();
     const auto retry = [&](bool delivered) {
         if (stop_flag_.load()) return false;
-        if (cfg.observation) cfg.observation->transition(SourceObservation::Phase::Reconnecting);
         health.onStreamDropped(cfg.id);
         if (delivered) {
             failures = 0;
@@ -668,7 +663,6 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
     } else {
         health.onReconnectSucceeded(cfg.id);
     }
-    if (cfg.observation) cfg.observation->transition(SourceObservation::Phase::Open);
     const auto frames_before = delivered_frames_.load();
 
     // ── Single-packet DVPP submit helper ─────────────────────────────────
@@ -758,7 +752,6 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
             fctx->capture_mono_ns = static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     now_steady.time_since_epoch()).count());
-            fctx->observation = cfg.observation;
         }
 
         fctx->slot_yuv_buf  = slot->yuv_buf;
@@ -906,9 +899,6 @@ void DVPPDecoder::decodeLoop(StreamConfig cfg) {
 #endif
     }
 
-    if (cfg.observation && !stop_flag_.load()) {
-        cfg.observation->transition(SourceObservation::Phase::Reconnecting);
-    }
     // ── Per-connection cleanup ────────────────────────────────────────────
     // No aclrtUnSubscribeReport — we never called aclrtSubscribeReport for
     // vdec; the thread binding is owned by the channel desc and released by

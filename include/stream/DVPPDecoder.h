@@ -118,7 +118,6 @@ public:
         int            codec_height{0};
         double         capture_ts{0.0};      // epoch seconds at submission
         uint64_t       capture_mono_ns{0};   // steady_clock ns at submission
-        SourceObservation* observation{nullptr};
 
         // Output buffer pool slot management.
         // pool_release: shared_ptr whose deleter returns the slot to the pool.

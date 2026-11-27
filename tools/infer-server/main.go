@@ -169,6 +169,7 @@ func handleMetrics(c *gin.Context) {
 // handleListSources godoc
 //
 //	@Summary	List sources
+//	@Description	Returns the latest independent RTSP probe results from the engine cache.
 //	@Tags		sources
 //	@Produce	json
 //	@Security	ApiKeyAuth

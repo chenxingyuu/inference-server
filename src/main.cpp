@@ -161,11 +161,13 @@ int main(int argc, char* argv[]) {
     task_manager.loadAll();
     task_manager.startAll();
 
+    const auto source_probe = [executable = std::string(argv[0])](const auto& source) {
+        return infer::probeSourceInChild(executable, source);
+    };
+    task_manager.startSourceMonitoring(source_probe);
+
     // ── Start management HTTP server ──────────────────────────────────────────
-    infer::UnixSocketServer mgmt_server(mgmt_socket_path, task_manager,
-        [executable = std::string(argv[0])](const auto& source) {
-            return infer::probeSourceInChild(executable, source);
-        });
+    infer::UnixSocketServer mgmt_server(mgmt_socket_path, task_manager, source_probe);
     mgmt_server.start();
 
     LOG_INFO("Task startup requested. TaskCount: {} SocketPath: {}",
@@ -182,6 +184,7 @@ int main(int argc, char* argv[]) {
     // Stop inference graphs first so RTSP/ffplay sinks don't race with shutdown.
     task_manager.stopAll();
 
+    task_manager.stopSourceMonitoring();
     frame_gc.stop();
     mgmt_server.stop();
 

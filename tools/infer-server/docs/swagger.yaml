@@ -387,7 +387,6 @@ definitions:
     properties:
       basis:
         enum:
-        - runtime
         - probe
         - none
         type: string
@@ -398,13 +397,8 @@ definitions:
       status:
         enum:
         - online
-        - connecting
-        - reconnecting
-        - unavailable
-        - probe_passed
-        - probe_failed
+        - offline
         - unchecked
-        - expired
         - unsupported
         type: string
     type: object
@@ -461,6 +455,7 @@ definitions:
       last_probe:
         $ref: '#/definitions/infer-server.SourceProbeResult'
       reused_runtime:
+        description: Always false for independent probes.
         type: boolean
     type: object
   infer-server.SourceProbeResult:
@@ -1202,6 +1197,8 @@ paths:
       - pipelines
   /sources:
     get:
+      description: Returns the latest independent RTSP probe results from the engine
+        cache.
       produces:
       - application/json
       responses:
@@ -1296,9 +1293,9 @@ paths:
       - sources
   /sources/{id}/probe:
     post:
-      description: Reuses a recent frame from a running decoder when available. Otherwise
-        opens the configured RTSP stream once. A completed check returns 200 even
-        when the source failed.
+      description: Opens the configured RTSP stream independently of tasks and updates
+        the engine cache. A completed check returns 200 for both online and offline
+        results.
       parameters:
       - description: Source ID
         in: path

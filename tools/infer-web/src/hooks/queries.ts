@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api, ApiError } from '../lib/api'
-import { sourceReasonKey, useT } from '../lib/i18n'
-import type { SourceCreate, SourceInfo, PipelineCreate, ModelLoad, TaskCreate } from '../types'
+import { useT } from '../lib/i18n'
+import type { SourceCreate, PipelineCreate, ModelLoad, TaskCreate } from '../types'
 
 // ─── Health ────────────────────────────────────────────────────────────────
 
@@ -44,37 +44,6 @@ export const useRemoveSource = () => {
       qc.invalidateQueries({ queryKey: ['sources'] })
     },
     onError: (e: Error) => toast.error(e.message),
-  })
-}
-
-export const useProbeSource = (id: string) => {
-  const qc = useQueryClient()
-  const { t } = useT()
-  return useMutation({
-    mutationFn: () => api.sources.probe(id),
-    onSuccess: async ({ availability, last_probe, reused_runtime }) => {
-      await qc.cancelQueries({ queryKey: ['sources'] })
-      qc.setQueryData<SourceInfo[]>(['sources'], (rows) => rows?.map((row) =>
-        row.id === id ? { ...row, availability, last_probe } : row,
-      ))
-      if (reused_runtime) {
-        toast.success(t('sources.probe_runtime', { id }))
-      } else if (last_probe?.passed) {
-        toast.success(t('sources.probe_passed', { id, ms: last_probe.elapsed_ms }))
-      } else {
-        const reason = t(sourceReasonKey(last_probe?.reason))
-        toast.error(t('sources.probe_failed', { id, reason }))
-      }
-      void qc.invalidateQueries({ queryKey: ['sources'] })
-    },
-    onError: (error: Error) => {
-      if (error instanceof ApiError && error.status === 401) {
-        toast.error(t('sources.probe_unauthorized'))
-      } else {
-        const reason = error instanceof ApiError ? error.code : undefined
-        toast.error(t(sourceReasonKey(reason, 'sources.reason.source_probe_unavailable')))
-      }
-    },
   })
 }
 

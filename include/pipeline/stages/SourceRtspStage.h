@@ -22,8 +22,7 @@ public:
                     int sample_fps, SamplingMode sampling_mode, bool use_hwdec,
                     std::shared_ptr<GpuDeviceAllocator> gpu_alloc = nullptr,
                     bool use_ascend_dvpp = false, int ascend_device_id = 0,
-                    int vpc_out_width = 0, int vpc_out_height = 0,
-                    std::shared_ptr<SourceObservation> observation = nullptr);
+                    int vpc_out_width = 0, int vpc_out_height = 0);
 
     std::string id() const override;
     bool isSource() const override;
@@ -40,7 +39,6 @@ private:
     SamplingMode sampling_mode_;
     bool use_hwdec_;
     std::shared_ptr<GpuDeviceAllocator> gpu_alloc_;
-    std::shared_ptr<SourceObservation> observation_;
     int cuda_device_id_{0};
     FFmpegDecoder decoder_;
 #ifdef BUILD_ASCEND_BACKEND

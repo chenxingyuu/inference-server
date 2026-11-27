@@ -2,7 +2,6 @@
 
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
-#include "stream/SourceObservation.h"
 
 #include <algorithm>
 #include <chrono>
@@ -13,15 +12,13 @@ SourceRtspStage::SourceRtspStage(std::string id, const PipelineSourceConfig& src
                                  int sample_fps, SamplingMode sampling_mode, bool use_hwdec,
                                  std::shared_ptr<GpuDeviceAllocator> gpu_alloc,
                                  bool use_ascend_dvpp, int ascend_device_id,
-                                 int vpc_out_width, int vpc_out_height,
-                                 std::shared_ptr<SourceObservation> observation)
+                                 int vpc_out_width, int vpc_out_height)
     : id_(std::move(id))
     , source_(src)
     , sample_fps_(sample_fps)
     , sampling_mode_(sampling_mode)
     , use_hwdec_(use_hwdec)
     , gpu_alloc_(std::move(gpu_alloc))
-    , observation_(std::move(observation))
 #ifdef BUILD_ASCEND_BACKEND
     , use_ascend_dvpp_(use_ascend_dvpp)
     , ascend_device_id_(ascend_device_id)
@@ -65,8 +62,6 @@ void SourceRtspStage::start() {
     cfg.max_reconnect_attempts = source_.max_reconnect_attempts;
     cfg.open_timeout_ms = source_.open_timeout_ms;
     cfg.read_timeout_ms = source_.read_timeout_ms;
-    cfg.observation = observation_.get();
-    if (observation_) observation_->transition(SourceObservation::Phase::Connecting);
 
     auto frame_cb = [this](Frame frame) {
         std::lock_guard<std::mutex> lock(mu_);
@@ -94,7 +89,6 @@ void SourceRtspStage::start() {
         LOG_WARN("SourceRtspStage [{}]: DVPP decoder failed to start — "
                  "falling back to FFmpeg software decode", source_.id);
         dvpp_decoder_.reset();
-        if (observation_) observation_->transition(SourceObservation::Phase::Connecting);
     }
 #endif
 
@@ -115,7 +109,6 @@ void SourceRtspStage::stop() {
     if (dvpp_decoder_) {
         dvpp_decoder_->stop();
         dvpp_decoder_.reset();
-        if (observation_) observation_->transition(SourceObservation::Phase::Idle);
         std::lock_guard lock(mu_);
         queue_.clear();
         return;
@@ -123,7 +116,6 @@ void SourceRtspStage::stop() {
 #endif
 
     decoder_.stop();
-    if (observation_) observation_->transition(SourceObservation::Phase::Idle);
     {
         std::lock_guard lock(mu_);
         queue_.clear();

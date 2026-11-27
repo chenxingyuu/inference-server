@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useSources, useAddSource, useProbeSource, useRemoveSource } from '../hooks/queries'
-import { StatusBadge } from '../components/ui/StatusBadge'
+import { useSources, useAddSource, useRemoveSource } from '../hooks/queries'
+import { SourceStatusBadge } from '../components/ui/StatusBadge'
 import { Modal } from '../components/ui/Modal'
 import { Field, Input } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
 import { sourceReasonKey, useT } from '../lib/i18n'
-import type { SourceAvailability, SourceCreate, SourceInfo, SourceState } from '../types'
+import type { SourceCreate, SourceInfo } from '../types'
 
 const DEFAULTS: SourceCreate = {
   id: '',
@@ -17,74 +17,33 @@ const DEFAULTS: SourceCreate = {
   read_timeout_ms: 10000,
 }
 
-const AVAILABILITY_COLORS: Record<SourceAvailability['status'], SourceState> = {
-  online: 'STREAMING',
-  connecting: 'CONNECTING',
-  reconnecting: 'RECONNECTING',
-  unavailable: 'FAILED',
-  probe_passed: 'STREAMING',
-  probe_failed: 'FAILED',
-  unchecked: 'STOPPED',
-  expired: 'STOPPED',
-  unsupported: 'STOPPED',
-}
-
 function SourceRow({ source, deleting, onDelete }: {
   source: SourceInfo
   deleting: boolean
   onDelete: () => void
 }) {
   const { lang, t } = useT()
-  const probe = useProbeSource(source.id)
   const { availability, last_probe } = source
-  const recentCheck = last_probe && (availability?.basis === 'runtime' || availability?.status === 'expired')
   // Avoid exposing camera credentials on the page while retaining the original API value.
   const displayUrl = source.url.replace(/^(rtsp:\/\/)[^/?#]*@/, '$1')
-  const formatTime = (timestamp: number) => new Date(timestamp).toLocaleString(lang)
 
   return (
     <tr>
       <td className="font-mono text-[12px] text-ink-primary font-medium">{source.id}</td>
       <td>
-        {availability ? (
-          <>
-            <StatusBadge
-              status={AVAILABILITY_COLORS[availability.status]}
-              label={t(`sources.status.${availability.status}`)}
-              pulse={availability.basis === 'probe' ? false : undefined}
-            />
-            {availability.observed_at_ms !== undefined && availability.status !== 'expired' && (
-              <div className="text-[11px] text-ink-muted">
-                {t(availability.status === 'online' || availability.reason === 'no_recent_frame'
-                  ? 'sources.last_frame'
-                  : availability.basis === 'probe' ? 'sources.checked_at' : 'sources.observed_at',
-                { time: formatTime(availability.observed_at_ms) })}
-              </div>
-            )}
-            {availability.reason && availability.status !== 'expired' && (
-              <div className="text-[11px] text-ink-secondary">{t(sourceReasonKey(availability.reason))}</div>
-            )}
-            {recentCheck && (
-              <div className="text-[11px] text-ink-muted">
-                {t(last_probe.passed ? 'sources.last_passed' : 'sources.last_failed',
-                  { time: formatTime(last_probe.checked_at_ms) })}
-                {last_probe.reason && ` · ${t(sourceReasonKey(last_probe.reason))}`}
-              </div>
-            )}
-          </>
-        ) : <StatusBadge status={source.state} />}
+        <SourceStatusBadge status={availability?.status} />
+        {last_probe && (
+          <div className="text-[11px] text-ink-muted">
+            {t('sources.checked_at', { time: new Date(last_probe.checked_at_ms).toLocaleString(lang) })}
+          </div>
+        )}
+        {availability?.status === 'offline' && availability.reason && (
+          <div className="text-[11px] text-ink-secondary">{t(sourceReasonKey(availability.reason))}</div>
+        )}
       </td>
-      <td className="font-mono text-[12px] text-ink-secondary">{source.reconnect_count}</td>
       <td className="font-mono text-[11px] text-ink-muted max-w-xs truncate">{displayUrl}</td>
       <td className="text-right pr-2">
-        <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-          {availability && availability.status !== 'unsupported' && (
-            <button type="button" onClick={() => probe.mutate()} disabled={probe.isPending} className="btn-ghost">
-              {t(probe.isPending ? 'sources.probing' : 'sources.probe')}
-            </button>
-          )}
-          <DeleteButton loading={deleting} onClick={onDelete} />
-        </div>
+        <DeleteButton loading={deleting} onClick={onDelete} />
       </td>
     </tr>
   )
@@ -127,15 +86,14 @@ export function SourcesPage() {
               <tr>
                 <th>{t('common.id')}</th>
                 <th>{t('sources.col.availability')}</th>
-                <th>{t('sources.col.reconnects')}</th>
                 <th>{t('sources.col.url')}</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {isLoading && <LoadingRows cols={5} />}
+              {isLoading && <LoadingRows cols={4} />}
               {!isLoading && !isError && sources.length === 0 && (
-                <EmptyState cols={5} message={t('sources.empty')} />
+                <EmptyState cols={4} message={t('sources.empty')} />
               )}
               {sources.map((s) => (
                 <SourceRow key={s.id} source={s} deleting={remove.isPending} onDelete={() => remove.mutate(s.id)} />

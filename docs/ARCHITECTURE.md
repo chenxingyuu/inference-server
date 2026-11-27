@@ -48,10 +48,9 @@ Legacy references to `ManagementServer` (cpp-httplib) are removed.
 
 ### RTSP source diagnostics
 
-- Each RTSP source stage reports connection transitions and successful decode to its own observation. The task manager aggregates active observations by source ID. Recent frames from any active decoder take precedence over other instances reconnecting or stopping. The frame freshness window is the greater of 15 seconds and the source read timeout. Existing stream health and reconnect fields remain available for legacy clients.
-- When a task reaches its startup deadline, a decoder already recovering from a failure or past its frame freshness deadline can leave an unavailable source observation after cleanup. A task startup deadline alone does not establish a source failure.
-- `GET /sources` adds `availability` and nullable `last_probe`. The route reads a snapshot. `POST /sources/{id}/probe` requires the management API key and forwards `probe_source` through the Unix socket. The engine reuses a fresh runtime observation or starts a bounded FFmpeg child to open the registered RTSP stream and decode one frame. The child receives the source configuration through stdin and returns a diagnostic code.
-- A probe reserves one slot per source and two slots per engine. The engine releases the task manager lock before network I/O and checks the source identity again before caching results. Manual results expire after 60 seconds and records are cleared when a source is removed or the engine restarts.
+- The engine schedules RTSP sources at startup and on registration, including sources without inference tasks. The oldest due source runs first. A bounded FFmpeg child reads its configuration through stdin and attempts to decode one frame. Each attempt schedules the next check 30 seconds after completion.
+- `GET /sources` reads the latest independent result from memory. `availability.status` is `online` or `offline` after a completed check, `unchecked` before the first result and `unsupported` for non-RTSP sources. `last_probe` includes the completion time and any failure reason. The previous result stays visible while a probe runs or the probe service itself fails. Legacy clients can still read the task-driven `state` and `reconnect_count`.
+- `POST /sources/{id}/probe` requires the management API key and runs the same probe. Both entry points share two slots per engine and one slot per source ID. The engine releases the catalog lock during network I/O and checks the source identity before caching results. Removing a source discards its cached result. Restarting the engine starts with an empty cache.
 
 ## Ascend ingest (DVPP + optional VPC)
 

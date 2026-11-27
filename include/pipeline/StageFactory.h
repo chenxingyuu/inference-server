@@ -30,7 +30,6 @@ public:
         int          ingest_vpc_out_width{0};
         int          ingest_vpc_out_height{0};
         std::shared_ptr<GpuDeviceAllocator> gpu_alloc; // null if hwdec disabled
-        std::shared_ptr<SourceObservation> source_observation{};
     };
 
     static std::unique_ptr<IStage> create(const StageConfig& cfg, const Context& ctx);

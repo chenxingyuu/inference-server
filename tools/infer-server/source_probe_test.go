@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +65,14 @@ func TestSourceProbeForwardsRegisteredIDAndMapsResponses(t *testing.T) {
 				switch scenario.status {
 				case http.StatusOK:
 					return map[string]any{"status": "ok", "data": map[string]any{
-						"id": "cam", "last_probe": map[string]any{"passed": false, "reason": scenario.code},
+						"id": "cam",
+						"availability": map[string]any{
+							"status": "offline", "basis": "probe", "reason": scenario.code, "observed_at_ms": 1234,
+						},
+						"last_probe": map[string]any{
+							"passed": false, "reason": scenario.code, "checked_at_ms": 1234, "elapsed_ms": 20,
+						},
+						"reused_runtime": false,
 					}}, nil
 				case http.StatusServiceUnavailable:
 					return nil, errors.New("private connection details")
@@ -81,6 +89,18 @@ func TestSourceProbeForwardsRegisteredIDAndMapsResponses(t *testing.T) {
 			}
 			if strings.Contains(response.Body.String(), "private connection details") {
 				t.Fatalf("engine error leaked: %s", response.Body)
+			}
+			if scenario.status == http.StatusOK {
+				var probe SourceProbeResponse
+				if err := json.Unmarshal(response.Body.Bytes(), &probe); err != nil {
+					t.Fatalf("decode probe response: %v", err)
+				}
+				if probe.ID != "cam" || probe.Availability.Status != "offline" || probe.Availability.Basis != "probe" ||
+					probe.LastProbe == nil || probe.LastProbe.Passed || probe.LastProbe.CheckedAtMs != 1234 ||
+					probe.Availability.ObservedAtMs == nil || *probe.Availability.ObservedAtMs != probe.LastProbe.CheckedAtMs ||
+					probe.ReusedRuntime || !strings.Contains(response.Body.String(), `"reused_runtime":false`) {
+					t.Fatalf("unexpected probe data: %s", response.Body)
+				}
 			}
 		})
 	}

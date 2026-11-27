@@ -23,7 +23,7 @@ func registerSourceProbeRoute(router gin.IRoutes) {
 // handleSourceProbe godoc
 //
 //	@Summary	Check whether the engine can decode a frame from a registered RTSP source
-//	@Description	Reuses a recent frame from a running decoder when available. Otherwise opens the configured RTSP stream once. A completed check returns 200 even when the source failed.
+//	@Description	Opens the configured RTSP stream independently of tasks and updates the engine cache. A completed check returns 200 for both online and offline results.
 //	@Tags		sources
 //	@Produce	json
 //	@Security	ApiKeyAuth

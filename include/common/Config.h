@@ -11,8 +11,6 @@
 
 namespace infer {
 
-class SourceObservation;
-
 struct ServerConfig {
     int stream_pool_threads{32};
     int max_streams{100};
@@ -105,7 +103,6 @@ struct StreamConfig {
     ByteTrackConfig byte_track{};
     SourceType  source_type{SourceType::RTSP};  // RTSP stream or local file
     bool        loop_file{false};               // re-open file on EOF (file sources only)
-    SourceObservation* observation{nullptr};   // optional runtime observer owned by the source stage
 };
 
 enum class EdgeDropPolicy { Block, DropOldest, DropNewest };

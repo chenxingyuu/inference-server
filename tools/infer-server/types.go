@@ -11,8 +11,8 @@ type SourceInfo struct {
 }
 
 type SourceAvailability struct {
-	Status       string `json:"status" enums:"online,connecting,reconnecting,unavailable,probe_passed,probe_failed,unchecked,expired,unsupported"`
-	Basis        string `json:"basis" enums:"runtime,probe,none"`
+	Status       string `json:"status" enums:"online,offline,unchecked,unsupported"`
+	Basis        string `json:"basis" enums:"probe,none"`
 	ObservedAtMs *int64 `json:"observed_at_ms,omitempty"`
 	Reason       string `json:"reason,omitempty"`
 }
@@ -28,7 +28,7 @@ type SourceProbeResponse struct {
 	ID            string             `json:"id"`
 	Availability  SourceAvailability `json:"availability"`
 	LastProbe     *SourceProbeResult `json:"last_probe"`
-	ReusedRuntime bool               `json:"reused_runtime"`
+	ReusedRuntime bool               `json:"reused_runtime"` // Always false for independent probes.
 }
 
 // SourceCreate is the request body for POST /sources.
