@@ -94,6 +94,10 @@ var callFn = func(cmd map[string]any) (map[string]any, error) {
 		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			return nil, err
 		}
+	} else if cmd["cmd"] == "probe_source" {
+		if err := conn.SetDeadline(time.Now().Add(17 * time.Second)); err != nil {
+			return nil, err
+		}
 	}
 
 	data, err := json.Marshal(cmd)
@@ -696,6 +700,7 @@ func main() {
 	registerModelUploadRoutes(r)
 	registerModelExportRoute(r)
 	registerModelTestRoute(r)
+	registerSourceProbeRoute(r)
 
 	// Protected management endpoints.
 	api := r.Group("/")

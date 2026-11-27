@@ -2,7 +2,6 @@
 #include "pipeline/StageFactory.h"
 #include <fstream>
 #include <regex>
-#include "stream/StreamHealthRegistry.h"
 #include "common/Logger.h"
 #include "common/Config.h"
 
@@ -150,7 +149,8 @@ void TaskManager::loadAll() {
     }
 }
 
-std::unique_ptr<GraphExecutor> TaskManager::buildGraph(const AppConfig& cfg, const TaskConfig& task) {
+std::unique_ptr<GraphExecutor> TaskManager::buildGraph(const AppConfig& cfg, const TaskConfig& task,
+                                                      const Run& run) {
     const auto* source = cfg.findSource(task.source_id);
     const auto* pipeline_tpl = cfg.findPipeline(task.pipeline_id);
     if (!source || !pipeline_tpl) throw std::runtime_error("task dependency missing");
@@ -187,8 +187,12 @@ std::unique_ptr<GraphExecutor> TaskManager::buildGraph(const AppConfig& cfg, con
         ingest_vpc_out_w,
         ingest_vpc_out_h,
         nullptr};
-    for (const auto& node : runtime_cfg.nodes)
+    for (const auto& node : runtime_cfg.nodes) {
+        const auto observation = run.source_observations.find(node.id);
+        ctx.source_observation = observation == run.source_observations.end()
+            ? nullptr : observation->second;
         executor->addStage(StageFactory::create(node, ctx));
+    }
     executor->build();
     LOG_INFO("Pipeline built for task={} (pipeline={}, source={})\n{}",
              task.id, task.pipeline_id, task.source_id, executor->graphText());
@@ -230,11 +234,19 @@ ITaskManager::ActionResult TaskManager::startLocked(const std::string& task_id) 
     const auto* config = cfg_.findTask(task_id);
     if (!config) return ActionResult::NotFound;
     auto run = std::make_shared<Run>();
+    if (const auto* pipeline = cfg_.findPipeline(config->pipeline_id)) {
+        for (const auto& node : pipeline->nodes) {
+            if (node.type == "source.rtsp") {
+                run->source_observations.emplace(node.id, std::make_shared<SourceObservation>());
+            }
+        }
+    }
     run->startup_deadline = std::chrono::steady_clock::now() +
         std::chrono::milliseconds(cfg_.server.task_start_timeout_ms);
     entry.run = run;
     entry.state = State::Starting;
     entry.failure.reset();
+    entry.source_failure.reset();
     try {
         run->thread = std::thread([this, task = *config, cfg = cfg_, run] {
             runTask(task, cfg, run);
@@ -274,6 +286,7 @@ bool TaskManager::stop(const std::string& task_id) {
     } else {
         entry.state = State::Stopped;
         entry.failure.reset();
+        entry.source_failure.reset();
     }
     return true;
 }
@@ -283,7 +296,7 @@ void TaskManager::runTask(const TaskConfig& task, const AppConfig& cfg, const st
     std::optional<TaskFailure> failure;
     try {
         if (!run->cancelled.load()) {
-            executor = graph_builder_ ? graph_builder_(cfg, task) : buildGraph(cfg, task);
+            executor = graph_builder_ ? graph_builder_(cfg, task) : buildGraph(cfg, task, *run);
             executor->start(&run->cancelled);
             std::optional<std::chrono::steady_clock::time_point> drain_deadline;
             while (!run->cancelled.load()) {
@@ -294,8 +307,7 @@ void TaskManager::runTask(const TaskConfig& task, const AppConfig& cfg, const st
                 const auto now = std::chrono::steady_clock::now();
                 if (entry.state == State::Starting) {
                     if (now >= run->startup_deadline) {
-                        LOG_ERROR("Task {} startup timed out", task.id);
-                        failure = TaskFailure{"startup_timeout", "Pipeline startup timed out"};
+                        recordStartupTimeoutLocked(task.id, entry);
                         break;
                     }
                     if (executor->inputsReady()) entry.state = State::Running;
@@ -324,6 +336,10 @@ void TaskManager::runTask(const TaskConfig& task, const AppConfig& cfg, const st
         auto& entry = entries_.at(task.id);
         if (!run->cancelled.exchange(true) && failure) {
             entry.state = State::Failed;
+            if (!run->source_observations.empty() &&
+                (failure->code == "source_retries_exhausted" || failure->code == "source_error")) {
+                entry.source_failure = SourceFailure{SourceEventTime::now(), failure->code};
+            }
             entry.failure = std::move(failure);
         }
     }
@@ -332,6 +348,17 @@ void TaskManager::runTask(const TaskConfig& task, const AppConfig& cfg, const st
         std::lock_guard lock(mu_);
         run->done = true;
     }
+    lifecycle_cv_.notify_all();
+}
+
+void TaskManager::recordStartupTimeoutLocked(const std::string& task_id, Entry& entry) {
+    const auto* task = cfg_.findTask(task_id);
+    const auto* source = task ? cfg_.findSource(task->source_id) : nullptr;
+    if (source) entry.source_failure = sourceFailureOnStartupTimeout(*entry.run, *source);
+    entry.run->cancelled.store(true);
+    LOG_ERROR("Task {} startup timed out", task_id);
+    entry.state = State::Failed;
+    entry.failure = TaskFailure{"startup_timeout", "Pipeline startup timed out"};
     lifecycle_cv_.notify_all();
 }
 
@@ -346,11 +373,8 @@ void TaskManager::watchTasks() {
             if (run.done) {
                 finished.emplace_back(id, entry.run);
             } else if (entry.state == State::Starting && now >= run.startup_deadline &&
-                       !run.cancelled.exchange(true)) {
-                LOG_ERROR("Task {} startup timed out", id);
-                entry.state = State::Failed;
-                entry.failure = TaskFailure{"startup_timeout", "Pipeline startup timed out"};
-                lifecycle_cv_.notify_all();
+                       !run.cancelled.load()) {
+                recordStartupTimeoutLocked(id, entry);
             }
         }
         if (!finished.empty()) {
@@ -368,6 +392,7 @@ void TaskManager::watchTasks() {
                     if (entry.state != State::Failed || run->stop_requested) {
                         entry.state = State::Stopped;
                         entry.failure.reset();
+                        entry.source_failure.reset();
                     }
                 }
             }
@@ -395,8 +420,7 @@ std::vector<SourceInfo> TaskManager::listSources() const {
     std::vector<SourceInfo> out;
     out.reserve(cfg_.sources.size());
     for (const auto& src : cfg_.sources) {
-        const auto h = StreamHealthRegistry::get().getHealth(src.id);
-        out.push_back({src.id, src.url, streamStateStr(h.state), static_cast<int>(h.reconnect_count)});
+        out.push_back(sourceInfoLocked(src));
     }
     return out;
 }
@@ -585,6 +609,7 @@ bool TaskManager::removeSource(const std::string& id) {
         if (t.source_id == id) return false;
     cfg_.sources.erase(std::remove_if(cfg_.sources.begin(), cfg_.sources.end(),
         [&](const auto& s){ return s.id == id; }), cfg_.sources.end());
+    source_probes_.erase(id);
     // Update runtime state.
     auto& added = runtime_state_.added_sources;
     added.erase(std::remove_if(added.begin(), added.end(),
@@ -653,6 +678,7 @@ ITaskManager::ActionResult TaskManager::requestUpdate(const TaskConfig& task) {
         if (t.id == task.id) { t = task; break; }
     it->second.state = State::Stopped;
     it->second.failure.reset();
+    it->second.source_failure.reset();
     persist();
     return ActionResult::Accepted;
 }

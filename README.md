@@ -30,6 +30,14 @@ RTSP(source.rtsp | source.file，内含 FFmpeg/DVPP 解码)
 - Pipeline 可编排（DAG）：用 `sources` + `pipelines`（图模板）+ `tasks`（`source_id` + `pipeline_id`）声明拓扑与运行实例，支持分支并行与汇合。
 - 模型清单由根配置里的 `models:` 与可选的 **model repository**（`server.model_repository`）在启动时合并；`infer.engine` 通过 `with.model_id` 引用合并后的 `models[].id`。
 
+### RTSP 数据源排障
+
+在 Web 的 **数据源** 页查看在线状态和最近出帧时间。运行中的解码器近期成功解出视频帧时，列表显示「在线」。同一数据源被多个任务使用时，只要有一路继续出帧就保持在线。闲置源可按需检测，列表每 5 秒读取状态。
+
+点击 **检测连接**，已有新鲜帧时会显示运行任务的观测结果，否则由推理服务器通过 RTSP/TCP 连接已登记的地址，尝试解出第一帧。检测最多等待 15 秒。同一数据源同时最多检测一次，整个引擎最多检测两路。手动检测结果保留在引擎内存中，闲置源的结果在 60 秒后标记为过期。
+
+部署时在 Go 管理服务设置 `INFER_API_KEY`，并在 Web 侧边栏填写对应的密钥。HTTP 客户端可使用相同的 Bearer 密钥调用 `POST /sources/{id}/probe`，请求无需正文。已完成的检测返回 HTTP 200，具体结论查看 `last_probe`，复用运行观测时 `reused_runtime` 为 `true`。同时更新 C++ 引擎、管理服务和 Web 才能启用完整流程。
+
 ### Model repository（可选，类 Triton 目录布局）
 
 当 `server.model_repository` 非空（或环境变量 `INFER_MODEL_REPOSITORY` 非空，**环境变量覆盖 YAML**）时，服务在 `loadConfig` 阶段扫描该目录，并把发现的模型 **追加** 到 `AppConfig::models`。与根配置 `models:` 出现 **相同 `id` 会报错**。

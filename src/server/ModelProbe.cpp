@@ -1,5 +1,6 @@
 #include "server/ModelProbe.h"
 #include "server/ModelTest.h"
+#include "server/BoundedChild.h"
 
 #include "common/RuntimeState.h"
 
@@ -10,16 +11,13 @@
 #include <cerrno>
 #include <cstdio>
 #include <chrono>
-#include <csignal>
 #include <cstdlib>
 #include <optional>
 #include <fstream>
 #include <set>
-#include <spawn.h>
 #include <stdexcept>
 #include <system_error>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 #include <opencv2/imgcodecs.hpp>
 
@@ -72,26 +70,7 @@ std::optional<int> runChild(const std::string& executable, const char* flag,
     std::string option = flag;
     auto path = dir.string();
     char* args[] = {program.data(), option.data(), path.data(), nullptr};
-    pid_t pid{};
-    if (const int rc = posix_spawnp(&pid, program.c_str(), nullptr, nullptr, args, environment); rc != 0) {
-        throw std::system_error(rc, std::generic_category(), "start model check");
-    }
-
-    const auto deadline = std::chrono::steady_clock::now() + kProbeTimeout;
-    int status{};
-    while (true) {
-        const auto result = waitpid(pid, &status, WNOHANG);
-        if (result == pid) return status;
-        if (result < 0 && errno != EINTR) {
-            throw std::system_error(errno, std::generic_category(), "wait for model check");
-        }
-        if (std::chrono::steady_clock::now() >= deadline) {
-            kill(pid, SIGKILL);
-            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
-            return std::nullopt;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
+    return runBoundedChild(args, environment, kProbeTimeout);
 }
 
 nlohmann::json testError(const char* code, const char* message) {

@@ -383,6 +383,31 @@ definitions:
       version:
         type: string
     type: object
+  infer-server.SourceAvailability:
+    properties:
+      basis:
+        enum:
+        - runtime
+        - probe
+        - none
+        type: string
+      observed_at_ms:
+        type: integer
+      reason:
+        type: string
+      status:
+        enum:
+        - online
+        - connecting
+        - reconnecting
+        - unavailable
+        - probe_passed
+        - probe_failed
+        - unchecked
+        - expired
+        - unsupported
+        type: string
+    type: object
   infer-server.SourceCreate:
     properties:
       degraded_threshold:
@@ -407,8 +432,12 @@ definitions:
     type: object
   infer-server.SourceInfo:
     properties:
+      availability:
+        $ref: '#/definitions/infer-server.SourceAvailability'
       id:
         type: string
+      last_probe:
+        $ref: '#/definitions/infer-server.SourceProbeResult'
       reconnect_count:
         type: integer
       state:
@@ -418,8 +447,31 @@ definitions:
         - RECONNECTING
         - DEGRADED
         - STOPPED
+        - FAILED
         type: string
       url:
+        type: string
+    type: object
+  infer-server.SourceProbeResponse:
+    properties:
+      availability:
+        $ref: '#/definitions/infer-server.SourceAvailability'
+      id:
+        type: string
+      last_probe:
+        $ref: '#/definitions/infer-server.SourceProbeResult'
+      reused_runtime:
+        type: boolean
+    type: object
+  infer-server.SourceProbeResult:
+    properties:
+      checked_at_ms:
+        type: integer
+      elapsed_ms:
+        type: integer
+      passed:
+        type: boolean
+      reason:
         type: string
     type: object
   infer-server.StageConfig:
@@ -1240,6 +1292,54 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Remove a source
+      tags:
+      - sources
+  /sources/{id}/probe:
+    post:
+      description: Reuses a recent frame from a running decoder when available. Otherwise
+        opens the configured RTSP stream once. A completed check returns 200 even
+        when the source failed.
+      parameters:
+      - description: Source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/infer-server.SourceProbeResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/infer-server.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Check whether the engine can decode a frame from a registered RTSP
+        source
       tags:
       - sources
   /tasks:

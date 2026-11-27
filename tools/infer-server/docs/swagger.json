@@ -1159,6 +1159,76 @@
                 }
             }
         },
+        "/sources/{id}/probe": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Reuses a recent frame from a running decoder when available. Otherwise opens the configured RTSP stream once. A completed check returns 200 even when the source failed.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sources"
+                ],
+                "summary": "Check whether the engine can decode a frame from a registered RTSP source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.SourceProbeResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/infer-server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/tasks": {
             "get": {
                 "security": [
@@ -2013,6 +2083,39 @@
                 }
             }
         },
+        "infer-server.SourceAvailability": {
+            "type": "object",
+            "properties": {
+                "basis": {
+                    "type": "string",
+                    "enum": [
+                        "runtime",
+                        "probe",
+                        "none"
+                    ]
+                },
+                "observed_at_ms": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "online",
+                        "connecting",
+                        "reconnecting",
+                        "unavailable",
+                        "probe_passed",
+                        "probe_failed",
+                        "unchecked",
+                        "expired",
+                        "unsupported"
+                    ]
+                }
+            }
+        },
         "infer-server.SourceCreate": {
             "type": "object",
             "required": [
@@ -2049,8 +2152,14 @@
         "infer-server.SourceInfo": {
             "type": "object",
             "properties": {
+                "availability": {
+                    "$ref": "#/definitions/infer-server.SourceAvailability"
+                },
                 "id": {
                     "type": "string"
+                },
+                "last_probe": {
+                    "$ref": "#/definitions/infer-server.SourceProbeResult"
                 },
                 "reconnect_count": {
                     "type": "integer"
@@ -2062,10 +2171,45 @@
                         "STREAMING",
                         "RECONNECTING",
                         "DEGRADED",
-                        "STOPPED"
+                        "STOPPED",
+                        "FAILED"
                     ]
                 },
                 "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "infer-server.SourceProbeResponse": {
+            "type": "object",
+            "properties": {
+                "availability": {
+                    "$ref": "#/definitions/infer-server.SourceAvailability"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_probe": {
+                    "$ref": "#/definitions/infer-server.SourceProbeResult"
+                },
+                "reused_runtime": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "infer-server.SourceProbeResult": {
+            "type": "object",
+            "properties": {
+                "checked_at_ms": {
+                    "type": "integer"
+                },
+                "elapsed_ms": {
+                    "type": "integer"
+                },
+                "passed": {
+                    "type": "boolean"
+                },
+                "reason": {
                     "type": "string"
                 }
             }

@@ -14,6 +14,7 @@
 #include "server/UnixSocketServer.h"
 #include "server/ModelProbe.h"
 #include "server/ModelTest.h"
+#include "server/SourceProbe.h"
 #include "archive/FrameArchiver.h"
 #include "archive/FrameRetentionGc.h"
 #include <csignal>
@@ -22,6 +23,7 @@
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
 std::atomic<bool> g_shutdown{false};
@@ -82,6 +84,9 @@ void logConfiguredPipelinesAndTasks(const infer::AppConfig& cfg) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    if (argc == 2 && std::string_view(argv[1]) == "--probe-source") {
+        return infer::runSourceProbe();
+    }
     if (argc == 3 && std::string(argv[1]) == "--probe-model") {
         infer::initLogger("warning");
         return infer::runModelProbe(argv[2]);
@@ -157,7 +162,10 @@ int main(int argc, char* argv[]) {
     task_manager.startAll();
 
     // ── Start management HTTP server ──────────────────────────────────────────
-    infer::UnixSocketServer mgmt_server(mgmt_socket_path, task_manager);
+    infer::UnixSocketServer mgmt_server(mgmt_socket_path, task_manager,
+        [executable = std::string(argv[0])](const auto& source) {
+            return infer::probeSourceInChild(executable, source);
+        });
     mgmt_server.start();
 
     LOG_INFO("Task startup requested. TaskCount: {} SocketPath: {}",

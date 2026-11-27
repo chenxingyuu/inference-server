@@ -1,6 +1,7 @@
 #include "stream/FFmpegDecoder.h"
 #include "stream/StopAwareSleep.h"
 #include "stream/StreamHealthRegistry.h"
+#include "stream/SourceObservation.h"
 #include "common/Logger.h"
 #include "metrics/Metrics.h"
 
@@ -307,7 +308,8 @@ void FFmpegDecoder::closeStream() {
     video_stream_idx_ = -1;
 }
 
-ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& params) {
+ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& params,
+                                           SourceObservation* observation) {
     AVPacket* pkt   = av_packet_alloc();
     AVFrame*  frame = av_frame_alloc();
     ReadExitReason exit_reason = ReadExitReason::FramesOk;
@@ -346,6 +348,10 @@ ReadExitReason FFmpegDecoder::readAndDecode(FrameCallback& cb, SamplingParams& p
                         std::chrono::steady_clock::now() - recv_t0).count();
                     if (recv_ret != 0) {
                         break;
+                    }
+                    if (observation && !(frame->flags & AV_FRAME_FLAG_CORRUPT) &&
+                        frame->width > 0 && frame->height > 0) {
+                        observation->decoded();
                     }
 
                     ++pkt_frame_idx;
@@ -488,6 +494,7 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
                 break;
             }
             if (retry_exhausted()) break;
+            if (cfg.observation) cfg.observation->transition(SourceObservation::Phase::Reconnecting);
             int64_t delay = backoffDelayMs(cfg.reconnect_delay_ms,
                                            cfg.max_reconnect_delay_ms, failures);
             LOG_WARN("[{}] open failed (attempt {}), retry in {}ms",
@@ -506,6 +513,7 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
             else
                 reg.onReconnectSucceeded(cfg.id);
         }
+        if (cfg.observation) cfg.observation->transition(SourceObservation::Phase::Open);
 
         // Build SamplingParams from actual stream fps (only valid after openStream()).
         frame_seq_ = 0;
@@ -529,7 +537,10 @@ void FFmpegDecoder::decodeLoop(StreamConfig cfg, FrameCallback cb) {
             }
             cb(std::move(frame));
         };
-        auto reason = readAndDecode(on_frame, params);
+        auto reason = readAndDecode(on_frame, params, cfg.observation);
+        if (cfg.observation && !stop_flag_.load()) {
+            cfg.observation->transition(SourceObservation::Phase::Reconnecting);
+        }
         closeStream();
 
         // File sources: EOF is a clean terminal; optionally loop by re-opening.

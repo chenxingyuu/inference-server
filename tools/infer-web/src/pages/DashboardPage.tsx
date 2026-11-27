@@ -28,6 +28,7 @@ const sourceColors: Record<SourceState, string> = {
   RECONNECTING: 'text-warning',
   DEGRADED: 'text-warning',
   STOPPED: 'text-ink-muted',
+  FAILED: 'text-danger',
 }
 
 export function DashboardPage() {

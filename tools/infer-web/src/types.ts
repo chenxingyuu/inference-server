@@ -1,4 +1,4 @@
-export type SourceState = 'CONNECTING' | 'STREAMING' | 'RECONNECTING' | 'DEGRADED' | 'STOPPED'
+export type SourceState = 'CONNECTING' | 'STREAMING' | 'RECONNECTING' | 'DEGRADED' | 'STOPPED' | 'FAILED'
 export type TaskState = 'stopped' | 'starting' | 'running' | 'failed'
 export type BackendType = 'cpu' | 'trt' | 'ascend'
 export type ModelVersion = 'v5' | 'v8' | 'v11' | 'v26'
@@ -6,11 +6,35 @@ export type ModelType = 'detector' | 'classifier'
 export type DropPolicy = 'block' | 'drop_oldest' | 'drop_newest'
 export type SamplingMode = 'frame_count' | 'time_based'
 
+export interface SourceAvailability {
+  status: 'online' | 'connecting' | 'reconnecting' | 'unavailable' | 'probe_passed' |
+    'probe_failed' | 'unchecked' | 'expired' | 'unsupported'
+  basis: 'runtime' | 'probe' | 'none'
+  observed_at_ms?: number
+  reason?: string
+}
+
+export interface SourceProbeResult {
+  passed: boolean
+  checked_at_ms: number
+  elapsed_ms: number
+  reason?: string
+}
+
 export interface SourceInfo {
   id: string
   url: string
   state: SourceState
   reconnect_count: number
+  availability?: SourceAvailability
+  last_probe?: SourceProbeResult | null
+}
+
+export interface SourceProbeResponse {
+  id: string
+  availability: SourceAvailability
+  last_probe: SourceProbeResult | null
+  reused_runtime: boolean
 }
 
 export interface SourceCreate {

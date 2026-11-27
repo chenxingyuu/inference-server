@@ -30,6 +30,7 @@ void DvppOutputPool::resetDesc(Slot& s) {
     acldvppSetPicDescHeight(s.pic_desc, codec_h);
     acldvppSetPicDescWidthStride(s.pic_desc, aligned_w);
     acldvppSetPicDescHeightStride(s.pic_desc, aligned_h);
+    acldvppSetPicDescRetCode(s.pic_desc, 0);
 }
 
 DvppOutputPool::Slot* DvppOutputPool::acquire(int timeout_ms) {

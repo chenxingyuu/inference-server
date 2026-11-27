@@ -2,10 +2,33 @@ package main
 
 // SourceInfo describes a registered video source.
 type SourceInfo struct {
-	ID             string `json:"id"`
-	URL            string `json:"url"`
-	State          string `json:"state" enums:"CONNECTING,STREAMING,RECONNECTING,DEGRADED,STOPPED"`
-	ReconnectCount int    `json:"reconnect_count"`
+	ID             string             `json:"id"`
+	URL            string             `json:"url"`
+	State          string             `json:"state" enums:"CONNECTING,STREAMING,RECONNECTING,DEGRADED,STOPPED,FAILED"`
+	ReconnectCount int                `json:"reconnect_count"`
+	Availability   SourceAvailability `json:"availability"`
+	LastProbe      *SourceProbeResult `json:"last_probe"`
+}
+
+type SourceAvailability struct {
+	Status       string `json:"status" enums:"online,connecting,reconnecting,unavailable,probe_passed,probe_failed,unchecked,expired,unsupported"`
+	Basis        string `json:"basis" enums:"runtime,probe,none"`
+	ObservedAtMs *int64 `json:"observed_at_ms,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type SourceProbeResult struct {
+	Passed      bool   `json:"passed"`
+	CheckedAtMs int64  `json:"checked_at_ms"`
+	ElapsedMs   int64  `json:"elapsed_ms"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+type SourceProbeResponse struct {
+	ID            string             `json:"id"`
+	Availability  SourceAvailability `json:"availability"`
+	LastProbe     *SourceProbeResult `json:"last_probe"`
+	ReusedRuntime bool               `json:"reused_runtime"`
 }
 
 // SourceCreate is the request body for POST /sources.

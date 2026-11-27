@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useSources, useAddSource, useRemoveSource } from '../hooks/queries'
+import { useSources, useAddSource, useProbeSource, useRemoveSource } from '../hooks/queries'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { Modal } from '../components/ui/Modal'
 import { Field, Input } from '../components/ui/Field'
 import { PageHeader, EmptyState, LoadingRows, DeleteButton } from '../components/layout/Layout'
-import { useT } from '../lib/i18n'
-import type { SourceCreate } from '../types'
+import { sourceReasonKey, useT } from '../lib/i18n'
+import type { SourceAvailability, SourceCreate, SourceInfo, SourceState } from '../types'
 
 const DEFAULTS: SourceCreate = {
   id: '',
@@ -17,8 +17,81 @@ const DEFAULTS: SourceCreate = {
   read_timeout_ms: 10000,
 }
 
+const AVAILABILITY_COLORS: Record<SourceAvailability['status'], SourceState> = {
+  online: 'STREAMING',
+  connecting: 'CONNECTING',
+  reconnecting: 'RECONNECTING',
+  unavailable: 'FAILED',
+  probe_passed: 'STREAMING',
+  probe_failed: 'FAILED',
+  unchecked: 'STOPPED',
+  expired: 'STOPPED',
+  unsupported: 'STOPPED',
+}
+
+function SourceRow({ source, deleting, onDelete }: {
+  source: SourceInfo
+  deleting: boolean
+  onDelete: () => void
+}) {
+  const { lang, t } = useT()
+  const probe = useProbeSource(source.id)
+  const { availability, last_probe } = source
+  const recentCheck = last_probe && (availability?.basis === 'runtime' || availability?.status === 'expired')
+  // Avoid exposing camera credentials on the page while retaining the original API value.
+  const displayUrl = source.url.replace(/^(rtsp:\/\/)[^/?#]*@/, '$1')
+  const formatTime = (timestamp: number) => new Date(timestamp).toLocaleString(lang)
+
+  return (
+    <tr>
+      <td className="font-mono text-[12px] text-ink-primary font-medium">{source.id}</td>
+      <td>
+        {availability ? (
+          <>
+            <StatusBadge
+              status={AVAILABILITY_COLORS[availability.status]}
+              label={t(`sources.status.${availability.status}`)}
+              pulse={availability.basis === 'probe' ? false : undefined}
+            />
+            {availability.observed_at_ms !== undefined && availability.status !== 'expired' && (
+              <div className="text-[11px] text-ink-muted">
+                {t(availability.status === 'online' || availability.reason === 'no_recent_frame'
+                  ? 'sources.last_frame'
+                  : availability.basis === 'probe' ? 'sources.checked_at' : 'sources.observed_at',
+                { time: formatTime(availability.observed_at_ms) })}
+              </div>
+            )}
+            {availability.reason && availability.status !== 'expired' && (
+              <div className="text-[11px] text-ink-secondary">{t(sourceReasonKey(availability.reason))}</div>
+            )}
+            {recentCheck && (
+              <div className="text-[11px] text-ink-muted">
+                {t(last_probe.passed ? 'sources.last_passed' : 'sources.last_failed',
+                  { time: formatTime(last_probe.checked_at_ms) })}
+                {last_probe.reason && ` · ${t(sourceReasonKey(last_probe.reason))}`}
+              </div>
+            )}
+          </>
+        ) : <StatusBadge status={source.state} />}
+      </td>
+      <td className="font-mono text-[12px] text-ink-secondary">{source.reconnect_count}</td>
+      <td className="font-mono text-[11px] text-ink-muted max-w-xs truncate">{displayUrl}</td>
+      <td className="text-right pr-2">
+        <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+          {availability && availability.status !== 'unsupported' && (
+            <button type="button" onClick={() => probe.mutate()} disabled={probe.isPending} className="btn-ghost">
+              {t(probe.isPending ? 'sources.probing' : 'sources.probe')}
+            </button>
+          )}
+          <DeleteButton loading={deleting} onClick={onDelete} />
+        </div>
+      </td>
+    </tr>
+  )
+}
+
 export function SourcesPage() {
-  const { data: sources = [], isLoading } = useSources()
+  const { data: sources = [], isLoading, isError } = useSources()
   const add = useAddSource()
   const remove = useRemoveSource()
   const { t } = useT()
@@ -47,12 +120,13 @@ export function SourcesPage() {
       />
 
       <div className="section">
+        {isError && <p role="alert" className="mb-2 text-sm text-danger">{t('sources.refresh_failed')}</p>}
         <div className="card overflow-hidden">
           <table className="data-table">
             <thead>
               <tr>
                 <th>{t('common.id')}</th>
-                <th>{t('common.state')}</th>
+                <th>{t('sources.col.availability')}</th>
                 <th>{t('sources.col.reconnects')}</th>
                 <th>{t('sources.col.url')}</th>
                 <th />
@@ -60,22 +134,11 @@ export function SourcesPage() {
             </thead>
             <tbody>
               {isLoading && <LoadingRows cols={5} />}
-              {!isLoading && sources.length === 0 && (
-                <EmptyState message={t('sources.empty')} />
+              {!isLoading && !isError && sources.length === 0 && (
+                <EmptyState cols={5} message={t('sources.empty')} />
               )}
               {sources.map((s) => (
-                <tr key={s.id}>
-                  <td className="font-mono text-[12px] text-ink-primary font-medium">{s.id}</td>
-                  <td><StatusBadge status={s.state} /></td>
-                  <td className="font-mono text-[12px] text-ink-secondary">{s.reconnect_count}</td>
-                  <td className="font-mono text-[11px] text-ink-muted max-w-xs truncate">{s.url}</td>
-                  <td className="text-right pr-2">
-                    <DeleteButton
-                      loading={remove.isPending}
-                      onClick={() => remove.mutate(s.id)}
-                    />
-                  </td>
-                </tr>
+                <SourceRow key={s.id} source={s} deleting={remove.isPending} onDelete={() => remove.mutate(s.id)} />
               ))}
             </tbody>
           </table>

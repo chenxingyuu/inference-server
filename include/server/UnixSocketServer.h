@@ -21,7 +21,8 @@ namespace infer {
 //   {"cmd":"stop_task","id":"<id>"}
 class UnixSocketServer {
 public:
-    UnixSocketServer(std::string socket_path, ITaskManager& task_manager);
+    UnixSocketServer(std::string socket_path, ITaskManager& task_manager,
+                     ITaskManager::SourceProbe source_probe = {});
     ~UnixSocketServer();
 
     // Throws std::runtime_error if the socket cannot be created or bound.
@@ -35,6 +36,7 @@ private:
 
     std::string   path_;
     ITaskManager& task_manager_;
+    ITaskManager::SourceProbe source_probe_;
     int           server_fd_{-1};
     std::atomic<bool> running_{false};
     std::thread   thread_;

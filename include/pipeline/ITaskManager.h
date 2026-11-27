@@ -5,17 +5,46 @@
 #include <nlohmann/json.hpp>
 
 #include <optional>
+#include <functional>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace infer {
 
+struct SourceAvailability {
+    std::string status{"unchecked"};
+    std::string basis{"none"};
+    std::optional<int64_t> observed_at_ms;
+    std::string reason;
+};
+
+struct SourceProbeResult {
+    bool passed;
+    int64_t checked_at_ms;
+    int64_t elapsed_ms;
+    std::string reason;
+};
+
+enum class SourceProbeCode {
+    Passed = 0, ConnectionFailed = 20, ConnectionTimeout, AuthenticationFailed,
+    NoVideo, FirstFrameTimeout, DecodeFailed, StreamFailed, ProbeTimeout, Unavailable
+};
+
 struct SourceInfo {
     std::string id;
     std::string url;
     std::string state;       // streamStateStr() value
     int         reconnect_count{0};
+    SourceAvailability availability{};
+    std::optional<SourceProbeResult> last_probe{};
+};
+
+struct SourceProbeResponse {
+    std::optional<SourceInfo> source{};
+    bool reused_runtime{false};
+    std::string error{};
 };
 
 struct PipelineNodeInfo {
@@ -96,6 +125,7 @@ struct ModelPublishResult {
 class ITaskManager {
 public:
     using State = TaskState;
+    using SourceProbe = std::function<SourceProbeCode(const PipelineSourceConfig&)>;
     enum class UnregisterResult { Removed, NotFound, InUse };
 
     struct TaskRuntimeInfo {
@@ -114,6 +144,9 @@ public:
     virtual bool stop(const std::string& task_id) = 0;
     virtual std::vector<TaskRuntimeInfo> listTasks()    const = 0;
     virtual std::vector<SourceInfo>                    listSources()  const = 0;
+    virtual SourceProbeResponse probeSource(const std::string&, const SourceProbe&) {
+        return {{}, false, "source_probe_unavailable"};
+    }
     virtual std::vector<PipelineInfo>                  listPipelines()const = 0;
     virtual std::vector<ModelInfo>                     listModels()   const = 0;
 

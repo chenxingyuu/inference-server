@@ -89,6 +89,21 @@ json modelInfoJson(const ModelInfo& model) {
             {"class_names", model.class_names}};
 }
 
+json sourceDiagnosticsJson(const SourceInfo& source) {
+    const auto& availability = source.availability;
+    json status = {{"status", availability.status}, {"basis", availability.basis}};
+    if (availability.observed_at_ms) status["observed_at_ms"] = *availability.observed_at_ms;
+    if (!availability.reason.empty()) status["reason"] = availability.reason;
+    json probe = nullptr;
+    if (source.last_probe) {
+        const auto& last = *source.last_probe;
+        probe = {{"passed", last.passed}, {"checked_at_ms", last.checked_at_ms},
+                 {"elapsed_ms", last.elapsed_ms}};
+        if (!last.reason.empty()) probe["reason"] = last.reason;
+    }
+    return {{"id", source.id}, {"availability", std::move(status)}, {"last_probe", std::move(probe)}};
+}
+
 bool sendAll(int fd, const std::string& response) {
 #ifdef MSG_NOSIGNAL
     constexpr int flags = MSG_NOSIGNAL;
@@ -107,9 +122,11 @@ bool sendAll(int fd, const std::string& response) {
 
 } // namespace
 
-UnixSocketServer::UnixSocketServer(std::string socket_path, ITaskManager& task_manager)
+UnixSocketServer::UnixSocketServer(std::string socket_path, ITaskManager& task_manager,
+                                   ITaskManager::SourceProbe source_probe)
     : path_(std::move(socket_path))
-    , task_manager_(task_manager) {}
+    , task_manager_(task_manager)
+    , source_probe_(std::move(source_probe)) {}
 
 UnixSocketServer::~UnixSocketServer() { stop(); }
 
@@ -273,9 +290,21 @@ std::string UnixSocketServer::dispatch(const std::string& line) {
     if (cmd == "list_sources") {
         json arr = json::array();
         for (const auto& s : task_manager_.listSources()) {
-            arr.push_back({{"id", s.id}, {"url", s.url}, {"state", s.state}, {"reconnect_count", s.reconnect_count}});
+            auto source = sourceDiagnosticsJson(s);
+            source["url"] = s.url;
+            source["state"] = s.state;
+            source["reconnect_count"] = s.reconnect_count;
+            arr.push_back(std::move(source));
         }
         return json({{"status", "ok"}, {"data", arr}}).dump();
+    }
+
+    if (cmd == "probe_source") {
+        const auto result = task_manager_.probeSource(requiredTaskString(req, "id"), source_probe_);
+        if (!result.source) return json({{"status", "error"}, {"code", result.error}}).dump();
+        auto data = sourceDiagnosticsJson(*result.source);
+        data["reused_runtime"] = result.reused_runtime;
+        return json({{"status", "ok"}, {"data", std::move(data)}}).dump();
     }
 
     if (cmd == "list_pipelines") {

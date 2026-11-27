@@ -223,6 +223,11 @@ add_executable(test_task_lifecycle test_task_lifecycle.cpp)
 target_link_libraries(test_task_lifecycle PRIVATE infer_core GTest::gtest_main)
 add_test(NAME test_task_lifecycle COMMAND test_task_lifecycle)
 
+add_executable(test_source_diagnostics test_source_diagnostics.cpp)
+target_link_libraries(test_source_diagnostics PRIVATE infer_core GTest::gtest_main)
+add_test(NAME test_source_diagnostics COMMAND test_source_diagnostics)
+set_tests_properties(test_source_diagnostics PROPERTIES TIMEOUT 15)
+
 # TrtUtils pure-logic unit tests — no GPU required, no TRT dependency
 add_infer_test(test_trt_utils)
 

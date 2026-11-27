@@ -141,6 +141,7 @@ set(DECODER_SOURCES
 )
 
 set(PIPELINE_SOURCES
+    src/pipeline/SourceDiagnostics.cpp
     src/pipeline/EdgeQueue.cpp
     src/pipeline/GraphExecutor.cpp
     src/pipeline/StageFactory.cpp
@@ -405,7 +406,7 @@ target_compile_definitions(infer_core PUBLIC
 )
 
 # ── Executable ────────────────────────────────────────────────────────────────
-add_executable(infer_server src/main.cpp src/server/ModelProbe.cpp)
+add_executable(infer_server src/main.cpp src/server/ModelProbe.cpp src/server/SourceProbe.cpp)
 target_link_libraries(infer_server PRIVATE infer_core)
 
 # AscendCL pulls additional toolkit libs (e.g. libascend_hal.so) through DT_NEEDED.

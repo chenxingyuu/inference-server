@@ -9,17 +9,18 @@ const cfg: Record<Status, { dot: string; text: string; pulse: boolean; label: st
   RECONNECTING: { dot: 'bg-warning',  text: 'text-warning',  pulse: true,  label: 'RECONNECTING' },
   DEGRADED:     { dot: 'bg-warning',  text: 'text-warning',  pulse: false, label: 'DEGRADED'     },
   STOPPED:      { dot: 'bg-ink-muted',text: 'text-ink-muted',pulse: false, label: 'STOPPED'      },
+  FAILED:       { dot: 'bg-danger',  text: 'text-danger',   pulse: false, label: 'FAILED'       },
   starting:     { dot: 'bg-accent',   text: 'text-accent',   pulse: true,  label: 'starting'     },
   failed:       { dot: 'bg-danger',   text: 'text-danger',   pulse: false, label: 'failed'       },
   running:      { dot: 'bg-success',  text: 'text-success',  pulse: true,  label: 'running'      },
   stopped:      { dot: 'bg-ink-muted',text: 'text-ink-muted',pulse: false, label: 'stopped'      },
 }
 
-export function StatusBadge({ status, label }: { status: Status; label?: string }) {
+export function StatusBadge({ status, label, pulse }: { status: Status; label?: string; pulse?: boolean }) {
   const c = cfg[status] ?? cfg.STOPPED
   return (
     <span className={`inline-flex items-center gap-1.5 font-mono text-[11px] font-medium ${c.text}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${c.dot} ${c.pulse ? 'led-pulse' : ''}`} />
+      <span className={`w-1.5 h-1.5 rounded-full ${c.dot} ${(pulse ?? c.pulse) ? 'led-pulse' : ''}`} />
       {label ?? c.label}
     </span>
   )

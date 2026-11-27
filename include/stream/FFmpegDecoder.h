@@ -74,7 +74,8 @@ private:
     void decodeLoop(StreamConfig cfg, FrameCallback cb);
     bool openStream(const StreamConfig& cfg);
     void closeStream();
-    ReadExitReason readAndDecode(FrameCallback& cb, SamplingParams& params);
+    ReadExitReason readAndDecode(FrameCallback& cb, SamplingParams& params,
+                                 SourceObservation* observation);
     int64_t backoffDelayMs(int base_ms, int ceiling_ms, uint32_t failures);
 
     // Called by FFmpeg to select the hw pixel format

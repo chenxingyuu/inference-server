@@ -6,12 +6,14 @@
 #include "pipeline/ITaskManager.h"
 #include "publisher/IPublisher.h"
 #include "archive/FrameArchiver.h"
+#include "stream/SourceObservation.h"
 #include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace infer {
 
@@ -42,6 +44,7 @@ public:
 
     std::vector<TaskRuntimeInfo>               listTasks()    const override;
     std::vector<SourceInfo>                    listSources()  const override;
+    SourceProbeResponse probeSource(const std::string& id, const SourceProbe& probe) override;
     std::vector<PipelineInfo>                  listPipelines()const override;
     std::vector<ModelInfo>                     listModels()   const override;
 
@@ -73,17 +76,29 @@ private:
         bool stop_requested{false};
         std::chrono::steady_clock::time_point startup_deadline;
         std::thread thread;
+        std::unordered_map<std::string, std::shared_ptr<SourceObservation>> source_observations;
+    };
+
+    struct SourceFailure {
+        SourceEventTime observed;
+        std::string reason;
     };
 
     struct Entry {
         State state{State::Stopped};
         std::optional<TaskFailure> failure;
+        std::optional<SourceFailure> source_failure;
         std::shared_ptr<Run> run;
         bool removed{false};
     };
 
     bool validateTask(const TaskConfig& task) const;
-    std::unique_ptr<GraphExecutor> buildGraph(const AppConfig& cfg, const TaskConfig& task);
+    std::unique_ptr<GraphExecutor> buildGraph(const AppConfig& cfg, const TaskConfig& task,
+                                              const Run& run);
+    SourceInfo sourceInfoLocked(const PipelineSourceConfig& source) const;
+    static std::optional<SourceFailure> sourceFailureOnStartupTimeout(
+        const Run& run, const PipelineSourceConfig& source);
+    void recordStartupTimeoutLocked(const std::string& task_id, Entry& entry);
     ActionResult startLocked(const std::string& task_id);
     void runTask(const TaskConfig& task, const AppConfig& cfg, const std::shared_ptr<Run>& run);
     void watchTasks();
@@ -106,6 +121,12 @@ private:
     std::mutex model_check_mu_;
     mutable std::mutex mu_;
     std::unordered_map<std::string, Entry> entries_;
+    struct SourceProbeRecord {
+        SourceEventTime checked{};
+        std::optional<SourceProbeResult> result;
+    };
+    std::unordered_map<std::string, std::shared_ptr<SourceProbeRecord>> source_probes_;
+    std::unordered_set<std::string> active_source_probes_;
     std::condition_variable lifecycle_cv_;
     bool stopping_all_{false};
     bool watcher_exit_{false};
